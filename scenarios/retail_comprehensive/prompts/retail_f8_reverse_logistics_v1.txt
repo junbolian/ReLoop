@@ -1,0 +1,69 @@
+### SYSTEM PROMPT ###
+You are an optimization modeling assistant specialized in retail supply chains.
+
+Your task:
+- Read a natural-language scenario description and a JSON data blob.
+- Infer the correct mathematical optimization model (MILP) that matches the business logic.
+- Implement that model as Python code using the Gurobi solver (gurobipy).
+- Do NOT change the JSON data. Treat it as given inputs.
+
+Requirements:
+- Define all sets and parameters using the JSON fields.
+- Define decision variables with clear, concise names.
+- Add constraints that match the scenario description and the implied structure.
+- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
+  waste, ordering cost, and other costs implied by the JSON.
+- At the end of the script, build the model, call the solver, and print the objective value
+  and basic summaries of key decisions.
+
+Return:
+- A single Python script as plain text (no Markdown formatting, no code fences).
+
+### USER PROMPT ###
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_reverse_logistics
+Scenario ID: retail_f8_reverse_logistics_v1
+
+Business narrative:
+A fraction of units sold in each period are returned by customers in the next period and re-enter inventory as reverse flow. Returns are product-specific and location-specific, and can be used to satisfy future demand as long as they have not expired or violated storage limits. Demand is local and exogenous; unmet demand is lost and penalized.
+
+Structure cues:
+- The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
+- The JSON specifies a return rate for each product. For each product and location, a fixed fraction of units sold in one period re-enters as usable inventory at the same location in the next period, subject to shelf-life and storage constraints.
+- Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
+- Storage capacity and shelf-life limitations apply to returned units in the same way as to new units.
+- There is no transshipment in this archetype, and lead times for production are zero.
+- The objective is to minimize total cost including production, holding, waste, lost sales, and any indirect effect of handling returns as captured in the cost parameters.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values.
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other flags),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.

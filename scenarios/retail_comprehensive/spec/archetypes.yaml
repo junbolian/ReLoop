@@ -1,0 +1,540 @@
+retail_f1_base:
+  family_id: F1
+  family_name: Core Operations
+  description: |-
+    Business narrative:
+    The retailer manages weekly inventory for several products across multiple distribution centers that directly serve final customer demand. Demand for each product at each location is seasonal and exogenous. Products are replenished each period up to a per-product production or procurement capacity, and any demand that is not served immediately in the period is permanently lost and penalized. Customers are never backlogged or promised future delivery. Inventory is held locally at each distribution center, and there is no movement of stock between locations in this archetype.
+
+    Structure cues:
+    - Time is a discrete sequence of periods defined in the JSON. Decisions about how much to produce or procure and how much to ship to each location are made at the beginning of each period; demand is realized and served within that same period.
+    - Inventory evolves by carrying over what remains from the previous period, adding any new production assigned to the location, and subtracting units that are sold or intentionally discarded as waste. On-hand stock is never allowed to become negative.
+    - Any demand that cannot be met from available local inventory in the period is treated as lost sales and incurs the lost sales penalty. There is no concept of backorders, reservations, or delayed fulfillment.
+    - Production for each product in each period cannot exceed the given production capacity. Production is available without delay in this archetype because lead times are effectively zero.
+    - Storage capacity at each location and period limits the total volume of on-hand inventory using product-specific storage usage coefficients and location capacities from the JSON. These limits must be respected even in periods where they do not bind.
+    - Customers may substitute from the basic product to the premium product along the one-way substitution relationship encoded in the JSON substitution graph; no other substitution paths are allowed.
+    - There is no transshipment of inventory between locations; each location can only serve its own local demand from its own inventory.
+    - Labor capacity is set high enough that it does not bind in this archetype, but if labor constraints are included they must be consistent with the JSON parameters.
+    - The objective is to minimize total cost over the horizon, including purchasing or production costs, inventory holding costs, waste costs, and lost sales penalties. No fixed ordering costs, minimum order quantities, lead times, reverse flows, or global budgets are active here.
+
+retail_f1_high_waste:
+  family_id: F1
+  family_name: Core Operations
+  description: |-
+    Business narrative:
+    This scenario keeps the same basic single-echelon structure as the core operations baseline but represents categories where waste is extremely expensive, such as highly perishable or sensitive products. The retailer still serves exogenous seasonal demand from local inventories at distribution centers with no transshipment and no backorders. Any units that must be discarded because they are no longer usable incur a much higher penalty than in the baseline, creating strong pressure to avoid overstocking.
+
+    Structure cues:
+    - The network is the same as in retail_f1_base: multiple products, multiple locations that directly serve final demand, and per-product production capacities in each period.
+    - Inventory is held at each location, evolves from period to period by adding local production and subtracting sales and waste, and is never allowed to go negative. Unserved demand is treated as lost sales and penalized as in the baseline.
+    - Storage capacity constraints by location and period must still be respected using product-specific storage usage and the location capacities from the JSON.
+    - The substitution pattern, absence of transshipment, zero lead times, and effectively non-binding labor capacities are the same as in the baseline scenario.
+    - The only intended structural change is in the cost weights: waste costs in the JSON are much larger, so discarding inventory is heavily discouraged, but the constraint system itself is not altered.
+    - The objective continues to minimize the sum of purchasing or production costs, holding costs, waste costs, and lost sales penalties over all products, locations, and periods.
+
+retail_f1_jit_logic:
+  family_id: F1
+  family_name: Core Operations
+  description: |-
+    Business narrative:
+    This scenario represents a just-in-time regime where holding inventory is very expensive. The retailer still faces exogenous seasonal demand at each location, cannot backorder customers, and has limited per-product production capacity per period. Because holding costs are high, the retailer is incentivized to keep inventories as lean as possible while still avoiding excessive lost sales.
+
+    Structure cues:
+    - The physical network and decision timing are the same as in retail_f1_base: single-echelon, multi-product, multi-location, with local demand and local inventory.
+    - Inventory at each location carries over from the previous period, is increased by local production that arrives without delay, and is reduced by sales and any intentional waste. Stock levels must remain non-negative, and any demand in excess of available stock is treated as lost sales.
+    - Storage capacity constraints, substitution behavior, and the absence of transshipment all match the baseline archetype.
+    - Holding cost coefficients in the JSON are scaled up substantially compared with retail_f1_base, making on-hand inventory much more expensive relative to lost sales. The underlying constraint structure is unchanged.
+    - The objective is to minimize total cost including purchasing or production, holding, waste, and lost sales, with the higher holding cost forcing a just-in-time style of operation.
+
+retail_f1_52_weeks:
+  family_id: F1
+  family_name: Core Operations
+  description: |-
+    Business narrative:
+    The retailer plans inventory over a full year of weekly decisions, represented by fifty-two time periods. Exogenous seasonal demand, local inventories at each distribution center, and per-product production capacities work as in the core operations baseline. Customers are never backordered; unmet demand in a week is immediately lost and penalized. The main difference is the extended planning horizon, which tests the ability to manage long-run seasonality and accumulation effects.
+
+    Structure cues:
+    - The inventory system is the same as in retail_f1_base, with multiple products, multiple locations, and capacity-limited production for each product and period.
+    - The time index now runs for fifty-two periods. The same inventory evolution and demand fulfillment logic is applied in every period of the year.
+    - At each location and for each product, stock at the end of a week depends on what was carried over, what was produced for that location during the week, and what was sold or discarded. Inventory cannot go below zero; any unmet demand in a week is lost and penalized.
+    - Storage capacity, substitution from the basic product to the premium product, the absence of transshipment, and zero lead times all remain as in the baseline case.
+    - Labor capacity remains high enough that it does not materially bind, though it can be represented consistently with the JSON.
+    - The objective is to minimize total cost over the entire year, aggregating purchasing or production, holding, waste, and lost sales costs across all weeks.
+
+retail_f2_no_substitution:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    The retailer manages multiple products that do not substitute for each other. Customers either buy the specific product they requested or, if it is unavailable, do not purchase anything and generate a lost sale. Demand for each product at each location is exogenous and seasonal. Inventory is held locally with no transshipment and no backorders, and there is no cross-product switching under any circumstances.
+
+    Structure cues:
+    - The physical setup matches retail_f1_base: single-echelon, multi-product, multi-location, with inventory held only at the locations that serve final demand.
+    - Inventory at each location and period starts from the previous period’s ending stock, is increased by local production or procurement, and is decreased by sales and waste. Stock cannot become negative.
+    - Storage capacity constraints limit the volume-weighted on-hand inventory at each location and period using the storage usage parameters and capacities from the JSON.
+    - In this archetype, the substitution graph in the JSON is empty. The model must not allow demand for one product to be satisfied by any other product; each product’s demand can only be met by its own on-hand inventory at that location.
+    - There is no transshipment of inventory between locations, lead times are effectively zero, and labor capacity is large relative to demand.
+    - The objective is to minimize total cost including purchasing or production, holding, waste, and lost sales without any cross-product substitution logic.
+
+retail_f2_circular_sub:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    The retailer offers several products in a category where customers are willing to switch along a circular pattern when their first choice is unavailable. The basic, premium, and short-life products form a directed substitution ring, so demand may move from one item to the next according to that ring. Demand remains exogenous by product and location, and any demand that cannot be satisfied even after considering allowed substitution is treated as a lost sale.
+
+    Structure cues:
+    - The overall structure is still single-echelon inventory with per-product production capacities, local storage, and lost sales when demand is not met.
+    - Inventory at each location evolves from carried-over stock, new production, sales to customers who originally requested that product, and sales to customers diverted from other products along the substitution ring, minus any discarded units. Inventory must remain non-negative.
+    - The substitution graph in the JSON defines a directed ring among the basic, premium, and short-life products. When demand for a product cannot be fully served from its own stock, the model may serve part of that demand from substitute products along these directed edges, subject to available inventory of those substitutes.
+    - Any remaining unmet demand after using all allowed substitutions becomes lost sales with a penalty cost. Customers are not backordered.
+    - Storage capacity constraints and zero lead times remain in effect, and there is no transshipment between locations.
+    - The objective is to minimize total cost including production or purchasing, holding, waste, and lost sales while respecting the substitution pattern encoded in the JSON.
+
+retail_f2_cannibalization:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    The retailer heavily promotes a low-margin basic product, strongly increasing its demand and making lost sales on that product relatively cheap, while shared storage is tightened. Because all products share limited storage, stocking more of the promoted basic product can displace higher-margin premium and short-life items. Customers can still switch along the substitution pattern in the category, but the promotional focus on the basic product creates cannibalization pressure.
+
+    Structure cues:
+    - The underlying inventory and substitution structure is the same as in retail_f2_circular_sub, with a single-echelon system, shared storage at each location, and a directed substitution graph defined in the JSON.
+    - The JSON increases demand for the basic product and reduces its lost sales penalty while keeping higher margins on other items, and reduces storage capacity, making space more scarce.
+    - Tight shared storage capacity means that choosing to stock more of the basic product can crowd out premium and short-life items in the warehouse, purely through the capacity and cost parameters.
+    - Inventory remains non-negative, lost sales capture unsatisfied demand after substitution, and there is still no transshipment or backordering.
+    - The objective is to minimize total cost, and the cannibalization effect is driven by the interplay of demand, margin, lost sales penalties, and capacity parameters rather than by any change to the model’s basic structure.
+
+retail_f2_ultra_fresh:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    This scenario represents extremely short shelf-life products such as daily bakery items or ready-to-eat meals. All products must be sold very soon after arrival; otherwise they must be discarded as waste. Demand for each product at each location is seasonal and exogenous. Customers may switch between products according to the substitution graph, but only non-expired inventory can be used to satisfy demand. There are no backorders and no transshipment.
+
+    Structure cues:
+    - The inventory and assortment framework is the same as in the other Family 2 archetypes: single-echelon, multiple products, local demand, and an encoded substitution graph.
+    - Shelf-life values in the JSON are very short, measured in periods. Inventory must be tracked by age so that units older than their shelf life are no longer eligible to serve demand.
+    - When units expire they leave usable inventory and are counted as waste, incurring waste costs. Only non-expired stock can be used to satisfy original and substituted demand.
+    - Inventory levels must remain non-negative; any demand that cannot be met from non-expired inventory and allowed substitution becomes lost sales.
+    - Storage capacity, production capacity, the absence of transshipment, zero lead times, and generous labor capacity remain in force.
+    - The objective is to minimize total cost including purchasing or production, short-horizon holding, waste from expiry, and lost sales.
+
+retail_f2_price_band_tight:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    The retailer operates a category with a value-oriented basic product and a premium product that are sold under tight price bands and margin trade-offs. Premium carries higher effective margin and stricter implicit service expectations, while basic is cheaper but more price sensitive. When the basic product is unavailable, some customers will upgrade to the premium product; the reverse does not occur. Unmet demand after this limited upgrade behavior is lost and penalized.
+
+    Structure cues:
+    - The physical and inventory structure follows the same pattern as in retail_f1_base: single-echelon, local demand, local inventory, shared storage, and no transshipment.
+    - The substitution graph is a single directed edge from the basic product to the premium product. When basic inventory is insufficient, some customers who cannot be served by basic may be served by premium if premium stock is available.
+    - Lost sales penalties and purchasing or production costs in the JSON make premium more valuable to protect and basic cheaper but more elastic. This asymmetry is expressed through cost parameters, not through any special-case constraints.
+    - Inventory remains non-negative; any demand that cannot be satisfied even after allowing the basic-to-premium shift is recorded as lost sales.
+    - There is no transshipment, lead times are effectively zero, and labor capacity is non-binding.
+    - The objective is to minimize total cost including purchasing, holding, waste, and lost sales while respecting the one-way substitution rule and storage capacity limits.
+
+retail_f2_promo_budget:
+  family_id: F2
+  family_name: Assortment and Substitution
+  description: |-
+    Business narrative:
+    In the final periods of the horizon the retailer runs strong promotions on the basic and short-life products, causing their demand to spike. At the same time, an open-to-buy style budget limits how much can be spent in each period on inventory-related activities. The retailer must allocate inventory and spending over time so that promotion-induced demand is supported as well as possible without violating the budget caps.
+
+    Structure cues:
+    - The inventory and substitution structure is the usual single-echelon system with shared storage, production capacity, and a substitution graph, together with lost sales for unmet demand.
+    - In the last few periods, the JSON scales up demand for the basic and short-life products to represent promotion-induced lifts; these are treated as ordinary exogenous demands with larger magnitudes.
+    - The JSON also provides a per-period budget for inventory-related spending. For each period, the total spending on items such as purchasing and transshipment (if present) must not exceed this budget.
+    - Inventory remains non-negative, and any demand that cannot be satisfied within the budget and capacity limits becomes lost sales.
+    - Storage capacity, substitution behavior, zero lead times, and generous labor capacity remain active as in other Family 2 archetypes.
+    - The objective is to minimize total cost subject to the per-period budget, making the trade-off between promotion support and resource limits explicit.
+
+retail_f3_storage_bottleneck:
+  family_id: F3
+  family_name: Shared Resources and Capacity
+  description: |-
+    Business narrative:
+    All locations share a tight storage resource that applies across all products, representing limited chilled, ambient, or dry space. Demand at each location is still exogenous and local, and inventory is not transferred between locations. The main operational challenge is that total stored volume at each site must fit within a strict capacity, so stocking one product reduces room for others.
+
+    Structure cues:
+    - The inventory, production, and lost sales logic is the same as in retail_f1_base: single-echelon, multiple products and locations, local demand, and no backorders or transshipment.
+    - At every location and period, a single shared storage capacity constraint limits the volume-weighted sum of on-hand inventory across all products using product-specific storage usage and the location capacity from the JSON.
+    - Inventory levels at each location are kept non-negative and evolve from carried-over stock and new production, minus sales and waste.
+    - Substitution edges, if any, are taken from the JSON but are not altered by this archetype.
+    - Production capacities, zero lead times, and generous labor capacity remain as in the base scenario.
+    - The objective is to minimize total cost while the shared storage constraint is designed to be binding and thus central to the trade-offs.
+
+retail_f3_volumetric_constraint:
+  family_id: F3
+  family_name: Shared Resources and Capacity
+  description: |-
+    Business narrative:
+    One product—typically a bulky premium item—uses much more storage volume per unit than the others. Storage capacity at each location becomes tight primarily because of this product, forcing the retailer to choose between stocking bulky high-margin units and smaller items. All demand remains local and exogenous, with no transshipment or backorders.
+
+    Structure cues:
+    - The overall structure and shared storage framework match retail_f3_storage_bottleneck.
+    - Product-specific storage usage parameters in the JSON are much larger for the premium product than for other SKUs. These usage factors must be applied when enforcing the shared storage limit at each location and period.
+    - Inventory cannot be negative and is updated based on previous stock, local production, sales, and waste.
+    - There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph.
+    - The objective is to minimize total cost under capacity constraints that make the volumetrically heavy premium product particularly expensive in terms of space.
+
+retail_f3_supply_bottleneck:
+  family_id: F3
+  family_name: Shared Resources and Capacity
+  description: |-
+    Business narrative:
+    Storage space is abundant but upstream production capacity is tight. The main bottleneck is how many units can be produced or procured each period, not how many can be stored. Demand is still exogenous, local to each location, and there are no backorders or transshipment.
+
+    Structure cues:
+    - The inventory and lost sales logic is the same as in the base scenario.
+    - Storage capacities in the JSON are set very high so that storage constraints are effectively non-binding but still formally present.
+    - Per-product production capacities are significantly reduced. These caps must be enforced and become the main source of unmet demand.
+    - Inventory at each location and period stays non-negative and changes according to local production, sales, and waste.
+    - There is no transshipment, lead times are zero, and substitution behavior is determined by the substitution graph.
+    - The objective is to minimize total cost, with lost sales penalties playing a central role because of tight production capacity.
+
+retail_f3_unbalanced_network:
+  family_id: F3
+  family_name: Shared Resources and Capacity
+  description: |-
+    Business narrative:
+    Storage capacity is highly unbalanced across locations. One location acts as a high-capacity hub with ample space, while all other locations have very limited storage. Demand is still local to each location, and there is no movement of inventory between locations. The retailer must decide how much to store at each site given these asymmetric capacity limits.
+
+    Structure cues:
+    - The inventory system remains single-echelon with local demand at each location and no transshipment.
+    - The JSON concentrates storage capacity at one hub location and gives very small capacities to the satellites. The model must enforce per-location storage constraints using these capacities and product storage usage coefficients.
+    - Inventory for each product and location evolves from previous stock and local production, minus sales and waste, without ever going below zero.
+    - Production capacities, zero lead times, and substitution behavior are as in the base scenario.
+    - The objective is to minimize total cost while respecting the highly asymmetric storage limits across locations.
+
+retail_f4_early_stockout:
+  family_id: F4
+  family_name: Dynamics and Disruptions
+  description: |-
+    Business narrative:
+    The retailer experiences an upstream supply failure at launch. For several initial periods, no production is possible for any product, but customer demand already exists at the locations. The retailer must decide how much inventory to build before the disruption and how to ration demand while supply is temporarily unavailable. Unserved demand in the disruption window is lost and penalized; customers are not backordered.
+
+    Structure cues:
+    - The inventory, storage, and lost sales framework matches the base scenario: single-echelon, local inventories, and no transshipment.
+    - In the JSON, production capacity for all products is set to zero in early periods. The model must respect this by not assigning any new production in those periods.
+    - Inventory remains non-negative and changes from period to period based on previous stock, any allowed production (zero during the disruption), sales, and waste.
+    - Storage capacity, substitution behavior, and zero lead times remain unchanged from the baseline.
+    - Labor capacity is generous and does not bind.
+    - The objective is to minimize total cost while capturing the trade-off between carrying inventory into the supply failure (and paying holding or waste costs) and accepting lost sales during the disruption.
+
+retail_f4_peak_failure:
+  family_id: F4
+  family_name: Dynamics and Disruptions
+  description: |-
+    Business narrative:
+    An upstream supply failure occurs during a high-demand peak, such as a holiday season. Production capacity drops to zero only during the peak window, while demand for all products remains high. The retailer must build inventory before the peak, use it strategically during the failure, and accept some lost sales if necessary. Demand that cannot be served in the peak periods is lost and penalized.
+
+    Structure cues:
+    - The inventory, storage, and lost sales structure is the same as in the base scenario.
+    - In the JSON, production capacities are set to zero only during a mid-horizon block of periods that coincide with the demand peak. No new production can occur in those periods.
+    - Inventory at each location remains non-negative and is updated from period to period based on earlier production, sales, and waste.
+    - Substitution behavior, absence of transshipment, zero lead times, and generous labor capacity all remain in effect.
+    - The objective is to minimize total cost while planning around the temporary but strategically placed supply failure.
+
+retail_f4_demand_surge:
+  family_id: F4
+  family_name: Dynamics and Disruptions
+  description: |-
+    Business narrative:
+    The retailer experiences a single-period viral demand spike where demand suddenly multiplies for all products. Production capacity and other structural elements remain unchanged; only the magnitude of demand in that period is much higher. The retailer must decide whether to build extra inventory in advance or accept lost sales during the surge.
+
+    Structure cues:
+    - The inventory and production structure is the same as in the base scenario.
+    - In the JSON, one mid-horizon period has demand for each product scaled up by a large factor, representing the surge. This period is treated as having much higher exogenous demand.
+    - Inventory stays non-negative and is updated using previous stock, current production, sales, and waste.
+    - Storage capacity and substitution behavior are unchanged, there is no transshipment, and lead times remain effectively zero.
+    - The objective is to minimize total cost, with the demand spike increasing the importance of planning ahead for that particular period.
+
+retail_f4_quality_hold:
+  family_id: F4
+  family_name: Dynamics and Disruptions
+  description: |-
+    Business narrative:
+    A quality issue forces the retailer to halt production of the basic product after a certain time. Existing units of that product can still be sold until they are exhausted or expire, but no new units can be produced during the hold window. Demand for other products is unaffected. Unserved demand for the basic product is lost and penalized, even if substitutes exist.
+
+    Structure cues:
+    - The inventory and production logic is the same as in the base scenario: single-echelon, local demand, local production, and no transshipment.
+    - In the JSON, the production capacity for the basic product is set to zero after a specified time index, while other products retain their production capacities.
+    - Inventory for each product and location evolves from period to period based on previous stock, production (which is zero for the basic product during the hold), sales, and waste, and must remain non-negative.
+    - Any unmet demand for the basic product after considering allowed substitution becomes lost sales.
+    - Storage capacity, substitution behavior, zero lead times, and generous labor capacity remain as usual.
+    - The objective is to minimize total cost while capturing the effect of the asymmetric quality hold on the basic product.
+
+retail_f5_impossible_demand:
+  family_id: F5
+  family_name: Feasibility and Model Repair
+  description: |-
+    Business narrative:
+    Demand is scaled so high that it is physically impossible to satisfy all of it given the production and storage capacities. Even with perfect planning, some demand must be sacrificed. This scenario is designed to test whether the model correctly accepts that full service is impossible and uses lost sales to remain feasible instead of implicitly assuming 100% service.
+
+    Structure cues:
+    - The inventory, production, storage, and lost sales framework is the same as in the base scenario.
+    - In the JSON, all demand curves are multiplied so that total demand over the horizon far exceeds what can be produced or stored. The model should not attempt to enforce full demand satisfaction; lost sales must be used where necessary.
+    - Inventory at each location and period is kept non-negative and reflects previous stock, local production, sales, and waste.
+    - Storage capacity and production capacity constraints must both be applied as given.
+    - There is no transshipment, lead times are zero, and substitution behavior follows the substitution graph.
+    - The objective is to minimize total cost, balancing production, holding, waste, and large lost sales penalties, effectively performing a form of model repair by accepting partial service.
+
+retail_f5_strict_service_trap:
+  family_id: F5
+  family_name: Feasibility and Model Repair
+  description: |-
+    Business narrative:
+    Storage capacity is reduced to the point where any attempt to maintain very high service levels conflicts with the physical constraints. The scenario is intended as a trap for models that implicitly assume near-perfect service without allowing lost sales: the only consistent solution is to accept that some demand will not be filled.
+
+    Structure cues:
+    - The inventory structure with production and storage capacity constraints is the same as in the base scenario.
+    - Storage capacities at all locations are sharply scaled down in the JSON. These tighter capacities must be enforced when limiting on-hand inventory.
+    - Inventory at each product, location, and period remains non-negative and is updated from previous stock, production, sales, and waste.
+    - Unmet demand is treated as lost sales with penalties; backorders are not allowed, and there is no hard requirement that all demand be served.
+    - There is no transshipment and lead times are zero. Substitution behavior remains as defined.
+    - The objective is to minimize total cost while recognizing that limited storage capacity makes full service impossible in some periods.
+
+retail_f5_storage_overflow:
+  family_id: F5
+  family_name: Feasibility and Model Repair
+  description: |-
+    Business narrative:
+    Storage capacities are set extremely close to zero so that almost any inbound inventory risks violating capacity if not very tightly controlled. The scenario stresses whether the model correctly enforces capacity and uses waste and lost sales to maintain feasibility rather than silently overfilling locations.
+
+    Structure cues:
+    - The inventory and production framework is the same single-echelon system with storage constraints.
+    - In the JSON, storage capacities are near zero at all locations. The volume-weighted sum of on-hand inventory must remain within these tiny capacities at every period.
+    - Inventory must stay non-negative and is adjusted through production, sales, and waste. In most periods, on-hand inventory must be kept very low to satisfy capacity.
+    - Unmet demand becomes lost sales, and discarding inventory becomes an important decision despite its cost.
+    - There is no transshipment, lead times are zero, and substitution behavior is unchanged.
+    - The objective is to minimize total cost, trading off production, waste, and lost sales under extremely strict storage capacity.
+
+retail_f5_ultimate_stress:
+  family_id: F5
+  family_name: Feasibility and Model Repair
+  description: |-
+    Business narrative:
+    This is a composite stress test that combines three stressors: tight storage capacity, a mid-horizon production failure during a peak period, and the absence of any substitution between products. Demand is local and exogenous at each location. The scenario is designed as a boss-level test where the only viable strategy is to accept significant lost sales while respecting all physical constraints.
+
+    Structure cues:
+    - The archetype combines the storage bottleneck of retail_f3_storage_bottleneck, the peak supply failure of retail_f4_peak_failure, and the no-substitution structure of retail_f2_no_substitution.
+    - Storage capacities in the JSON are sharply reduced and must be enforced as binding constraints at each location and period.
+    - Production capacities are set to zero during a mid-horizon peak window, so no new units can be produced in those periods.
+    - The substitution graph is empty, so each product’s demand can only be served by its own inventory at the location.
+    - Inventory at each product, location, and period remains non-negative and reflects previous stock, allowed production, sales, and waste. Unmet demand is explicitly treated as lost sales.
+    - There is no transshipment and lead times are zero. Labor capacity remains generous.
+    - The objective is to minimize total cost while handling simultaneous capacity, supply, and assortment stress without violating feasibility.
+
+retail_f6_lead_time:
+  family_id: F6
+  family_name: Logistics and Integer Procurement
+  description: |-
+    Business narrative:
+    Orders for each product take several periods to arrive. When the retailer places an order, the goods travel in a pipeline and only become available to serve demand after a deterministic lead time that is specific to each product. Demand is local and exogenous; customers are never backordered, so demand that cannot be met by on-hand inventory in a period is lost and penalized.
+
+    Structure cues:
+    - The inventory system is single-echelon with ordering decisions, storage capacity, and lost sales.
+    - The JSON provides a non-zero lead time in periods for each product. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
+    - Inventory must distinguish between on-hand units and units that are still in transit. Only on-hand units can be used to satisfy demand in a given period; in-transit units become on-hand when their lead time completes.
+    - For each product and location, on-hand stock in a period is determined by previous on-hand stock plus arrivals of past orders whose lead time has completed, minus sales and waste. Stock levels must remain non-negative.
+    - Storage capacity, lost sales treatment, absence of transshipment, substitution behavior, and generous labor capacity remain consistent with other families.
+    - The objective is to minimize total cost while explicitly capturing the effect of deterministic lead times on inventory decisions.
+
+retail_f6_moq_binary:
+  family_id: F6
+  family_name: Logistics and Integer Procurement
+  description: |-
+    Business narrative:
+    The retailer faces a minimum order quantity for each product and location. In any period, the buyer must either place no order for a product or place an order that is at least as large as the specified minimum. It is never allowed to place a small positive order below that minimum. This creates an all-or-nothing structure in procurement decisions on top of the usual inventory and storage logic.
+
+    Structure cues:
+    - The system is single-echelon with ordering decisions, storage capacity, and lost sales.
+    - The JSON specifies a positive minimum order quantity for each product. Orders in a given period must either be zero or at least this minimum; intermediate positive quantities below the minimum are forbidden.
+    - This all-or-nothing pattern must be enforced consistently across products, locations, and periods so that the model does not exploit fractional orders below the minimum.
+    - Inventory balance follows the standard pattern with zero lead time: on-hand stock in a period comes from previous stock and current orders, minus sales and waste, and cannot become negative.
+    - There is no transshipment; substitution behavior follows the JSON graph, and labor capacity is generous.
+    - The objective is to minimize total cost including purchasing, holding, waste, lost sales, and the implicit cost of being forced to buy in minimum lots.
+
+retail_f6_fixed_order_cost:
+  family_id: F6
+  family_name: Logistics and Integer Procurement
+  description: |-
+    Business narrative:
+    Placing an order in a period incurs a fixed cost regardless of how large the order is. This encourages batching orders into fewer, larger replenishments instead of many small ones. The retailer still faces local demand, storage limits, and lost sales for unmet demand, but now each decision to place any positive order carries an additional setup-like cost.
+
+    Structure cues:
+    - The structure is single-echelon with ordering decisions, storage capacity, and lost sales.
+    - The JSON includes a fixed order cost parameter for each product and location. Whenever a strictly positive order is placed in a period, this fixed cost must be charged once for that period in addition to variable purchasing costs.
+    - The model must ensure that the fixed cost is applied if and only if the total order quantity for that product and location in a period is positive; it should not be possible to evade the fixed cost with arbitrarily small orders.
+    - Inventory balance under zero lead time is standard: on-hand stock is updated from previous stock and current orders, minus sales and waste, and cannot drop below zero.
+    - There is no transshipment, lead times are zero, and substitution behavior is unchanged.
+    - The objective is to minimize total cost including fixed ordering costs, variable purchasing costs, holding, waste, and lost sales.
+
+retail_f6_pack_size_integer:
+  family_id: F6
+  family_name: Logistics and Integer Procurement
+  description: |-
+    Business narrative:
+    Orders must be placed in whole packs or pallets of a fixed size. For each product, the retailer can only buy an integer number of packs; partial packs cannot be ordered. Demand and storage remain as before, and demand that cannot be served from on-hand inventory is lost and penalized.
+
+    Structure cues:
+    - The system is single-echelon with ordering decisions, storage capacity, and lost sales.
+    - The JSON specifies a positive pack size for each product. In every period, the order quantity for that product must be a whole number of packs, so the ratio of ordered units to pack size must be a non-negative integer.
+    - This pack-size rule introduces integrality into order quantities and must be enforced consistently for all products and periods.
+    - Inventory balance with zero lead time is standard: on-hand stock comes from previous stock and ordered units, minus sales and waste, and remains non-negative.
+    - There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph.
+    - The objective is to minimize total cost subject to the pack-size ordering restriction.
+
+retail_f7_transshipment:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    The retailer operates a fully connected lateral transshipment network among all locations. Inventory can be moved between any pair of locations at a transshipment cost, allowing local surpluses to be reallocated to locations facing shortages. Demand remains local and exogenous at each site, and unsatisfied demand after considering local stock and inbound transshipments is lost and penalized.
+
+    Structure cues:
+    - This archetype extends the single-echelon inventory model by allowing transshipment flows along directed edges given in the JSON; in this case, all ordered pairs of distinct locations are connected.
+    - For each product and period, inventory at a location changes according to incoming production, incoming transshipments, outgoing transshipments, sales, and waste, and must remain non-negative.
+    - Transshipment flows from a location in a period cannot exceed that location’s available inventory for the product. All such moves incur transshipment costs as specified in the JSON.
+    - Demand remains local: each location’s demand must be met from its own on-hand inventory and inbound transshipments, if available.
+    - Storage capacity constraints apply to on-hand inventory at each location, while in-transit units can be treated separately if desired.
+    - Lead times for transshipment are effectively zero in this archetype, so shipments dispatched in a period are available at the destination within the same period.
+    - The objective is to minimize total cost including production or purchasing, holding, waste, lost sales, and transshipment costs.
+
+retail_f7_hub_and_spoke:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    The network has one high-capacity hub distribution center that ships to several low-capacity spokes. All lateral movements must pass through the hub; spokes cannot ship directly to each other or back to the hub. Demand occurs at spokes and is local. This captures a hub-and-spoke distribution strategy where stock is pooled at the hub and then pushed out to stores.
+
+    Structure cues:
+    - Locations are the same as in the base network, but storage capacity in the JSON is concentrated at a single hub location with small capacities at the other locations.
+    - The transshipment network consists only of directed edges from the hub to each spoke. Inventory can move from the hub to the spokes but not directly between spokes and not from spokes back to the hub.
+    - For each product, location, and period, inventory evolves based on local production (if any), inbound shipments, outbound shipments, sales (at spokes), and waste, and must remain non-negative.
+    - Transshipment flows from the hub are limited by the hub’s available inventory and incur transshipment costs. Spokes largely rely on inbound shipments from the hub to meet local demand.
+    - Storage capacity constraints must be enforced at all locations, with no direct lateral exchange between spokes.
+    - Lead times for transshipment are effectively zero, and substitution behavior remains as encoded.
+    - The objective is to minimize total cost while exploiting the centralized hub structure.
+
+retail_f7_budget_limit:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    The retailer faces a per-period open-to-buy budget that limits total spending on inventory-related activities across the network. This budget must cover purchasing and possibly other variable costs, coupling decisions across locations in each period. Demand is local and exogenous, and unmet demand is lost and penalized.
+
+    Structure cues:
+    - The underlying network is the same single-echelon structure with potential transshipment and storage capacity as in the base network for this family.
+    - The JSON specifies a spending budget for each period. For that period, the total cost of selected components such as purchasing and transshipment must not exceed the given budget.
+    - Inventory balance for each product, location, and period follows the standard pattern with production or inbound shipments, outbound shipments, sales, and waste, and inventory must remain non-negative.
+    - The budget constraint must be encoded so that spending above the budget is not allowed in any period.
+    - The transshipment network and lead times match the base network archetype for this family.
+    - The objective is to minimize total cost while respecting the period-by-period budget caps.
+
+retail_f7_multi_sourcing:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    Products differ in their effective sourcing regimes: some behave like slow but cheap supply, while others behave like fast but expensive supply. Lead times and holding costs vary across products, creating multi-speed inventory dynamics. Demand is local and exogenous at each location, and unmet demand is lost and penalized.
+
+    Structure cues:
+    - The inventory structure is single-echelon with product-specific lead times, similar to retail_f6_lead_time, together with storage capacity and lost sales.
+    - The JSON sets different lead times and holding costs for different products. Orders for each product become available only after that product’s lead time, and inventory carried over incurs its corresponding holding cost.
+    - For each product, location, and period, on-hand stock is determined by previous on-hand stock, arrivals of past orders whose lead time completes in that period, sales, and waste, and must remain non-negative.
+    - Storage capacity, lost sales treatment, and any transshipment options are as in the base network for this family.
+    - The scenario does not explicitly encode multiple suppliers, but heterogeneous lead times and cost profiles mimic slow and fast sourcing channels at the product level.
+    - The objective is to minimize total cost while correctly handling the different lead times and holding-cost profiles.
+
+retail_f7_multiechelon_chain:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    The network is an explicit three-echelon chain consisting of a plant, distribution centers, and retail stores. Demand occurs only at stores; the plant and distribution centers act purely as upstream nodes that hold and move inventory. Customers are never backordered: store demand that cannot be met from store inventory is lost and penalized.
+
+    Structure cues:
+    - Locations in the JSON include one plant, two distribution centers, and three stores. The transshipment network defines directed edges from the plant to each distribution center and from distribution centers to stores.
+    - Inventory is allowed to flow only along these directed edges. There is no direct shipment between stores, between distribution centers, or from stores back upstream.
+    - Demand occurs only at store nodes according to the demand parameters in the JSON. Upstream nodes do not face direct customer demand.
+    - For each product, location, and period, inventory reflects previous stock, production or inbound shipments, outbound shipments, sales at stores, and waste, and must remain non-negative.
+    - Storage and labor capacities differ by node type and must be enforced at each location and period.
+    - Lost sales occur only at store nodes when local demand cannot be served from available inventory, even after receiving shipments from upstream.
+    - The objective is to minimize total cost including production, holding at all echelons, transshipment, waste, and lost sales, subject to the three-echelon topology.
+
+retail_f7_ring_routing:
+  family_id: F7
+  family_name: Network and Multi Echelon
+  description: |-
+    Business narrative:
+    Locations are connected in a directed ring, mimicking a truck route that visits each location in a fixed cycle. Inventory can only move along the ring edges, and storage capacities are tightened so that the chosen routing structure affects feasibility and cost. Demand is local and exogenous at each node, and unmet demand is lost and penalized.
+
+    Structure cues:
+    - The transshipment network in the JSON forms a directed cycle that connects each location to exactly one successor. Inventory can be shipped only along these ring edges.
+    - For each product, location, and period, inventory reflects previous stock, local production, inbound ring shipments, outbound ring shipments, sales, and waste, and must remain non-negative.
+    - Storage capacities at each location are reduced in the JSON so that capacity constraints are more likely to bind. These capacity limits must be enforced.
+    - Demand at each location is met from local inventory and inbound ring shipments; there are no shortcuts across the ring.
+    - Inventory that moves further along the route must pass through intermediate locations in sequence.
+    - Lead times for ring shipments are effectively zero in this archetype, and substitution behavior is as encoded.
+    - The objective is to minimize total cost while respecting the ring network structure and tighter storage capacities.
+
+retail_f8_reverse_logistics:
+  family_id: F8
+  family_name: Omni channel and Store Operations
+  description: |-
+    Business narrative:
+    A fraction of units sold in each period are returned by customers in the next period and re-enter inventory as reverse flow. Returns are product-specific and location-specific, and can be used to satisfy future demand as long as they have not expired or violated storage limits. Demand is local and exogenous; unmet demand is lost and penalized.
+
+    Structure cues:
+    - The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
+    - The JSON specifies a return rate for each product. For each product and location, a fixed fraction of units sold in one period re-enters as usable inventory at the same location in the next period, subject to shelf-life and storage constraints.
+    - Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
+    - Storage capacity and shelf-life limitations apply to returned units in the same way as to new units.
+    - There is no transshipment in this archetype, and lead times for production are zero.
+    - The objective is to minimize total cost including production, holding, waste, lost sales, and any indirect effect of handling returns as captured in the cost parameters.
+
+retail_f8_labor_constraint:
+  family_id: F8
+  family_name: Omni channel and Store Operations
+  description: |-
+    Business narrative:
+    Store and warehouse labor capacity directly limits how much inventory can be handled in each period. Labor is required for activities such as receiving, picking, and replenishment, and total labor usage per period at a location cannot exceed a location-specific cap. Demand is local and exogenous; unmet demand is lost and penalized.
+
+    Structure cues:
+    - The inventory system is single-echelon with production, storage capacity, and lost sales.
+    - The JSON provides a labor capacity per location and period and a per-unit labor usage for each product. Total labor consumed by the relevant activities at a location in a period must not exceed this capacity.
+    - A simple representation is to treat labor usage as proportional to the volume of units handled, such as the sum of units received, picked, or moved for that product and period.
+    - Inventory balance follows the usual pattern: previous stock plus arrivals minus sales and waste, with non-negative inventory and lost sales for unmet demand.
+    - Storage capacity constraints remain in effect and there is no transshipment in this archetype.
+    - The objective is to minimize total cost while respecting labor capacity constraints, which may bind in busy periods.
+
+retail_f8_ship_from_store:
+  family_id: F8
+  family_name: Omni channel and Store Operations
+  description: |-
+    Business narrative:
+    Stores fulfill both walk-in traffic and online orders, effectively acting as small fulfillment centers that ship from store. Storage capacity and labor capacity at stores are scaled up, but labor usage per unit is higher when stores serve both channels. Demand from walk-in and online customers is aggregated into a single local demand stream per product and location, and unmet demand is lost and penalized.
+
+    Structure cues:
+    - The inventory structure is single-echelon with local demand at each location, storage capacity, and lost sales.
+    - The JSON increases storage and labor capacities at all locations while also increasing per-unit labor usage. Both storage and labor constraints must be enforced using these parameters.
+    - Stores conceptually serve two demand streams, but the model treats them as a single aggregated demand per product and location. Higher labor usage reflects the additional work from online fulfillment.
+    - Inventory remains non-negative and is updated from previous stock and production, minus sales and waste.
+    - There is no transshipment; lead times are zero, and substitution behavior remains as encoded.
+    - The objective is to minimize total cost while balancing higher labor intensity against increased capacity.
+
+retail_f8_sustainability:
+  family_id: F8
+  family_name: Omni channel and Store Operations
+  description: |-
+    Business narrative:
+    The retailer operates under a sustainability or regulatory constraint that limits total waste. Over the entire planning horizon, the total quantity discarded as waste must not exceed a fixed fraction of total demand. Demand is local and exogenous; unmet demand is lost and penalized. The retailer must balance serving demand, avoiding stockouts, and limiting waste.
+
+    Structure cues:
+    - The inventory and production structure is the same single-echelon system with storage capacity and lost sales as in the base scenario.
+    - The JSON specifies a waste limit percentage. Over the horizon, the total waste across all products, locations, and periods must not exceed the given fraction of total demand.
+    - Inventory is updated from previous stock and production, minus sales and waste, and remains non-negative.
+    - Storage capacity constraints and substitution behavior remain active as defined in the JSON, and there is no transshipment.
+    - The objective is to minimize total cost subject to the global waste cap, making trade-offs between holding more inventory, losing sales, and discarding units explicit.

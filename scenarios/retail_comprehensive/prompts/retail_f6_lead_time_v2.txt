@@ -1,0 +1,69 @@
+### SYSTEM PROMPT ###
+You are an optimization modeling assistant specialized in retail supply chains.
+
+Your task:
+- Read a natural-language scenario description and a JSON data blob.
+- Infer the correct mathematical optimization model (MILP) that matches the business logic.
+- Implement that model as Python code using the Gurobi solver (gurobipy).
+- Do NOT change the JSON data. Treat it as given inputs.
+
+Requirements:
+- Define all sets and parameters using the JSON fields.
+- Define decision variables with clear, concise names.
+- Add constraints that match the scenario description and the implied structure.
+- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
+  waste, ordering cost, and other costs implied by the JSON.
+- At the end of the script, build the model, call the solver, and print the objective value
+  and basic summaries of key decisions.
+
+Return:
+- A single Python script as plain text (no Markdown formatting, no code fences).
+
+### USER PROMPT ###
+[SCENARIO]
+Family: F6 (Logistics and Integer Procurement)
+Archetype: retail_f6_lead_time
+Scenario ID: retail_f6_lead_time_v2
+
+Business narrative:
+Orders for each product take several periods to arrive. When the retailer places an order, the goods travel in a pipeline and only become available to serve demand after a deterministic lead time that is specific to each product. Demand is local and exogenous; customers are never backordered, so demand that cannot be met by on-hand inventory in a period is lost and penalized.
+
+Structure cues:
+- The inventory system is single-echelon with ordering decisions, storage capacity, and lost sales.
+- The JSON provides a non-zero lead time in periods for each product. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
+- Inventory must distinguish between on-hand units and units that are still in transit. Only on-hand units can be used to satisfy demand in a given period; in-transit units become on-hand when their lead time completes.
+- For each product and location, on-hand stock in a period is determined by previous on-hand stock plus arrivals of past orders whose lead time has completed, minus sales and waste. Stock levels must remain non-negative.
+- Storage capacity, lost sales treatment, absence of transshipment, substitution behavior, and generous labor capacity remain consistent with other families.
+- The objective is to minimize total cost while explicitly capturing the effect of deterministic lead times on inventory decisions.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values.
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other flags),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.

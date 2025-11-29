@@ -1,0 +1,69 @@
+### SYSTEM PROMPT ###
+You are an optimization modeling assistant specialized in retail supply chains.
+
+Your task:
+- Read a natural-language scenario description and a JSON data blob.
+- Infer the correct mathematical optimization model (MILP) that matches the business logic.
+- Implement that model as Python code using the Gurobi solver (gurobipy).
+- Do NOT change the JSON data. Treat it as given inputs.
+
+Requirements:
+- Define all sets and parameters using the JSON fields.
+- Define decision variables with clear, concise names.
+- Add constraints that match the scenario description and the implied structure.
+- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
+  waste, ordering cost, and other costs implied by the JSON.
+- At the end of the script, build the model, call the solver, and print the objective value
+  and basic summaries of key decisions.
+
+Return:
+- A single Python script as plain text (no Markdown formatting, no code fences).
+
+### USER PROMPT ###
+[SCENARIO]
+Family: F2 (Assortment and Substitution)
+Archetype: retail_f2_ultra_fresh
+Scenario ID: retail_f2_ultra_fresh_v0
+
+Business narrative:
+This scenario represents extremely short shelf-life products such as daily bakery items or ready-to-eat meals. All products must be sold very soon after arrival; otherwise they must be discarded as waste. Demand for each product at each location is seasonal and exogenous. Customers may switch between products according to the substitution graph, but only non-expired inventory can be used to satisfy demand. There are no backorders and no transshipment.
+
+Structure cues:
+- The inventory and assortment framework is the same as in the other Family 2 archetypes: single-echelon, multiple products, local demand, and an encoded substitution graph.
+- Shelf-life values in the JSON are very short, measured in periods. Inventory must be tracked by age so that units older than their shelf life are no longer eligible to serve demand.
+- When units expire they leave usable inventory and are counted as waste, incurring waste costs. Only non-expired stock can be used to satisfy original and substituted demand.
+- Inventory levels must remain non-negative; any demand that cannot be met from non-expired inventory and allowed substitution becomes lost sales.
+- Storage capacity, production capacity, the absence of transshipment, zero lead times, and generous labor capacity remain in force.
+- The objective is to minimize total cost including purchasing or production, short-horizon holding, waste from expiry, and lost sales.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values.
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other flags),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.
