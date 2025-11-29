@@ -108,7 +108,14 @@ def main():
             data = json.load(f)
 
         scenario_id = data.get("scenario_id") or jf.stem
-        archetype_id = data.get("archetype") or scenario_id.split("_v")[0]
+
+        if data.get("archetype"):
+            archetype_id = data["archetype"]
+        else:
+            if "_v" in scenario_id:
+                archetype_id = scenario_id.rsplit("_v", 1)[0]
+            else:
+                archetype_id = scenario_id
 
         if archetype_id not in arche_meta:
             print(f"[WARN] Archetype {archetype_id} not found in archetypes.yaml for {scenario_id}")
