@@ -1,0 +1,32 @@
+ReLoop Research and Education License
+Version 1.0
+
+Copyright (c) 2025 Junbo Jacob Lian and contributors
+
+Permission is granted to any person obtaining a copy of this repository
+and its associated files (the "Software") to use, copy, modify, merge,
+publish, distribute, and sublicense the Software, for any purpose,
+including research, teaching, and commercial applications, subject to
+the conditions below.
+
+1. Attribution
+   Any copy or substantial portion of the Software must include:
+   - the above copyright notice, and
+   - this license text,
+   so that recipients know the original source and terms.
+
+2. No endorsement
+   You may not use the names of the authors or contributors to endorse
+   or promote derived products without explicit written permission.
+
+3. No warranty
+   The Software is provided "as is", without any guarantees or promises
+   of correctness, performance, or fitness for a particular purpose.
+   To the maximum extent permitted by law, the authors and contributors
+   are not liable for any claim, damages, or other liability, whether
+   in an action of contract, tort, or otherwise, arising from, out of,
+   or in connection with the Software or the use or other dealings in
+   the Software.
+
+By using the Software, you agree to be bound by the terms of this
+license.
