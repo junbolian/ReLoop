@@ -46,16 +46,16 @@ Each **archetype name** (e.g., `retail_f3_storage_bottleneck`) corresponds to:
 * a generator function in `retail_benchmark_generator.py`, and
 * a JSON file prefix under `scenarios/retail_comprehensive/data/`.
 
-| Family | Name         | Retail Function                                          | Mathematical Logic                               | # Archetypes |
-| ------ | ------------ | -------------------------------------------------------- | ------------------------------------------------ | -----------: |
-| 1      | Operations   | Inventory Planning, Cost Control                         | Basic LP, Horizon Scaling                        |            4 |
+| Family | Name         | Retail Function                                           | Mathematical Logic                               | # Archetypes |
+| ------ | ------------ | --------------------------------------------------------- | ------------------------------------------------ | -----------: |
+| 1      | Operations   | Inventory Planning, Cost Control                          | Basic LP, Horizon Scaling                        |            4 |
 | 2      | Assortment   | Merchandising, Substitution, Cannibalization, Promotions | Substitution Logic, Budget Coupling              |            6 |
-| 3      | Resources    | Sourcing, Warehousing, Shared Resources                  | Capacity Constraints (Knapsack)                  |            4 |
-| 4      | Dynamics     | Risk & Disruption Management, Robust-Style Planning      | Time-dependent Constraints, Demand/Supply Shocks |            6 |
-| 5      | Feasibility  | Model Repair (Stress Tests)                              | Logical Inconsistency (requires Slack)           |            4 |
-| 6      | Logistics    | Procurement & Transport                                  | MIP (Binary, Integer, Lead Time)                 |            4 |
+| 3      | Resources    | Sourcing, Warehousing, Shared Resources                   | Capacity Constraints (Knapsack)                  |            4 |
+| 4      | Dynamics     | Risk & Disruption Management, Robust-Style Planning       | Time-dependent Constraints, Demand/Supply Shocks |            6 |
+| 5      | Feasibility  | Model Repair (Stress Tests)                               | Logical Inconsistency (requires Slack)           |            4 |
+| 6      | Logistics    | Procurement & Transport                                   | MIP (Binary, Integer, Lead Time)                 |            4 |
 | 7      | Network      | Distribution Strategy, Multi-echelon, Routing Proxies    | Network Flow (Transshipment)                     |            6 |
-| 8      | Omni-channel | Store Ops, Returns, Online Fulfillment                   | Reverse Flows, Labor Constraints                 |            4 |
+| 8      | Omni-channel | Store Ops, Returns, Online Fulfillment                    | Reverse Flows, Labor Constraints                 |            4 |
 
 Overall:
 
@@ -117,7 +117,7 @@ reloop/
 └── eval/
     ├── run_benchmark.py                # Batch evaluation script (writes benchmark_results.csv)
     └── benchmark_results.csv           
-```
+````
 
 The `prompts/` directory is generated automatically by the prompt builder script and contains one `.txt` file per JSON instance. Each file concatenates a system prompt and a user prompt and assumes that the JSON content has already been loaded into a Python variable called `data` inside the evaluation harness.
 
@@ -141,7 +141,7 @@ During evaluation, `reloop/eval/run_benchmark.py` performs the following steps f
    exec(code_str, {"data": data, ...})
    ```
 
-The agent is therefore **not** expected to read JSON files from disk or modify the data; it must treat `data` as a read-only input that conforms to the schema described in Sections 5–6.
+The agent **must not** read JSON files from disk or modify the data; it must treat `data` as a read-only input that conforms to the schema described in Sections 5–6.
 
 ---
 
@@ -290,8 +290,7 @@ Tests fundamental multi-period inventory balancing and cost trade-offs using bas
 
 * **Active mechanisms**:
 
-  * Same base structure as `retail_f1_base`.
-  * Short effective shelf life.
+  * Same base structure and shelf life as `retail_f1_base`.
   * Waste cost much larger than holding cost.
 
 * **Structural intent**:

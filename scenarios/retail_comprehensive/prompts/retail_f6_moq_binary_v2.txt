@@ -26,12 +26,12 @@ Archetype: retail_f6_moq_binary
 Scenario ID: retail_f6_moq_binary_v2
 
 Business narrative:
-The retailer faces a minimum order quantity for each product and location. In any period, the buyer must either place no order for a product or place an order that is at least as large as the specified minimum. It is never allowed to place a small positive order below that minimum. This creates an all-or-nothing structure in procurement decisions on top of the usual inventory and storage logic.
+The retailer faces a minimum order quantity applied uniformly across the category. In any period, the buyer must either place no order for a product or place an order that is at least as large as the specified global minimum. It is never allowed to place a small positive order below that threshold. This creates an all-or-nothing structure in procurement decisions on top of the usual inventory and storage logic.
 
 Structure cues:
 - The system is single-echelon with ordering decisions, storage capacity, and lost sales.
-- The JSON specifies a positive minimum order quantity for each product. Orders in a given period must either be zero or at least this minimum; intermediate positive quantities below the minimum are forbidden.
-- This all-or-nothing pattern must be enforced consistently across products, locations, and periods so that the model does not exploit fractional orders below the minimum.
+- The JSON specifies a positive global minimum order quantity `moq` in the "constraints" object. For each product, location, and period, the order quantity must either be zero or at least this global minimum; intermediate positive quantities below `moq` are forbidden.
+- This all-or-nothing pattern must be enforced consistently across products, locations, and periods so that the model does not exploit fractional orders below the global minimum.
 - Inventory balance follows the standard pattern with zero lead time: on-hand stock in a period comes from previous stock and current orders, minus sales and waste, and cannot become negative.
 - There is no transshipment; substitution behavior follows the JSON graph, and labor capacity is generous.
 - The objective is to minimize total cost including purchasing, holding, waste, lost sales, and the implicit cost of being forced to buy in minimum lots.
@@ -45,6 +45,10 @@ Operational context:
   shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
   are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
   "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
 - Substitution and transshipment structures are encoded in the "network" section, for example
   as substitution edges or transshipment edges between locations.
 - The model should respect all of these fields exactly as given and interpret them in a way
@@ -53,7 +57,8 @@ Operational context:
 JSON data (do not modify):
 The evaluation harness loads the JSON for this scenario into a Python variable
 called `data`. Your code should read all sets and parameters from `data` using
-these fields and must not change any numeric values.
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
 
 [INSTRUCTION]
 Using ONLY the information above, write a complete Python script that:

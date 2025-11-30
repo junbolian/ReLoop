@@ -30,7 +30,7 @@ Requirements:
 
 Return:
 - A single Python script as plain text (no Markdown formatting, no code fences).
-```
+````
 
 ### 1.1 Execution context for the system prompt
 
@@ -41,7 +41,7 @@ In the benchmark pipeline, the phrase “JSON data blob” refers to the parsed 
 3. Binds that dictionary to a variable called `data`.
 4. Executes the Python script returned by the model in an environment where `data` is already defined.
 
-Agents are therefore expected to **read all parameters from `data` only**, without performing any file I/O (no `open`, `json.load`, etc.) and without modifying `data` in place.
+Agents must therefore **read all parameters from `data` only**, without performing any file I/O (no `open`, `json.load`, etc.) and without modifying `data` in place.
 
 The benchmark harness always sends this system prompt, followed by an instance-specific **user prompt** defined below.
 
@@ -51,8 +51,8 @@ The benchmark harness always sends this system prompt, followed by an instance-s
 
 For each JSON instance in `scenarios/retail_comprehensive/data/`, the prompt builder script combines:
 
-- The archetype-level description from `archetypes.yaml` / `retail_spec.md`, and  
-- The file name / scenario ID of the specific JSON instance.
+* The archetype-level description from `archetypes.yaml` / `retail_spec.md`, and
+* The file name / scenario ID of the specific JSON instance.
 
 The JSON blob itself is **not** pasted into the prompt; instead, the model is told that a Python variable called `data` already contains the parsed JSON, as described in Section 1.1.
 
@@ -125,8 +125,8 @@ has the following outer structure:
 
 This is purely a file layout convention. The actual API call to the LLM uses:
 
-- `SYSTEM_PROMPT_TEXT` as the system message, and  
-- `USER_PROMPT_TEXT_FOR_THIS_INSTANCE` as the user message.
+* `SYSTEM_PROMPT_TEXT` as the system message, and
+* `USER_PROMPT_TEXT_FOR_THIS_INSTANCE` as the user message.
 
 The corresponding JSON is **never** inlined inside these `.txt` files. For each scenario, the evaluation harness separately loads the matching JSON file into the Python variable `data` before executing the code returned by the model.
 
@@ -134,11 +134,11 @@ The corresponding JSON is **never** inlined inside these `.txt` files. For each 
 
 ## 4. Example User Prompt (Instance: `retail_f3_storage_bottleneck_v0`)
 
-Below is a concrete example of the **user** portion of the prompt for one instance  
+Below is a concrete example of the **user** portion of the prompt for one instance
 (`retail_f3_storage_bottleneck_v0`). It follows the generic template above and assumes:
 
-- JSON file: `scenarios/retail_comprehensive/data/retail_f3_storage_bottleneck_v0.json`
-- The JSON has already been parsed into a Python variable named `data`.
+* JSON file: `scenarios/retail_comprehensive/data/retail_f3_storage_bottleneck_v0.json`
+* The JSON has already been parsed into a Python variable named `data`.
 
 ```text
 [SCENARIO]
@@ -177,8 +177,9 @@ Operational context:
 - Costs for inventory, waste, and lost sales are provided in the "costs" object.
 
 JSON data (do not modify):
-The evaluation harness provides a Python variable called `data` that contains the
-entire JSON object for this instance, using the top-level fields described above.
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O.
 
 [INSTRUCTION]
 Using ONLY the information above, write a complete Python script that:
@@ -212,7 +213,7 @@ Using ONLY the information above, write a complete Python script that:
 Return ONLY the Python source code as plain text, with no comments and no Markdown.
 ```
 
-This example is illustrative; all other archetypes follow the same structure but use  
+This example is illustrative; all other archetypes follow the same structure but use
 their own business narrative and structure cues from `archetypes.yaml` / `retail_spec.md`.
 
 ---
@@ -263,15 +264,15 @@ its conflict-refinement APIs; the LLM only sees a plain-language description.
 
 ## 6. Relation to the Reference Solver and Time Limits
 
-- `universal_retail_solver.py` is the **canonical reference model** for this benchmark.
-- It uses a 60-second time limit (`TimeLimit = 60`) and a 1% relative MIP gap
+* `universal_retail_solver.py` is the **canonical reference model** for this benchmark.
+* It uses a 60-second time limit (`TimeLimit = 60`) and a 1% relative MIP gap
   (`MIPGap = 0.01`) for all instances, and suppresses solver logs (`OutputFlag = 0`).
-- `run_benchmark.py` runs the reference solver on all 190 JSON files and records:
+* `run_benchmark.py` runs the reference solver on all 190 JSON files and records:
 
-  - `OPTIMAL` when the solver proves optimality within the time limit and gap,
-  - `OPTIMAL (TL)` when it hits the time limit but returns a feasible incumbent,
-  - `TIMEOUT` when it hits the time limit with no incumbent solution,
-  - `INFEASIBLE` when the model is proven infeasible.
+  * `OPTIMAL` when the solver proves optimality within the time limit and gap,
+  * `OPTIMAL (TL)` when it hits the time limit but returns a feasible incumbent,
+  * `TIMEOUT` when it hits the time limit with no incumbent solution,
+  * `INFEASIBLE` when the model is proven infeasible.
 
 These labels, together with objective values, form the baseline in
 `reloop/eval/benchmark_results.csv`. LLM-generated models are evaluated by
@@ -282,14 +283,14 @@ feasibility rates and objective gaps to this reference.
 
 ## 7. Summary
 
-- `retail_spec.md` defines the **archetypes and structural intent** of the 38 retail scenarios.
-- `retail_prompts.md` (this file) defines the **system and user prompt formats** used to
+* `retail_spec.md` defines the **archetypes and structural intent** of the 38 retail scenarios.
+* `retail_prompts.md` (this file) defines the **system and user prompt formats** used to
   query LLM-based optimization agents.
-- `universal_retail_solver.py` and `run_benchmark.py` provide the **reference implementation**
+* `universal_retail_solver.py` and `run_benchmark.py` provide the **reference implementation**
   and evaluation pipeline.
 
 Together, these components ensure that:
 
-- Every JSON instance has a clear business meaning.
-- Prompt text and JSON semantics are tightly aligned with the actual code.
-- Results from different LLMs are comparable under a fixed 60-second time limit and 1% MIP gap.
+* Every JSON instance has a clear business meaning.
+* Prompt text and JSON semantics are tightly aligned with the actual code.
+* Results from different LLMs are comparable under a fixed 60-second time limit and 1% MIP gap.
