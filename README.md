@@ -2,7 +2,7 @@
 
 ReLoop is the public codebase for a research project on **retail supply-chain optimization** and **LLM-based text-to-MILP modeling**.
 
-The repository is intended to eventually host the **full code for the ReLoop paper**, including:
+This repository currently releases the **Comprehensive Retail Supply Chain Benchmark** and its **universal retail MILP solver**, and is intended to eventually host the **full code for the ReLoop paper**, including:
 
 - A universal retail MILP formulation implemented in Gurobi
 - Scenario generators and synthetic retail data
@@ -39,16 +39,17 @@ Over time, additional modules (e.g., agent runners, experiment scripts) will be 
 
 ---
 
-## 2. Retail Benchmark Data (short description)
+## 2. Comprehensive Retail Benchmark (short description)
 
-The `scenarios/retail_comprehensive/` tree contains a **synthetic retail operations benchmark** designed for both:
+The `scenarios/retail_comprehensive/` tree contains the **Comprehensive Retail Supply Chain Benchmark**, a synthetic retail operations benchmark designed for both
 
 * classical optimization solvers, and
 * LLM-based text-to-optimization agents.
 
 Key points:
 
-* **38 structural archetypes** grouped into 8 families (operations, assortment, resources, dynamics, feasibility, logistics, network, omni-channel).
+* **38 structural archetypes** grouped into 8 families
+  (operations, assortment, resources, dynamics, feasibility, logistics, network, omni-channel).
 * Each archetype has **5 numerical variants**, giving a total of **190 JSON instances**.
 * All instances share a **single JSON schema** and are solved by the same universal MILP in `universal_retail_solver.py`.
 
@@ -146,7 +147,7 @@ with at least the following columns:
 
 ## 5. LLM Benchmarking (high level)
 
-The repository is also designed to support **LLM-based text-to-MILP agents**:
+The repository is also designed to support **LLM-based text-to-MILP agents** on top of the benchmark:
 
 * A **system prompt** describes the agent’s role as a retail optimization modeling assistant.
 * A **user prompt** for each JSON instance provides:
@@ -192,7 +193,7 @@ If you use ReLoop in academic work, please cite the accompanying paper (once ava
 
 ```bibtex
 @misc{reloop2026,
-  author       = {Yujun Sam Sun, Junbo Jacob Lian, Diego Klabjan},
+  author       = {Yujun Sam Sun and Junbo Jacob Lian and Diego Klabjan},
   title        = {ReLoop: Solver-Guided LLMs for Semantically Reliable Text-to-Optimization in Retail Supply Chains},
   year         = {2026},
 }
