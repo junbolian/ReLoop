@@ -1,7 +1,7 @@
-# Retail Benchmark – LLM Prompt Templates
+# RetailOpt-190 – LLM Prompt Templates
 
-> File: `reloop/scenarios/retail_comprehensive/spec/retail_prompts.md`  
-> Goal: Document how each JSON instance is converted into a text-based prompt for LLM-driven optimization agents, consistent with the current code in `reloop/tools` and the JSON schema used by `universal_retail_solver.py`.
+> File: `reloop/scenarios/retailopt_190/spec/retail_prompts.md`  
+> Goal: Document how each JSON instance in **RetailOpt-190** is converted into a text-based prompt for LLM-driven optimization agents, consistent with the current code in `reloop/tools` and the JSON schema used by `universal_retail_solver.py`.
 
 ---
 
@@ -49,7 +49,7 @@ The benchmark harness always sends this system prompt, followed by an instance-s
 
 ## 2. User Prompt Template (Per JSON Instance)
 
-For each JSON instance in `scenarios/retail_comprehensive/data/`, the prompt builder script combines:
+For each JSON instance in `scenarios/retailopt_190/data/`, the prompt builder script combines:
 
 * The archetype-level description from `archetypes.yaml` / `retail_spec.md`, and
 * The file name / scenario ID of the specific JSON instance.
@@ -110,7 +110,7 @@ Agents should treat `data` as a read-only source of inputs conforming to the JSO
 Each generated prompt file under:
 
 ```text
-reloop/scenarios/retail_comprehensive/prompts/
+reloop/scenarios/retailopt_190/prompts/
 ```
 
 has the following outer structure:
@@ -134,10 +134,10 @@ The corresponding JSON is **never** inlined inside these `.txt` files. For each 
 
 ## 4. Example User Prompt (Instance: `retail_f3_storage_bottleneck_v0`)
 
-Below is a concrete example of the **user** portion of the prompt for one instance
+Below is a concrete example of the **user** portion of the prompt for one RetailOpt-190 instance
 (`retail_f3_storage_bottleneck_v0`). It follows the generic template above and assumes:
 
-* JSON file: `scenarios/retail_comprehensive/data/retail_f3_storage_bottleneck_v0.json`
+* JSON file: `scenarios/retailopt_190/data/retail_f3_storage_bottleneck_v0.json`
 * The JSON has already been parsed into a Python variable named `data`.
 
 ```text
@@ -264,7 +264,7 @@ its conflict-refinement APIs; the LLM only sees a plain-language description.
 
 ## 6. Relation to the Reference Solver and Time Limits
 
-* `universal_retail_solver.py` is the **canonical reference model** for this benchmark.
+* `universal_retail_solver.py` is the **canonical reference model** for RetailOpt-190.
 * It uses a 60-second time limit (`TimeLimit = 60`) and a 1% relative MIP gap
   (`MIPGap = 0.01`) for all instances, and suppresses solver logs (`OutputFlag = 0`).
 * `run_benchmark.py` runs the reference solver on all 190 JSON files and records:
@@ -283,9 +283,9 @@ feasibility rates and objective gaps to this reference.
 
 ## 7. Summary
 
-* `retail_spec.md` defines the **archetypes and structural intent** of the 38 retail scenarios.
+* `retail_spec.md` defines the **archetypes and structural intent** of the 38 retail scenarios in RetailOpt-190.
 * `retail_prompts.md` (this file) defines the **system and user prompt formats** used to
-  query LLM-based optimization agents.
+  query LLM-based optimization agents on RetailOpt-190.
 * `universal_retail_solver.py` and `run_benchmark.py` provide the **reference implementation**
   and evaluation pipeline.
 
@@ -293,4 +293,4 @@ Together, these components ensure that:
 
 * Every JSON instance has a clear business meaning.
 * Prompt text and JSON semantics are tightly aligned with the actual code.
-* Results from different LLMs are comparable under a fixed 60-second time limit and 1% MIP gap.
+* Results from different LLMs are comparable under a fixed 60-second time limit and 1% MIP gap
