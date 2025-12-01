@@ -194,7 +194,7 @@ If you use ReLoop or the **RetailOpt-190** benchmark in academic work, please ci
 
 ```bibtex
 @misc{reloop2026,
-  author       = {Yujun Sam Sun and Junbo Jacob Lian and Diego Klabjan},
+  author       = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
   title        = {ReLoop: Solver-Guided LLMs for Semantically Reliable Text-to-Optimization in Retail Supply Chains},
   year         = {2026},
 }
