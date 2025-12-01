@@ -1,15 +1,15 @@
-# ReLoop: Retail Text-to-Optimization Benchmark and Codebase
+# ReLoop: RetailOpt-190 Benchmark and Codebase
 
 ReLoop is the public codebase for a research project on **retail supply-chain optimization** and **LLM-based text-to-MILP modeling**.
 
-This repository currently releases the **Comprehensive Retail Supply Chain Benchmark** and its **universal retail MILP solver**, and is intended to eventually host the **full code for the ReLoop paper**, including:
+This repository currently releases **RetailOpt-190**, a vertically focused **retail text-to-optimization benchmark**, together with a **universal retail MILP solver**, and is intended to eventually host the **full code for the ReLoop paper**, including:
 
 - A universal retail MILP formulation implemented in Gurobi
 - Scenario generators and synthetic retail data
 - Evaluation pipelines for classical solvers
 - Prompt templates and tooling for LLM-based optimization agents
 
-At the moment, the focus is on the **retail benchmark and reference solver**, which can already be used as an open testbed.
+At the moment, the focus is on the **RetailOpt-190 benchmark and reference solver**, which can already be used as an open testbed.
 
 ---
 
@@ -24,11 +24,11 @@ reloop/
 ├── tools/
 │   └── retail_benchmark_generator.py    # Generator for 38 archetypes × 5 variations
 ├── scenarios/
-│   └── retail_comprehensive/
+│   └── retailopt_190/
 │       ├── spec/
 │       │   ├── retail_spec.md          # Structural and semantic specification
 │       │   └── retail_prompts.md       # Prompt templates for LLM agents
-│       ├── data/                       # JSON instances (retail benchmark)
+│       ├── data/                       # JSON instances (RetailOpt-190 benchmark)
 │       └── prompts/                    # Per-instance SYSTEM/USER prompt files
 └── eval/
     ├── run_benchmark.py                # Batch evaluation script
@@ -39,9 +39,9 @@ Over time, additional modules (e.g., agent runners, experiment scripts) will be 
 
 ---
 
-## 2. Comprehensive Retail Benchmark (short description)
+## 2. RetailOpt-190 Benchmark (short description)
 
-The `scenarios/retail_comprehensive/` tree contains the **Comprehensive Retail Supply Chain Benchmark**, a synthetic retail operations benchmark designed for both
+The `scenarios/retailopt_190/` tree contains **RetailOpt-190**, a synthetic retail operations benchmark designed for both
 
 * classical optimization solvers, and
 * LLM-based text-to-optimization agents.
@@ -55,16 +55,16 @@ Key points:
 
 For the **full specification and semantics** of the dataset, see:
 
-* `scenarios/retail_comprehensive/spec/retail_spec.md` – retail stories, active mechanisms, and structural intent.
-* `scenarios/retail_comprehensive/spec/retail_prompts.md` – system/user prompt templates and an example repair prompt.
+* `scenarios/retailopt_190/spec/retail_spec.md` – retail stories, active mechanisms, and structural intent.
+* `scenarios/retailopt_190/spec/retail_prompts.md` – prompt templates for LLM agents (system / user / repair prompts) and an example instance.
 
 The per-instance JSON files live in:
 
-* `scenarios/retail_comprehensive/data/`
+* `scenarios/retailopt_190/data/`
 
 The corresponding LLM prompts (one `.txt` per JSON) live in:
 
-* `scenarios/retail_comprehensive/prompts/`
+* `scenarios/retailopt_190/prompts/`
 
 ---
 
@@ -113,7 +113,7 @@ Example (adjust arguments if needed according to the script):
 
 ```bash
 python -m reloop.solvers.universal_retail_solver \
-  --json scenarios/retail_comprehensive/data/retail_f1_52_weeks_v0.json
+  --json scenarios/retailopt_190/data/retail_f1_52_weeks_v0.json
 ```
 
 The script will print (at least):
@@ -147,7 +147,7 @@ with at least the following columns:
 
 ## 5. LLM Benchmarking (high level)
 
-The repository is also designed to support **LLM-based text-to-MILP agents** on top of the benchmark:
+The repository is also designed to support **LLM-based text-to-MILP agents** on top of RetailOpt-190:
 
 * A **system prompt** describes the agent’s role as a retail optimization modeling assistant.
 * A **user prompt** for each JSON instance provides:
@@ -159,9 +159,9 @@ The repository is also designed to support **LLM-based text-to-MILP agents** on 
 
 The exact prompt templates and an example user prompt are documented in:
 
-* `scenarios/retail_comprehensive/spec/retail_prompts.md`
+* `scenarios/retailopt_190/spec/retail_prompts.md`
 
-Per-instance prompt files under `scenarios/retail_comprehensive/prompts/` have the structure:
+Per-instance prompt files under `scenarios/retailopt_190/prompts/` have the structure:
 
 ```text
 ### SYSTEM PROMPT ###
@@ -181,6 +181,7 @@ This repository is under active development. Planned additions include:
 
 * Full experiment scripts for all results reported in the ReLoop paper
 * Agent runners for multiple LLM providers
+* Closed-loop (generator–verifier–repair) runners using IIS feedback
 * Additional diagnostics and visualization tools
 
 Once those components are public, this README will be updated with detailed “reproduce-the-paper” instructions.
@@ -189,7 +190,7 @@ Once those components are public, this README will be updated with detailed “r
 
 ## 7. Citation
 
-If you use ReLoop in academic work, please cite the accompanying paper (once available). A temporary placeholder BibTeX entry is:
+If you use ReLoop or the **RetailOpt-190** benchmark in academic work, please cite the accompanying paper (once available). A temporary placeholder BibTeX entry is:
 
 ```bibtex
 @misc{reloop2026,
