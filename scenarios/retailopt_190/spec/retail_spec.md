@@ -1,6 +1,6 @@
-# Comprehensive Retail Supply Chain Benchmark
+# RetailOpt-190: Comprehensive Retail Supply Chain Benchmark
 
-> File: `reloop/scenarios/retail_comprehensive/spec/retail_spec.md`
+> File: `reloop/scenarios/RetailOpt-190/spec/retail_spec.md`  
 > Depends on:
 >
 > * `reloop/solvers/universal_retail_solver.py`
@@ -11,7 +11,7 @@
 
 ## 1. Overview
 
-This benchmark evaluates **text-to-optimization agents** on **38 retail operations archetypes**, expanded into **190 solver-validated instances** via controlled perturbations. Together, these instances cover a broad spectrum of modern retail supply chains.
+RetailOpt-190 evaluates **text-to-optimization agents** on **38 retail operations archetypes**, expanded into **190 solver-validated instances** via controlled perturbations. Together, these instances cover a broad spectrum of modern retail supply chains.
 
 All instances share a **single JSON schema** and are solved by a **single universal MILP formulation** implemented in:
 
@@ -44,7 +44,7 @@ The benchmark is organized into eight Scenario Families. Some families contain f
 Each **archetype name** (e.g., `retail_f3_storage_bottleneck`) corresponds to:
 
 * a generator function in `retail_benchmark_generator.py`, and
-* a JSON file prefix under `scenarios/retail_comprehensive/data/`.
+* a JSON file prefix under `scenarios/RetailOpt-190/data/`.
 
 | Family | Name         | Retail Function                                           | Mathematical Logic                               | # Archetypes |
 | ------ | ------------ | --------------------------------------------------------- | ------------------------------------------------ | -----------: |
@@ -57,7 +57,7 @@ Each **archetype name** (e.g., `retail_f3_storage_bottleneck`) corresponds to:
 | 7      | Network      | Distribution Strategy, Multi-echelon, Routing Proxies    | Network Flow (Transshipment)                     |            6 |
 | 8      | Omni-channel | Store Ops, Returns, Online Fulfillment                    | Reverse Flows, Labor Constraints                 |            4 |
 
-Overall:
+Overall, RetailOpt-190 contains:
 
 * **38 structural archetypes**
 * **5 numerical variations per archetype**
@@ -99,7 +99,7 @@ The **set of active constraint mechanisms** for an archetype (e.g., “shared st
 
 ## 4. Directory Structure
 
-The benchmark lives under the `reloop` project tree:
+RetailOpt-190 lives under the `reloop` project tree:
 
 ```text
 reloop/
@@ -108,22 +108,22 @@ reloop/
 ├── tools/
 │   └── retail_benchmark_generator.py    # Retail instance generator (38 archetypes × 5 variations)
 ├── scenarios/
-│   └── retail_comprehensive/           # Comprehensive retail scenarios
+│   └── RetailOpt-190/                   # RetailOpt-190 benchmark scenarios
 │       ├── spec/
-│       │   ├── retail_spec.md          # Structural and semantic specification (this file)
-│       │   └── retail_prompts.md       # Prompt design and templates for LLM-based agents
-│       ├── data/                       # 190 JSON instances (38 archetypes × 5 variations)
-│       └── prompts/                    # Per-instance text prompts (one .txt per JSON)
+│       │   ├── retail_spec.md           # Structural and semantic specification (this file)
+│       │   └── retail_prompts.md        # Prompt design and templates for LLM-based agents
+│       ├── data/                        # 190 JSON instances (38 archetypes × 5 variations)
+│       └── prompts/                     # Per-instance text prompts (one .txt per JSON)
 └── eval/
-    ├── run_benchmark.py                # Batch evaluation script (writes benchmark_results.csv)
-    └── benchmark_results.csv           
+    ├── run_benchmark.py                 # Batch evaluation script (writes benchmark_results.csv)
+    └── benchmark_results.csv
 ````
 
 The `prompts/` directory is generated automatically by the prompt builder script and contains one `.txt` file per JSON instance. Each file concatenates a system prompt and a user prompt and assumes that the JSON content has already been loaded into a Python variable called `data` inside the evaluation harness.
 
 ### 4.1 Agent Interface and Execution Model
 
-For each JSON instance `<scenario>.json`, there is a companion prompt file `<scenario>.txt` under `scenarios/retail_comprehensive/prompts/`. The prompt file **does not embed the JSON payload**; instead, it defines how the modeling agent should interpret a pre-loaded Python dictionary called `data`.
+For each JSON instance `<scenario>.json`, there is a companion prompt file `<scenario>.txt` under `scenarios/RetailOpt-190/prompts/`. The prompt file **does not embed the JSON payload**; instead, it defines how the modeling agent should interpret a pre-loaded Python dictionary called `data`.
 
 During evaluation, `reloop/eval/run_benchmark.py` performs the following steps for each scenario:
 
@@ -802,7 +802,7 @@ Tests omni-channel flows and in-store resource constraints.
 
 ## 7. Evaluation Pipeline and Solver Settings
 
-`run_benchmark.py` uses `universal_retail_solver.py` to compute reference solutions for all 190 JSON instances and writes a CSV summary:
+`run_benchmark.py` uses `universal_retail_solver.py` to compute reference solutions for all 190 JSON instances in RetailOpt-190 and writes a CSV summary:
 
 * Output file: `reloop/eval/benchmark_results.csv`
 
