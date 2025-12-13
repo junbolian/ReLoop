@@ -14,6 +14,10 @@ Modeling requirements:
   directed substitution routing with demand/sales conservation, transshipment flows,
   lead times, discrete procurement (MOQ / pack size / fixed ordering), budgets, and waste caps.
 
+Data semantics (must follow):
+- Demand allocation: if `data` contains `demand_curve` by product and period and `demand_share` by location, interpret `demand_curve[p][t]` as total demand for product p in period t, and allocate location demand as `Dem[p,l,t] = demand_curve[p][t] * demand_share[l]`.
+- Production/procurement capacity: if `data` contains `production_cap[p][t]` with no location index, interpret it as a global (network-wide) capacity for product p in period t, enforced as `sum_l inflow[p,l,t] <= production_cap[p][t]` (where inflow is production/order quantity delivered in that period, consistent with lead times).
+
 Naming contract (required for automatic semantic checking):
 - Use the following variable dictionaries with exactly these names when active:
   I (inventory by remaining life), y (sales/consumption), W (waste),
@@ -25,9 +29,12 @@ Naming contract (required for automatic semantic checking):
   pack, budget, wastecap.
 
 Objective (reference semantics):
-- Minimize total cost = purchasing + holding/inventory + waste + lost sales
-  + (if enabled) transshipment cost + fixed ordering cost.
+- Minimize total cost including all cost terms present in `data`: holding/inventory, waste, and lost-sales penalties;
+  plus purchasing/ordering costs if provided; plus (if enabled) transshipment cost and fixed ordering cost.
 - If a cost term is missing in `data`, treat it as zero; do not invent extra data.
+
+Solving and output:
+- Call the solver and print the solver status and the objective value (if available).
 
 Return:
 - Output a single Python script as plain text.
