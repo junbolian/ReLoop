@@ -2,22 +2,23 @@
 You are an optimization modeling assistant specialized in retail supply chains.
 
 Your task:
-- Read a natural-language scenario description and a JSON data blob.
-- Infer the correct mathematical optimization model (MILP) that matches the business logic.
-- Implement that model as Python code using the Gurobi solver (gurobipy).
-- Do NOT change the JSON data. Treat it as given inputs.
+- Read a natural-language scenario description.
+- Implement a mixed-integer linear program (MILP) in Python using Gurobi (gurobipy).
+- The scenario JSON is NOT shown to you as raw text. Instead, it is available at runtime as a Python variable called `data`.
+- Do NOT change `data`. Treat it as immutable input.
 
 Requirements:
-- Define all sets and parameters using the JSON fields.
+- Define all sets and parameters using fields in `data`.
 - Define decision variables with clear, concise names.
-- Add constraints that match the scenario description and the implied structure.
-- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
-  waste, ordering cost, and other costs implied by the JSON.
-- At the end of the script, build the model, call the solver, and print the objective value
-  and basic summaries of key decisions.
+- Add constraints that match the scenario description and the structure implied by `data`.
+- Set an objective consistent with the reference solver semantics: holding/inventory cost, waste penalties,
+  and lost-sales penalties; plus fixed ordering cost if enabled; plus transshipment cost if enabled.
+  Note: purchasing costs may be used in budget constraints when a per-period budget is active and are not necessarily included in the objective.
+- Build the model, call the solver, and print solver status and objective value (if available).
 
 Return:
 - A single Python script as plain text (no Markdown formatting, no code fences).
+- Do not include comments in the returned code.
 
 ### USER PROMPT ###
 [SCENARIO]
@@ -37,7 +38,7 @@ Structure cues:
 - Customers may substitute from the basic product to the premium product along the one-way substitution relationship encoded in the JSON substitution graph; no other substitution paths are allowed.
 - There is no transshipment of inventory between locations; each location can only serve its own local demand from its own inventory.
 - Labor capacity is set high enough that it does not bind in this archetype, but if labor constraints are included they must be consistent with the JSON parameters.
-- The objective is to minimize total cost over the horizon, including purchasing or production costs, inventory holding costs, waste costs, and lost sales penalties. No fixed ordering costs, minimum order quantities, lead times, reverse flows, or global budgets are active here.
+- The objective is to minimize total cost over the horizon, including inventory holding costs, waste costs, and lost sales penalties. No fixed ordering costs, minimum order quantities, lead times, reverse flows, or global budgets are active here.
 
 Operational context:
 - The JSON contains the number of time periods, the list of products, and the list of locations
@@ -70,7 +71,7 @@ Using ONLY the information above, write a complete Python script that:
 2) Assumes the JSON has already been loaded into a Python variable called `data`,
 3) Builds and solves a mixed-integer linear program that reflects the business
    description and the structure implied by the JSON fields (including capacities,
-   shelf life, lead times, substitution edges, transshipment edges, and other flags),
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
 4) Prints the solver status and the optimal objective value.
 
 Do not invent extra data. Do not change any numbers from the JSON.
