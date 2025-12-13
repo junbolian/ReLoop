@@ -1,6 +1,6 @@
 # RetailOpt-190: Comprehensive Retail Supply Chain Benchmark
 
-> File: `reloop/scenarios/RetailOpt-190/spec/retail_spec.md`  
+> File: `reloop/scenarios/retailopt_190/spec/retail_spec.md`
 > Depends on:
 >
 > * `reloop/solvers/universal_retail_solver.py`
@@ -44,18 +44,18 @@ The benchmark is organized into eight Scenario Families. Some families contain f
 Each **archetype name** (e.g., `retail_f3_storage_bottleneck`) corresponds to:
 
 * a generator function in `retail_benchmark_generator.py`, and
-* a JSON file prefix under `scenarios/RetailOpt-190/data/`.
+* a JSON file prefix under `scenarios/retailopt_190/data/`.
 
-| Family | Name         | Retail Function                                           | Mathematical Logic                               | # Archetypes |
-| ------ | ------------ | --------------------------------------------------------- | ------------------------------------------------ | -----------: |
-| 1      | Operations   | Inventory Planning, Cost Control                          | Basic LP, Horizon Scaling                        |            4 |
+| Family | Name         | Retail Function                                          | Mathematical Logic                               | # Archetypes |
+| ------ | ------------ | -------------------------------------------------------- | ------------------------------------------------ | -----------: |
+| 1      | Operations   | Inventory Planning, Cost Control                         | Basic LP, Horizon Scaling                        |            4 |
 | 2      | Assortment   | Merchandising, Substitution, Cannibalization, Promotions | Substitution Logic, Budget Coupling              |            6 |
-| 3      | Resources    | Sourcing, Warehousing, Shared Resources                   | Capacity Constraints (Knapsack)                  |            4 |
-| 4      | Dynamics     | Risk & Disruption Management, Robust-Style Planning       | Time-dependent Constraints, Demand/Supply Shocks |            6 |
-| 5      | Feasibility  | Model Repair (Stress Tests)                               | Logical Inconsistency (requires Slack)           |            4 |
-| 6      | Logistics    | Procurement & Transport                                   | MIP (Binary, Integer, Lead Time)                 |            4 |
+| 3      | Resources    | Sourcing, Warehousing, Shared Resources                  | Capacity Constraints (Knapsack)                  |            4 |
+| 4      | Dynamics     | Risk & Disruption Management, Robust-Style Planning      | Time-dependent Constraints, Demand/Supply Shocks |            6 |
+| 5      | Feasibility  | Model Repair (Stress Tests)                              | Logical Inconsistency (requires Slack)           |            4 |
+| 6      | Logistics    | Procurement & Transport                                  | MIP (Binary, Integer, Lead Time)                 |            4 |
 | 7      | Network      | Distribution Strategy, Multi-echelon, Routing Proxies    | Network Flow (Transshipment)                     |            6 |
-| 8      | Omni-channel | Store Ops, Returns, Online Fulfillment                    | Reverse Flows, Labor Constraints                 |            4 |
+| 8      | Omni-channel | Store Ops, Returns, Online Fulfillment                   | Reverse Flows, Labor Constraints                 |            4 |
 
 Overall, RetailOpt-190 contains:
 
@@ -108,7 +108,7 @@ reloop/
 ├── tools/
 │   └── retail_benchmark_generator.py    # Retail instance generator (38 archetypes × 5 variations)
 ├── scenarios/
-│   └── RetailOpt-190/                   # RetailOpt-190 benchmark scenarios
+│   └── retailopt_190/                   # RetailOpt-190 benchmark scenarios
 │       ├── spec/
 │       │   ├── retail_spec.md           # Structural and semantic specification (this file)
 │       │   └── retail_prompts.md        # Prompt design and templates for LLM-based agents
@@ -117,13 +117,13 @@ reloop/
 └── eval/
     ├── run_benchmark.py                 # Batch evaluation script (writes benchmark_results.csv)
     └── benchmark_results.csv
-````
+```
 
 The `prompts/` directory is generated automatically by the prompt builder script and contains one `.txt` file per JSON instance. Each file concatenates a system prompt and a user prompt and assumes that the JSON content has already been loaded into a Python variable called `data` inside the evaluation harness.
 
 ### 4.1 Agent Interface and Execution Model
 
-For each JSON instance `<scenario>.json`, there is a companion prompt file `<scenario>.txt` under `scenarios/RetailOpt-190/prompts/`. The prompt file **does not embed the JSON payload**; instead, it defines how the modeling agent should interpret a pre-loaded Python dictionary called `data`.
+For each JSON instance `<scenario>.json`, there is a companion prompt file `<scenario>.txt` under `scenarios/retailopt_190/prompts/`. The prompt file **does not embed the JSON payload**; instead, it defines how the modeling agent should interpret a pre-loaded Python dictionary called `data`.
 
 During evaluation, `reloop/eval/run_benchmark.py` performs the following steps for each scenario:
 
@@ -153,7 +153,7 @@ Each instance JSON has the following top-level structure (conceptual example):
 
 ```jsonc
 {
-  "name": "retail_f3_storage_bottleneck_v0",
+  "scenario_id": "retail_f3_storage_bottleneck_v0",
   "description": "Human-readable scenario description (not used by URS)",
   "periods": 20,
   "products": ["SKU_Basic", "SKU_Premium", "SKU_ShortLife"],

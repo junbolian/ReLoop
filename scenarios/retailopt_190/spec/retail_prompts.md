@@ -1,13 +1,13 @@
 # RetailOpt-190 – LLM Prompt Templates
 
-> File: `reloop/scenarios/retailopt_190/spec/retail_prompts.md`  
+> File: `reloop/scenarios/retailopt_190/spec/retail_prompts.md`
 > Goal: Document how each JSON instance in **RetailOpt-190** is converted into a text-based prompt for LLM-driven optimization agents, consistent with the current code in `reloop/tools` and the JSON schema used by `universal_retail_solver.py`.
 
 ---
 
 ## 1. System Prompt Template
 
-All models evaluated on this benchmark are expected to receive the same **system prompt**.  
+All models evaluated on this benchmark are expected to receive the same **system prompt**.
 It matches the `SYSTEM_PROMPT` string used by the prompt-generation script in `reloop/tools/`.
 
 ```text
@@ -30,7 +30,7 @@ Requirements:
 
 Return:
 - A single Python script as plain text (no Markdown formatting, no code fences).
-````
+```
 
 ### 1.1 Execution context for the system prompt
 
@@ -75,6 +75,10 @@ Operational context:
   shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
   are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
   "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
 - Substitution and transshipment structures are encoded in the "network" section, for example
   as substitution edges or transshipment edges between locations.
 - The model should respect all of these fields exactly as given and interpret them in a way
@@ -83,7 +87,7 @@ Operational context:
 JSON data (do not modify):
 The evaluation harness loads the JSON for this scenario into a Python variable
 called `data`. Your code should read all sets and parameters from `data` using
-these fields and must not change any numeric values or perform any file I/O.
+these fields and must not change any numeric values or perform any file I/O (for example, do not call open or json.load).
 
 [INSTRUCTION]
 Using ONLY the information above, write a complete Python script that:

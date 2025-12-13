@@ -8,7 +8,7 @@ import yaml  # pip install pyyaml
 # Path settings: assume this script is inside reloop/tools/
 # Project root is one level above this file (reloop/)
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_DIR = ROOT / "scenarios" / "retail_comprehensive"
+SCENARIO_DIR = ROOT / "scenarios" / "retailopt_190"
 DATA_DIR = SCENARIO_DIR / "data"
 SPEC_DIR = SCENARIO_DIR / "spec"
 PROMPT_DIR = SCENARIO_DIR / "prompts"
@@ -19,22 +19,23 @@ ARCHETYPE_META_FILE = SPEC_DIR / "archetypes.yaml"
 SYSTEM_PROMPT = """You are an optimization modeling assistant specialized in retail supply chains.
 
 Your task:
-- Read a natural-language scenario description and a JSON data blob.
-- Infer the correct mathematical optimization model (MILP) that matches the business logic.
-- Implement that model as Python code using the Gurobi solver (gurobipy).
-- Do NOT change the JSON data. Treat it as given inputs.
+- Read a natural-language scenario description.
+- Implement a mixed-integer linear program (MILP) in Python using Gurobi (gurobipy).
+- The scenario JSON is NOT shown to you as raw text. Instead, it is available at runtime as a Python variable called `data`.
+- Do NOT change `data`. Treat it as immutable input.
 
 Requirements:
-- Define all sets and parameters using the JSON fields.
+- Define all sets and parameters using fields in `data`.
 - Define decision variables with clear, concise names.
-- Add constraints that match the scenario description and the implied structure.
-- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
-  waste, ordering cost, and other costs implied by the JSON.
-- At the end of the script, build the model, call the solver, and print the objective value
-  and basic summaries of key decisions.
+- Add constraints that match the scenario description and the structure implied by `data`.
+- Set an objective consistent with the reference solver semantics: holding/inventory cost, waste penalties,
+  and lost-sales penalties; plus fixed ordering cost if enabled; plus transshipment cost if enabled.
+  Note: purchasing costs may be used in budget constraints when a per-period budget is active and are not necessarily included in the objective.
+- Build the model, call the solver, and print solver status and objective value (if available).
 
 Return:
 - A single Python script as plain text (no Markdown formatting, no code fences).
+- Do not include comments in the returned code.
 """.strip()
 
 
@@ -76,7 +77,7 @@ Using ONLY the information above, write a complete Python script that:
 2) Assumes the JSON has already been loaded into a Python variable called `data`,
 3) Builds and solves a mixed-integer linear program that reflects the business
    description and the structure implied by the JSON fields (including capacities,
-   shelf life, lead times, substitution edges, transshipment edges, and other flags),
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
 4) Prints the solver status and the optimal objective value.
 
 Do not invent extra data. Do not change any numbers from the JSON.
@@ -103,7 +104,6 @@ def main():
         return
 
     json_files = sorted(DATA_DIR.glob("*.json"))
-
     if not json_files:
         print(f"[WARN] No JSON files found in {DATA_DIR}")
         return
@@ -112,7 +112,7 @@ def main():
         with open(jf, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        scenario_id = data.get("scenario_id") or jf.stem
+        scenario_id = data.get("scenario_id") or data.get("name") or jf.stem
 
         if data.get("archetype"):
             archetype_id = data["archetype"]
