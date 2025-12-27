@@ -1,0 +1,53 @@
+[SCENARIO]
+Family: F7 (Network and Multi Echelon)
+Archetype: retail_f7_ring_routing
+Scenario ID: retail_f7_ring_routing_v2
+
+Business narrative:
+Locations are connected in a directed ring, mimicking a truck route that visits each location in a fixed cycle. Inventory can only move along the ring edges, and storage capacities are tightened so that the chosen routing structure affects feasibility and cost. Demand is local and exogenous at each node, and unmet demand is lost and penalized.
+
+Structure cues:
+- The transshipment network in the JSON forms a directed cycle that connects each location to exactly one successor. Inventory can be shipped only along these ring edges.
+- For each product, location, and period, inventory reflects previous stock, local production, inbound ring shipments, outbound ring shipments, sales, and waste, and must remain non-negative.
+- Storage capacities at each location are reduced in the JSON so that capacity constraints are more likely to bind. These capacity limits must be enforced.
+- Demand at each location is met from local inventory and inbound ring shipments; there are no shortcuts across the ring.
+- Inventory that moves further along the route must pass through intermediate locations in sequence.
+- Lead times for ring shipments are effectively zero in this archetype, and substitution behavior is as encoded.
+- The objective is to minimize total cost while respecting the ring network structure and tighter storage capacities.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.

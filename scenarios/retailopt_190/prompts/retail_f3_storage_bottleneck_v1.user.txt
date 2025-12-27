@@ -1,0 +1,52 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_storage_bottleneck
+Scenario ID: retail_f3_storage_bottleneck_v1
+
+Business narrative:
+All locations share a tight storage resource that applies across all products, representing limited chilled, ambient, or dry space. Demand at each location is still exogenous and local, and inventory is not transferred between locations. The main operational challenge is that total stored volume at each site must fit within a strict capacity, so stocking one product reduces room for others.
+
+Structure cues:
+- The inventory, production, and lost sales logic is the same as in retail_f1_base: single-echelon, multiple products and locations, local demand, and no backorders or transshipment.
+- At every location and period, a single shared storage capacity constraint limits the volume-weighted sum of on-hand inventory across all products using product-specific storage usage and the location capacity from the JSON.
+- Inventory levels at each location are kept non-negative and evolve from carried-over stock and new production, minus sales and waste.
+- Substitution edges, if any, are taken from the JSON but are not altered by this archetype.
+- Production capacities, zero lead times, and generous labor capacity remain as in the base scenario.
+- The objective is to minimize total cost while the shared storage constraint is designed to be binding and thus central to the trade-offs.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.

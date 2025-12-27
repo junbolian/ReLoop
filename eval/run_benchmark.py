@@ -22,7 +22,13 @@ import subprocess
 import sys
 import csv
 import time
+import re
 from collections import Counter
+
+
+SUMMARY_ROW_RE = re.compile(
+    r'^\|\s*(?P<name>[^|]+?)\s*\|\s*(?P<status>[^|]+?)\s*\|\s*(?P<obj>[^|]+?)\s*\|\s*$'
+)
 
 
 def parse_objective_to_float(obj_str: str):
@@ -36,6 +42,54 @@ def parse_objective_to_float(obj_str: str):
         return float(clean)
     except Exception:
         return ""
+
+
+def _extract_summary(stdout_text: str, expected_name: str):
+    """
+    Extract the summary row printed by universal_retail_solver.py:
+    | scenario_name | STATUS | OBJ |
+    Returns (status, objective) or (None, None) if not found.
+    """
+    for line in stdout_text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        m = SUMMARY_ROW_RE.match(s)
+        if not m:
+            continue
+
+        name = m.group("name").strip()
+        status = m.group("status").strip()
+        obj = m.group("obj").strip()
+
+        # Skip header row if any
+        if name.upper() == "SCENARIO NAME":
+            continue
+
+        # Prefer exact match; fall back to contains-match to be tolerant to padding
+        if name == expected_name or expected_name == name:
+            return status, obj
+
+    # If exact match not found, try a second pass with a soft contains-match
+    for line in stdout_text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        m = SUMMARY_ROW_RE.match(s)
+        if not m:
+            continue
+
+        name = m.group("name").strip()
+        status = m.group("status").strip()
+        obj = m.group("obj").strip()
+
+        if name.upper() == "SCENARIO NAME":
+            continue
+
+        if expected_name in name or name in expected_name:
+            return status, obj
+
+    return None, None
 
 
 def main():
@@ -81,34 +135,43 @@ def main():
         t0 = time.time()
         status = "ERROR"
         objective = "N/A"
+        elapsed = 0.0
 
         try:
             proc_result = subprocess.run(
                 [sys.executable, solver_script, "--file", json_file],
                 capture_output=True,
                 text=True,
+                timeout=120,  # hard guard; solver itself has TimeLimit
             )
             elapsed = time.time() - t0
-            output = proc_result.stdout.strip()
 
-            # The solver prints a line like:
-            # | retail_f1_base_v0                 | OPTIMAL       | 12345.00       |
-            found_summary = False
-            for line in output.split("\n"):
-                line_stripped = line.strip()
-                if line_stripped.startswith("|") and scenario_name in line_stripped:
-                    parts = [p.strip() for p in line_stripped.split("|")]
-                    if len(parts) >= 4:
-                        status = parts[2]
-                        objective = parts[3]
-                        found_summary = True
-                        break
+            stdout = (proc_result.stdout or "").strip()
+            stderr = (proc_result.stderr or "").strip()
 
-            if not found_summary:
-                err_msg = proc_result.stderr.strip().replace("\n", " ")
-                if len(err_msg) > 80:
-                    err_msg = err_msg[:77] + "..."
-                status = f"CRASH: {err_msg}" if err_msg else "CRASH"
+            parsed_status, parsed_obj = _extract_summary(stdout, expected_name=scenario_name)
+
+            if parsed_status is not None:
+                status, objective = parsed_status, parsed_obj
+            else:
+                # If solver didn't print a summary row, treat as crash/misbehavior.
+                if proc_result.returncode != 0:
+                    err_msg = stderr.replace("\n", " ").strip()
+                    if len(err_msg) > 120:
+                        err_msg = err_msg[:117] + "..."
+                    status = f"CRASH: {err_msg}" if err_msg else "CRASH"
+                else:
+                    # Return code 0 but no summary line -> still mark as CRASH for consistency
+                    err_msg = stderr.replace("\n", " ").strip()
+                    if len(err_msg) > 120:
+                        err_msg = err_msg[:117] + "..."
+                    status = f"NO_SUMMARY: {err_msg}" if err_msg else "NO_SUMMARY"
+                objective = "N/A"
+
+        except subprocess.TimeoutExpired:
+            elapsed = time.time() - t0
+            status = "TIMEOUT"
+            objective = "N/A"
         except Exception as e:
             elapsed = time.time() - t0
             status = "SYSTEM_ERROR"
