@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 import argparse
+=======
+>>>>>>> 1980535 (Fix production_cap semantics in RetailOpt-190 system prompt (cap on Q))
 import json
 from pathlib import Path
 
@@ -27,7 +30,7 @@ Modeling requirements:
 
 Data semantics (must follow):
 - Demand allocation: if `data` contains `demand_curve` by product and period and `demand_share` by location, interpret `demand_curve[p][t]` as total demand for product p in period t, and allocate location demand as `Dem[p,l,t] = demand_curve[p][t] * demand_share[l]`.
-- Production/procurement capacity: if `data` contains `production_cap[p][t]` with no location index, interpret it as a global (network-wide) capacity for product p in period t, enforced as `sum_l inflow[p,l,t] <= production_cap[p][t]` (where inflow is production/order quantity delivered in that period, consistent with lead times).
+- Production/procurement capacity: if `data` contains `production_cap[p][t]` with no location index, interpret it as a global (network-wide) capacity for product p in period t, enforced on orders/production decisions as `sum_l Q[p,l,t] <= production_cap[p][t]`. Lead times (if any) only shift arrivals across periods; do NOT reinterpret `production_cap` as an arrival/inflow cap.
 
 Naming contract (required for automatic semantic checking):
 - Use the following variable dictionaries with exactly these names when active:
