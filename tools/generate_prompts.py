@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 import argparse
-=======
->>>>>>> 1980535 (Fix production_cap semantics in RetailOpt-190 system prompt (cap on Q))
 import json
 from pathlib import Path
-
 import yaml  # pip install pyyaml
 
 
@@ -39,7 +35,7 @@ Naming contract (required for automatic semantic checking):
   S (substitution routing), X (transshipment), z (order trigger), n (pack integer).
 - When adding constraints, set the `name=` field using these prefixes (plus indices):
   demand_route, sales_conservation, availability, expire_clear, leadtime, returns,
-  fresh_inflow, aging, storage_cap, prod_cap, labor_cap, moq_lb, moq_ub,
+  init, fresh_inflow, aging, storage_cap, prod_cap, labor_cap, moq_lb, moq_ub,
   pack, budget, wastecap.
 
 Objective (reference semantics):
