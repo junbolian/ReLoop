@@ -1,4 +1,4 @@
-import os
+import argparse
 import json
 from pathlib import Path
 
@@ -6,14 +6,8 @@ import yaml  # pip install pyyaml
 
 
 # Path settings: assume this script is inside reloop/tools/
-# Project root is one level above this file (reloop/)
+# ROOT points to reloop/
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_DIR = ROOT / "scenarios" / "retailopt_190"
-DATA_DIR = SCENARIO_DIR / "data"
-SPEC_DIR = SCENARIO_DIR / "spec"
-PROMPT_DIR = SCENARIO_DIR / "prompts"
-
-ARCHETYPE_META_FILE = SPEC_DIR / "archetypes.yaml"
 
 
 SYSTEM_PROMPT = """You are an optimization modeling assistant specialized in retail supply chains.
@@ -107,49 +101,108 @@ Return ONLY the Python source code as plain text, with no comments and no Markdo
 
 def load_archetype_meta(path: Path):
     with open(path, "r", encoding="utf-8") as f:
-        meta = yaml.safe_load(f)
+        meta = yaml.safe_load(f) or {}
+
+    # Allow either:
+    #  (a) top-level mapping: {archetype_id: {...}}
+    #  (b) wrapped mapping: {"archetypes": {archetype_id: {...}}}
+    if isinstance(meta, dict) and "archetypes" in meta and isinstance(meta["archetypes"], dict):
+        meta = meta["archetypes"]
+
+    if not isinstance(meta, dict):
+        raise ValueError(f"Unexpected YAML structure in {path}: expected a mapping.")
+
     return meta
 
 
+def infer_archetype_id(scenario_id: str, data: dict):
+    if isinstance(data, dict) and data.get("archetype"):
+        return str(data["archetype"])
+
+    # Default convention: drop trailing "_v{int}" if present
+    if "_v" in scenario_id:
+        left, right = scenario_id.rsplit("_v", 1)
+        if right.isdigit():
+            return left
+
+    return scenario_id
+
+
 def main():
-    if not ARCHETYPE_META_FILE.exists():
-        print(f"[ERROR] archetypes.yaml not found at {ARCHETYPE_META_FILE}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default=None,
+        help="Scenario folder name under reloop/scenarios/ (e.g., retailopt_190 or retail_comprehensive). "
+             "If omitted, auto-detects retailopt_190 then retail_comprehensive.",
+    )
+    parser.add_argument(
+        "--write_combined",
+        action="store_true",
+        help="Also write a combined file containing system+user prompt for each scenario.",
+    )
+    args = parser.parse_args()
+
+    # Auto-detect scenario folder if not provided
+    scenario_name = args.scenario
+    if scenario_name is None:
+        if (ROOT / "scenarios" / "retailopt_190").exists():
+            scenario_name = "retailopt_190"
+        elif (ROOT / "scenarios" / "retail_comprehensive").exists():
+            scenario_name = "retail_comprehensive"
+        else:
+            print("[ERROR] Could not auto-detect scenario folder. Use --scenario <name>.")
+            return
+
+    scenario_dir = ROOT / "scenarios" / scenario_name
+    data_dir = scenario_dir / "data"
+    spec_dir = scenario_dir / "spec"
+    prompt_dir = scenario_dir / "prompts"
+    archetype_meta_file = spec_dir / "archetypes.yaml"
+
+    if not archetype_meta_file.exists():
+        print(f"[ERROR] archetypes.yaml not found at {archetype_meta_file}")
         return
 
-    arche_meta = load_archetype_meta(ARCHETYPE_META_FILE)
-    PROMPT_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not DATA_DIR.exists():
-        print(f"[ERROR] Data directory not found: {DATA_DIR}")
+    if not data_dir.exists():
+        print(f"[ERROR] Data directory not found: {data_dir}")
         return
 
-    json_files = sorted(DATA_DIR.glob("*.json"))
+    json_files = sorted(data_dir.glob("*.json"))
     if not json_files:
-        print(f"[WARN] No JSON files found in {DATA_DIR}")
+        print(f"[WARN] No JSON files found in {data_dir}")
         return
+
+    arche_meta = load_archetype_meta(archetype_meta_file)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write system prompt once
+    sys_path = prompt_dir / "system_prompt.txt"
+    with open(sys_path, "w", encoding="utf-8") as f_sys:
+        f_sys.write(SYSTEM_PROMPT)
+        f_sys.write("\n")
+    print(f"[OK] Wrote system prompt -> {sys_path}")
+
+    ok_count = 0
+    skip_count = 0
 
     for jf in json_files:
         with open(jf, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        scenario_id = data.get("scenario_id") or data.get("name") or jf.stem
-
-        if data.get("archetype"):
-            archetype_id = data["archetype"]
-        else:
-            if "_v" in scenario_id:
-                archetype_id = scenario_id.rsplit("_v", 1)[0]
-            else:
-                archetype_id = scenario_id
+        scenario_id = str(data.get("scenario_id") or data.get("name") or jf.stem)
+        archetype_id = infer_archetype_id(scenario_id, data)
 
         if archetype_id not in arche_meta:
             print(f"[WARN] Archetype {archetype_id} not found in archetypes.yaml for {scenario_id}")
+            skip_count += 1
             continue
 
         meta = arche_meta[archetype_id]
-        family_id = meta["family_id"]
-        family_name = meta["family_name"]
-        description = meta["description"].strip()
+        family_id = meta.get("family_id", "unknown")
+        family_name = meta.get("family_name", "unknown")
+        description = str(meta.get("description", "")).strip()
 
         user_prompt = USER_TEMPLATE.format(
             family_id=family_id,
@@ -159,14 +212,23 @@ def main():
             description=description,
         )
 
-        out_path = PROMPT_DIR / f"{scenario_id}.txt"
-        with open(out_path, "w", encoding="utf-8") as f_out:
-            f_out.write("### SYSTEM PROMPT ###\n")
-            f_out.write(SYSTEM_PROMPT)
-            f_out.write("\n\n### USER PROMPT ###\n")
+        out_user = prompt_dir / f"{scenario_id}.user.txt"
+        with open(out_user, "w", encoding="utf-8") as f_out:
             f_out.write(user_prompt)
+            f_out.write("\n")
 
-        print(f"[OK] Wrote prompt for {scenario_id} -> {out_path}")
+        if args.write_combined:
+            out_combined = prompt_dir / f"{scenario_id}.txt"
+            with open(out_combined, "w", encoding="utf-8") as f_out:
+                f_out.write(SYSTEM_PROMPT)
+                f_out.write("\n\n")
+                f_out.write(user_prompt)
+                f_out.write("\n")
+
+        print(f"[OK] Wrote user prompt for {scenario_id} -> {out_user}")
+        ok_count += 1
+
+    print(f"Done. prompts_ok={ok_count}, skipped={skip_count}, scenario={scenario_name}")
 
 
 if __name__ == "__main__":
