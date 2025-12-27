@@ -1,1 +1,69 @@
+# ----------------------------
+# Python / uv
+# ----------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.cache/
+.nox/
+.tox/
+
+# uv / virtual environments
+.venv/
+.venv*/
+.uv/
+uv.lock
+.python-version
+
+# ----------------------------
+# Jupyter / IPython
+# ----------------------------
+.ipynb_checkpoints/
+.profile_default/
+.ipython/
+
+# ----------------------------
+# Editors / OS
+# ----------------------------
+.vscode/
 .idea/
+.DS_Store
+Thumbs.db
+
+# ----------------------------
+# Logs
+# ----------------------------
+*.log
+
+# ----------------------------
+# Local config / secrets
+# ----------------------------
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ----------------------------
+# Data
+# ----------------------------
+runs/
+
+# If you DO want to keep a small sample jsonl in repo, you can negate it like:
+# !data/sample.jsonl
+
