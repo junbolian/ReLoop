@@ -1,0 +1,51 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_demand_surge
+Scenario ID: retail_f4_demand_surge_v4
+
+Business narrative:
+The retailer experiences a single-period viral demand spike where demand suddenly multiplies for all products. Production capacity and other structural elements remain unchanged; only the magnitude of demand in that period is much higher. The retailer must decide whether to build extra inventory in advance or accept lost sales during the surge.
+
+Structure cues:
+- The inventory and production structure is the same as in the base scenario.
+- In the JSON, one mid-horizon period has demand for each product scaled up by a large factor, representing the surge. This period is treated as having much higher exogenous demand.
+- Inventory stays non-negative and is updated using previous stock, current production, sales, and waste.
+- Storage capacity and substitution behavior are unchanged, there is no transshipment, and lead times remain effectively zero.
+- The objective is to minimize total cost, with the demand spike increasing the importance of planning ahead for that particular period.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.

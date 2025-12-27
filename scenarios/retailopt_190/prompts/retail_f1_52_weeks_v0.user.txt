@@ -1,0 +1,52 @@
+[SCENARIO]
+Family: F1 (Core Operations)
+Archetype: retail_f1_52_weeks
+Scenario ID: retail_f1_52_weeks_v0
+
+Business narrative:
+The retailer plans inventory over a full year of weekly decisions, represented by fifty-two time periods. Exogenous seasonal demand, local inventories at each distribution center, and per-product production capacities work as in the core operations baseline. Customers are never backordered; unmet demand in a week is immediately lost and penalized. The main difference is the extended planning horizon, which tests the ability to manage long-run seasonality and accumulation effects.
+
+Structure cues:
+- The inventory system is the same as in retail_f1_base, with multiple products, multiple locations, and capacity-limited production for each product and period.
+- The time index now runs for fifty-two periods. The same inventory evolution and demand fulfillment logic is applied in every period of the year.
+- At each location and for each product, stock at the end of a week depends on what was carried over, what was produced for that location during the week, and what was sold or discarded. Inventory cannot go below zero; any unmet demand in a week is lost and penalized.
+- Storage capacity, substitution from the basic product to the premium product, the absence of transshipment, and zero lead times all remain as in the baseline case.
+- Labor capacity remains high enough that it does not materially bind, though it can be represented consistently with the JSON.
+- The objective is to minimize total cost over the entire year, aggregating holding, waste, and lost sales costs across all weeks.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.
