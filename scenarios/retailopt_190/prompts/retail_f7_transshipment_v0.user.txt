@@ -1,0 +1,53 @@
+[SCENARIO]
+Family: F7 (Network and Multi Echelon)
+Archetype: retail_f7_transshipment
+Scenario ID: retail_f7_transshipment_v0
+
+Business narrative:
+The retailer operates a fully connected lateral transshipment network among all locations. Inventory can be moved between any pair of locations at a transshipment cost, allowing local surpluses to be reallocated to locations facing shortages. Demand remains local and exogenous at each site, and unsatisfied demand after considering local stock and inbound transshipments is lost and penalized.
+
+Structure cues:
+- This archetype extends the single-echelon inventory model by allowing transshipment flows along directed edges given in the JSON; in this case, all ordered pairs of distinct locations are connected.
+- For each product and period, inventory at a location changes according to incoming production, incoming transshipments, outgoing transshipments, sales, and waste, and must remain non-negative.
+- Transshipment flows from a location in a period cannot exceed that location’s available inventory for the product. All such moves incur transshipment costs as specified in the JSON.
+- Demand remains local: each location’s demand must be met from its own on-hand inventory and inbound transshipments, if available.
+- Storage capacity constraints apply to on-hand inventory at each location, while in-transit units can be treated separately if desired.
+- Lead times for transshipment are effectively zero in this archetype, so shipments dispatched in a period are available at the destination within the same period.
+- The objective is to minimize total cost including holding, waste, lost sales, and transshipment costs.
+
+Operational context:
+- The JSON contains the number of time periods, the list of products, and the list of locations
+  directly as top-level fields (for example: "periods", "products", "locations").
+- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
+  are stored in the "costs" section of the JSON.
+- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
+  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
+  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
+  "lead_time", "constraints", and "network".
+- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
+  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
+  "constraints" and "costs" sections and should be applied uniformly across products and locations
+  unless the scenario description explicitly specifies otherwise.
+- Substitution and transshipment structures are encoded in the "network" section, for example
+  as substitution edges or transshipment edges between locations.
+- The model should respect all of these fields exactly as given and interpret them in a way
+  consistent with the scenario description.
+
+JSON data (do not modify):
+The evaluation harness loads the JSON for this scenario into a Python variable
+called `data`. Your code should read all sets and parameters from `data` using
+these fields and must not change any numeric values or perform any file I/O
+(for example, do not call open or json.load).
+
+[INSTRUCTION]
+Using ONLY the information above, write a complete Python script that:
+
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
+2) Assumes the JSON has already been loaded into a Python variable called `data`,
+3) Builds and solves a mixed-integer linear program that reflects the business
+   description and the structure implied by the JSON fields (including capacities,
+   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
+4) Prints the solver status and the optimal objective value.
+
+Do not invent extra data. Do not change any numbers from the JSON.
+Return ONLY the Python source code as plain text, with no comments and no Markdown.
