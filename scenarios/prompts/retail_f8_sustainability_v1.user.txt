@@ -37,6 +37,8 @@ called `data`. Your code should read all sets and parameters from `data` using
 these fields and must not change any numeric values or perform any file I/O
 (for example, do not call open or json.load).
 
+
+
 [INSTRUCTION]
 Using ONLY the information above, write a complete Python script that:
 
@@ -45,7 +47,8 @@ Using ONLY the information above, write a complete Python script that:
 3) Builds and solves a mixed-integer linear program that reflects the business
    description and the structure implied by the JSON fields (including capacities,
    shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
-4) Prints the solver status and the optimal objective value.
+4) Sets reproducibility parameters (OutputFlag=0, Threads=1, Seed=0) unless the harness overrides them,
+5) Prints: status always; objective only as final if OPTIMAL; otherwise also print ObjVal/ObjBound/MIPGap when available.
 
 Do not invent extra data. Do not change any numbers from the JSON.
 Return ONLY the Python source code as plain text, with no comments and no Markdown.
