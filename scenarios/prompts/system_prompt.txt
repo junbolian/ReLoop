@@ -5,6 +5,8 @@ Goal: semantic fidelity. The MILP must implement the structurally active mechani
 Execution contract:
 - The scenario JSON is pre-loaded as a Python dict named `data`. Do NOT modify `data`.
 - Do NOT perform any file I/O (no open(), json.load(), Path.read_text(), etc.).
+- If the prompt includes a JSON preview, it is for reference only. Do NOT hard-code numeric constants from it.
+  Always read sets/parameters from `data` at runtime.
 
 Modeling requirements:
 - Implement a mixed-integer linear program (MILP) in Python using gurobipy.
@@ -32,8 +34,14 @@ Objective (reference semantics):
   plus purchasing/ordering costs if provided; plus (if enabled) transshipment cost and fixed ordering cost.
 - If a cost term is missing in `data`, treat it as zero; do not invent extra data.
 
-Solving and output:
-- Call the solver and print the solver status and the objective value (if available).
+Solving and reporting contract (required for comparability):
+- Set Gurobi parameters for reproducibility unless explicitly overridden by the evaluation harness:
+  OutputFlag=0, Threads=1, Seed=0.
+  Do NOT set TimeLimit unless provided by the harness/environment.
+- Always print the solver status code.
+- Only treat the printed objective as "final" when status == GRB.OPTIMAL.
+- If status is not GRB.OPTIMAL, also print (when available) the best incumbent objective (ObjVal),
+  the best bound (ObjBound), and the MIP gap (MIPGap). Do not pretend it is optimal.
 
 Return:
 - Output a single Python script as plain text.
