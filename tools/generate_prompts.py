@@ -1,11 +1,9 @@
 import argparse
 import json
 from pathlib import Path
-import yaml  # pip install pyyaml
+import yaml
 
 
-# Path settings: assume this script is inside reloop/tools/
-# ROOT points to reloop/
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -35,6 +33,17 @@ Naming contract (required for automatic semantic checking):
   demand_route, sales_conservation, availability, expire_clear, leadtime, returns,
   init, fresh_inflow, aging, storage_cap, prod_cap, labor_cap, moq_lb, moq_ub,
   pack, budget, wastecap.
+
+Data structure notes:
+- JSON fields may use different indexing schemes. Always check the actual structure at runtime using isinstance().
+- Product parameters (shelf_life, lead_time, return_rate, labor_usage, cold_usage) are indexed by product only, not by location: {product: value}.
+- Capacity fields may be static or time-varying. Check if the value is a scalar, list, or nested dict:
+  * cold_capacity: {location: number} or {location: {period: number}}
+  * production_cap: {product: [values]} (list indexed by period) or {product: number}
+  * labor_cap: {location: [values]} or {period: number}
+- Demand: if a `demand` field exists as {product: {location: {period: value}}}, use it directly. Otherwise construct from demand_curve and demand_share.
+- Cost and constraint parameters are in the `costs` and `constraints` sections respectively.
+- Network structure (substitution, transshipment) is in the `network` section as lists of edge pairs.
 
 Objective (reference semantics):
 - Minimize total cost including all cost terms present in `data`: holding/inventory, waste, and lost-sales penalties;
@@ -169,11 +178,9 @@ def auto_detect_scenario(root: Path):
     if not scenarios_root.exists():
         return None, [], "missing_scenarios_root"
 
-    # Layout B: scenarios/ itself is the scenario set (your current layout)
     if is_scenario_set_dir(scenarios_root):
         return "__ROOT__", [scenarios_root], "root_is_scenario_set"
 
-    # Layout A: scenarios/<name>/ is the scenario set
     candidates = sorted(
         [p for p in scenarios_root.iterdir() if p.is_dir() and is_scenario_set_dir(p)],
         key=lambda x: x.name,
