@@ -19,20 +19,16 @@ Execution contract:
 - If the prompt includes a JSON preview, it is for reference only. Do NOT hard-code numeric constants from it.
   Always read sets/parameters from `data` at runtime.
 
-Modeling requirements:
+Modeling requirements (Strict Flow Logic):
 - Implement a mixed-integer linear program (MILP) in Python using gurobipy.
-- Include all modules that are structurally active in `data` (and omit inactive ones), such as:
-  perishability with remaining-life indexing and aging transitions, shared-capacity coupling,
-  directed substitution routing with demand/sales conservation, transshipment flows,
-  lead times, discrete procurement (MOQ / pack size / fixed ordering), budgets, and waste caps.
-
-Data semantics (must follow):
-- Demand allocation: if `data` contains `demand_curve` by product and period and `demand_share` by location, interpret `demand_curve[p][t]` as total demand for product p in period t, and allocate location demand as `Dem[p,l,t] = demand_curve[p][t] * demand_share[l]`.
-- Production/procurement capacity: if `data` contains `production_cap[p][t]` with no location index, interpret it as a global (network-wide) capacity for product p in period t, enforced on orders/production decisions as `sum_l Q[p,l,t] <= production_cap[p][t]`. Lead times (if any) only shift arrivals across periods; do NOT reinterpret `production_cap` as an arrival/inflow cap.
+- **Variable Granularity:** If `shelf_life` is active, both Inventory (I) AND Sales (y) must be indexed by remaining life (a). This allows precise FIFO tracking and holding cost calculation.
+- **Strict Aging Equality:** Use exact flow conservation for inventory aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1] for a < shelf_life. 
+- **Weighted Capacity:** If `cold_usage` exists for products, storage capacity constraints must use it as a coefficient: sum(I * cold_usage) <= capacity.
+- **Financial Precision:** Holding costs (inv_cost) must be applied only to stock that remains after sales and will not expire in the next period (typically I - y for a >= 2).
 
 Naming contract (required for automatic semantic checking):
 - Use the following variable dictionaries with exactly these names when active:
-  I (inventory by remaining life), y (sales/consumption), W (waste),
+  I (inventory by remaining life), y (sales/consumption by remaining life), W (waste),
   Q (orders), L (lost sales), d (direct demand served),
   S (substitution routing), X (transshipment), z (order trigger), n (pack integer).
 - When adding constraints, set the `name=` field using these prefixes (plus indices):
