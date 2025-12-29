@@ -36,6 +36,12 @@ Data structure notes:
 - Cost and constraint parameters are in the `costs` and `constraints` sections respectively.
 - Network structure (substitution, transshipment) is in the `network` section as lists of edge pairs.
 
+Critical semantic clarifications:
+- demand_share is indexed by location only: {location: fraction}. Demand for product p at location l in period t equals demand_curve[p][t] * demand_share[l].
+- production_cap is a GLOBAL constraint per product per period: the sum of production across ALL locations for product p in period t must not exceed production_cap[p][t].
+- Substitution edges [p_from, p_to] mean: demand for p_to can be served by p_from's inventory when p_to is unavailable. Example: [SKU_Basic, SKU_Premium] means Basic inventory can satisfy Premium demand (not the reverse).
+- costs.inventory is the holding cost (same as inv_cost). costs.lost_sales is the penalty for unmet demand.
+
 Objective (reference semantics):
 - Minimize total cost including all cost terms present in `data`: holding/inventory, waste, and lost-sales penalties;
   plus purchasing/ordering costs if provided; plus (if enabled) transshipment cost and fixed ordering cost.
