@@ -24,12 +24,12 @@ reloop/
 ├── tools/
 │   └── retail_benchmark_generator.py    # Generator for 38 archetypes × 5 variations
 ├── scenarios/
-│   └── retailopt_190/
-│       ├── spec/
-│       │   ├── retail_spec.md          # Structural and semantic specification
-│       │   └── retail_prompts.md       # Prompt templates for LLM agents
-│       ├── data/                       # JSON instances (RetailOpt-190 benchmark)
-│       └── prompts/                    # Per-instance SYSTEM/USER prompt files
+|
+│   ├── spec/
+│   │   ├── retail_spec.md          # Structural and semantic specification
+│   │   └── retail_prompts.md       # Prompt templates for LLM agents
+│   ├── data/                       # JSON instances (RetailOpt-190 benchmark)
+│   └── prompts/                    # Per-instance SYSTEM/USER prompt files
 └── eval/
     ├── run_benchmark.py                # Batch evaluation script
     └── benchmark_results.csv           # Reference solver results (if generated)
