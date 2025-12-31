@@ -1,0 +1,26 @@
+STEP 0 — LOCK THE TASK CONTRACT
+
+Task:
+Answer the following 4 questions based ONLY on the scenario narrative + the data_profile provided earlier in the conversation:
+1) What are we optimizing?
+2) What can we control?
+3) What MUST be satisfied (hard constraints)?
+4) What is allowed to be unmet but penalized (soft violations + penalty)?
+
+Output requirements:
+- Output MUST be a single JSON object, no surrounding text.
+- Use double quotes for all strings. No trailing commas.
+
+Output schema (exact keys):
+{
+  "optimize": "one sentence",
+  "controls": ["short noun phrases, decision levers"],
+  "hard_constraints": ["short noun phrases, must-hold rules"],
+  "soft_violations": [{"name": "short name", "penalty_source": "which cost key or rule implies penalty"}],
+  "contract_summary": "one sentence summarizing hard vs soft structure"
+}
+
+Rules:
+- If the narrative says “unmet demand is lost and penalized”, you MUST include lost sales as a soft violation and reference costs.lost_sales.
+- If shelf life exists in data_profile, you MUST mention expiration/waste as a hard physical mechanism (even if waste is penalized).
+- Do not add items that are not implied by the narrative or data_profile.

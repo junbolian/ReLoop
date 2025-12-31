@@ -1,0 +1,29 @@
+STEP 4 — NON-SOLVER SANITY CHECKS (LOGIC-ONLY)
+
+Task:
+Run the 6 sanity checks on the current spec_sheet + constraint_templates + contract.
+Do NOT solve. Do NOT generate code.
+
+Output:
+- A single JSON object with the schema below. No surrounding text.
+
+Schema:
+{
+  "checks": [
+    {"id": 1, "name": "hard_equals_really_hard", "pass": true, "reason": "...", "fix_hint": "..."},
+    {"id": 2, "name": "unit_consistency", "pass": true, "reason": "...", "fix_hint": "..."},
+    {"id": 3, "name": "time_alignment", "pass": true, "reason": "...", "fix_hint": "..."},
+    {"id": 4, "name": "conservation_closed", "pass": true, "reason": "...", "fix_hint": "..."},
+    {"id": 5, "name": "boundary_handled", "pass": true, "reason": "...", "fix_hint": "..."},
+    {"id": 6, "name": "extreme_cases_behavior", "pass": true, "reason": "...", "fix_hint": "..."}
+  ],
+  "overall_pass": true,
+  "blockers": ["list of constraint family prefixes that must be fixed before codegen"],
+  "recommended_next_step": "PROCEED_TO_CODEGEN|REVISE_SPEC"
+}
+
+Rules:
+- If unmet demand is allowed, demand routing MUST include lost sales L; otherwise fail check #1 or #4.
+- If shelf_life active, both I and y must be indexed by remaining life; otherwise fail.
+- If substitution exists, you MUST confirm both demand-side and supply-side coupling exists; otherwise fail.
+- If any check fails, overall_pass must be false and recommended_next_step must be REVISE_SPEC.
