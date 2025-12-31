@@ -1,0 +1,32 @@
+STEP 1 — TAG NATURAL LANGUAGE INTO 5 INFORMATION TYPES
+
+Task:
+Using the scenario narrative text provided earlier, split it into atomic sentences/clauses (as needed) and tag EACH as one of:
+- "SET_OBJECT"
+- "PARAM_FACT"
+- "DECISION"
+- "RULE_CONSTRAINT_SOURCE"
+- "OBJECTIVE_PREFERENCE"
+
+Output requirements:
+- Output MUST be a single JSON array (no wrapper object), no surrounding text.
+- Each element must have the exact keys below.
+
+Element schema:
+{
+  "id": "S1",
+  "text": "verbatim sentence/fragment",
+  "tag": "SET_OBJECT|PARAM_FACT|DECISION|RULE_CONSTRAINT_SOURCE|OBJECTIVE_PREFERENCE",
+  "extracted": {
+    "sets": ["P","L","T","A"] ,
+    "params": ["demand_curve","demand_share","shelf_life","lead_time","cold_capacity","production_cap","labor_cap","moq","pack_size","budget_per_period","waste_limit_pct","sub_edges","trans_edges","costs.inventory","costs.lost_sales","costs.waste","costs.purchasing","costs.fixed_order","costs.transshipment"],
+    "decisions": ["I","y","W","Q","L","d","S","X","z","n"],
+    "rule_hints": ["short hint of what rule this sentence implies"]
+  }
+}
+
+Rules:
+- "extracted.sets/params/decisions" must only include items that are actually implicated by the sentence.
+- If the sentence implies substitution, include "S" and "sub_edges" in extracted.
+- If the sentence implies no transshipment, include "trans_edges" with a rule_hint indicating X should be absent or fixed to 0.
+- If unsure, keep extracted lists empty and put the uncertainty in rule_hints like "unclear".

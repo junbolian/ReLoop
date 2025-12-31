@@ -1,0 +1,11 @@
+FORMAT REPAIR — CODE ONLY
+
+Your previous output was not a plain Python script (e.g., included Markdown fences, commentary, or missing required prints).
+
+Task:
+Re-output ONLY the Python source code as plain text.
+
+Rules:
+- No Markdown, no backticks, no comments, no explanations.
+- Preserve the intended logic. Only fix formatting and missing required boilerplate (imports, status printing, parameter settings) if absent.
+- Do NOT introduce file I/O.

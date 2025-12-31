@@ -1,0 +1,31 @@
+STEP 5 — GENERATE THE FINAL GUROBIPY SCRIPT (SINGLE FILE)
+
+Task:
+Using:
+- the immutable BASE PROMPT rules,
+- the spec_sheet,
+- the constraint_templates,
+generate ONE complete Python script as plain text.
+
+Output requirements (critical):
+- Output ONLY the Python source code. No Markdown. No code fences. No comments.
+- Must import: import gurobipy as gp; from gurobipy import GRB
+- Must assume `data` is already a dict in memory; do NOT modify it.
+- No file I/O.
+- Must set: OutputFlag=0, Threads=1, Seed=0 (unless overridden by harness).
+- Must print solver status always.
+- Only print “final objective” if status == GRB.OPTIMAL.
+- Otherwise also print ObjVal, ObjBound, MIPGap when available.
+- Must follow naming contract: variable dictionaries named exactly I,y,W,Q,L,d,S,X,z,n when active.
+- Constraint names must use the specified prefixes with indices.
+
+Implementation rules:
+- Do not hard-code numeric constants from any JSON preview. Always read from `data`.
+- For any optional module not present in data, treat its costs as 0 or skip constraints consistently.
+- Big-M values MUST be derived at runtime from available bounds in `data` (e.g., production_cap, budget, demand upper bounds). If no safe bound can be derived, pick a conservative bound using sums of maxima computed from data arrays/dicts at runtime (never a magic constant).
+- If shelf_life active:
+  - Inventory and sales must be indexed by remaining life `a`.
+  - Strict aging equality required.
+  - Waste/expiration handling must clear expiring bucket.
+- If cold_usage present, storage capacity must be weighted.
+- If sub_edges nonempty, implement substitution routing and ensure it consumes the supplying product’s inventory.
