@@ -1,0 +1,46 @@
+STEP 6 — BUILD A STRUCTURED REPAIR BRIEF (NO CODE)
+
+Task:
+You will receive:
+- the last spec_sheet and/or last generated code,
+- the run result (status, stdout/stderr),
+- optional IIS summary (constraint names in IIS),
+- optional static audit failures.
+
+Your job:
+Decide the minimal changes needed and produce a structured repair brief targeting either:
+- "SPEC" (go back to Step2/Step3), or
+- "CODEGEN" (go back to Step5 with clearer instructions),
+but NEVER change the immutable base prompt.
+
+Output:
+A single JSON object, no surrounding text.
+
+Schema:
+{
+  "target": "SPEC|CODEGEN",
+  "diagnosis": {
+    "category": "INFEASIBLE|UNBOUNDED|WEIRD_SOLUTION|FORMAT_ERROR|AUDIT_FAIL|RUNTIME_ERROR",
+    "most_likely_causes": ["short bullet causes"],
+    "evidence": ["snippets from stderr/stdout/IIS constraint prefixes"],
+    "affected_constraint_prefixes": ["aging","demand_route","prod_cap"]
+  },
+  "repairs": [
+    {
+      "change_type": "ADD|REMOVE|TIGHTEN|RELAX|ALIGN_TIME|ADD_SOFT_SLACK|FIX_SUBSTITUTION_COUPLING|FIX_BOUNDS",
+      "where": "spec_sheet.constraint_families|constraint_templates|codegen_instructions",
+      "description": "one sentence",
+      "acceptance_test": "how to verify after change (e.g., sanity check #3 passes)"
+    }
+  ],
+  "next_step_prompting": {
+    "extra_instructions_to_inject": ["short additional step-specific instructions for the next attempt"]
+  }
+}
+
+Rules:
+- If IIS mentions many constraints of one prefix, include that prefix in affected_constraint_prefixes.
+- If error is about time alignment, set change_type=ALIGN_TIME.
+- If demand is forced but should allow lost sales, set change_type=ADD_SOFT_SLACK and mention L variables.
+- If substitution “paper satisfies”, set change_type=FIX_SUBSTITUTION_COUPLING.
+- Do NOT output code here.

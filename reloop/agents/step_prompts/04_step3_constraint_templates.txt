@@ -1,0 +1,41 @@
+STEP 3 — MAP BUSINESS RULES TO CONSTRAINT FAMILY TEMPLATES
+
+Task:
+Using the spec_sheet, produce constraint templates that are “symbolic but checkable”.
+Do NOT use numeric constants. Expressions can reference variables and data keys symbolically.
+
+Output:
+- A single JSON array. No surrounding text.
+
+Element schema:
+{
+  "prefix": "aging",
+  "template_type": "BALANCE|CAPACITY|DYNAMICS|NETWORK|SUBSTITUTION|DISCRETE",
+  "applies_when": "short condition such as 'shelf_life active'",
+  "indices": ["p","l","t","a"],
+  "equations": [
+    {
+      "name_suffix": "p_l_t_a",
+      "sense": "=",
+      "lhs": "I[p,l,t+1,a]",
+      "rhs": "I[p,l,t,a+1] - y[p,l,t,a+1]"
+    }
+  ],
+  "notes": ["short notes about boundary handling and what must be linked"]
+}
+
+Rules:
+- Use ONLY variable names from the naming contract (I,y,W,Q,L,d,S,X,z,n).
+- Use “t+1”, “t-lead[p]” symbolically. Boundary conditions go into notes (do not enumerate all boundary equations).
+- For demand routing with substitution:
+  - Demand for p_to must be: d[p_to,l,t] + sum_{p_from can serve p_to} S[p_from,p_to,l,t] + L[p_to,l,t] = demand[p_to,l,t]
+- For supply-side coupling with substitution:
+  - Substitution S[p_from,p_to,l,t] MUST consume p_from inventory via y (or an explicit consumption linkage). If using y-based consumption, note it.
+- For capacity constraints:
+  - storage_cap must be weighted by cold_usage if present: sum(I * cold_usage[p]) <= cold_capacity[l,t]
+- For prod_cap:
+  - sum_l Q[p,l,t] <= production_cap[p,t]  (global per product per period)
+- For pack:
+  - Q[p,l,t] = pack_size * n[p,l,t]
+- For MOQ:
+  - Q >= moq * z and Q <= M * z, and explain how M is derived at runtime (notes).
