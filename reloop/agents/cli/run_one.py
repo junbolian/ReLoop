@@ -56,6 +56,9 @@ def main():
     parser.add_argument(
         "--repair-limit", type=int, default=5, help="Maximum repair iterations."
     )
+    parser.add_argument(
+        "--max-turns", type=int, default=8, help="Hard cap on total agent turns."
+    )
     args = parser.parse_args()
 
     scenario_arg = args.scenario
@@ -95,7 +98,11 @@ def main():
     llm = build_llm_client("mock" if args.mock_llm else "openai", model=args.model)
     persistence = PersistenceManager(Path(args.out))
     orchestrator = AgentOrchestrator(
-        llm_client=llm, prompt_stack=prompt_stack, persistence=persistence, repair_limit=args.repair_limit
+        llm_client=llm,
+        prompt_stack=prompt_stack,
+        persistence=persistence,
+        repair_limit=args.repair_limit,
+        max_turns=args.max_turns,
     )
 
     initial_state = {
