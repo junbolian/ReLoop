@@ -71,11 +71,13 @@ class AgentOrchestrator:
         prompt_stack: PromptStack,
         persistence: PersistenceManager,
         repair_limit: int = 5,
+        max_turns: int = 8,
     ):
         self.llm = llm_client
         self.prompt_stack = prompt_stack
         self.persistence = persistence
         self.repair_limit = repair_limit
+        self.max_turns = max_turns
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -102,6 +104,7 @@ class AgentOrchestrator:
             {
                 "revise_spec": "step2",
                 "codegen": "step5_codegen",
+                "done": END,
             },
         )
         graph.add_edge("step5_codegen", "static_audit")
@@ -112,6 +115,7 @@ class AgentOrchestrator:
             {
                 "retry_codegen": "step5_codegen",
                 "run": "step6_run_and_diagnose",
+                "done": END,
             },
         )
 
@@ -518,17 +522,23 @@ class AgentOrchestrator:
         return state
 
     def _route_after_audit(self, state: AgentState):
+        if state.get("turn_index", 0) >= self.max_turns:
+            return "done"
         if state.get("static_audit_reports") and not state["static_audit_reports"][-1].passed:
             return "retry_codegen"
         return "run"
 
     def _route_after_sanity(self, state: AgentState):
+        if state.get("turn_index", 0) >= self.max_turns:
+            return "done"
         report = state.get("step4_sanity_report")
         if report and not report.overall_pass:
             return "revise_spec"
         return "codegen"
 
     def _route_after_run(self, state: AgentState):
+        if state.get("turn_index", 0) >= self.max_turns:
+            return "done"
         if state.get("repair_count", 0) >= self.repair_limit:
             return "done"
         if state.get("repair_briefs"):
