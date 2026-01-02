@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--mock-llm", action="store_true", help="Use mock LLM.")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of scenarios.")
     parser.add_argument("--repair-limit", type=int, default=5, help="Maximum repair iterations.")
+    parser.add_argument("--max-turns", type=int, default=8, help="Hard cap on agent turns.")
     args = parser.parse_args()
 
     suite_path = Path(args.suite)
@@ -63,6 +64,7 @@ def main():
             prompt_stack=prompt_stack,
             persistence=persistence,
             repair_limit=args.repair_limit,
+            max_turns=args.max_turns,
         )
 
         state = {

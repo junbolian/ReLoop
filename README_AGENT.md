@@ -6,13 +6,14 @@ A clean-slate LangGraph orchestrator drives a strict Step0–Step6 workflow for 
 1) Python ≥ 3.10 and Gurobi with a valid license.
 2) `pip install -e .` (uses `pyproject.toml` + `requirements.txt`).
 3) LLM options:
-   - **Mock**: `--mock-llm` (offline).
-   - **OpenAI-compatible**: set `OPENAI_API_KEY`, `OPENAI_MODEL`, optional `OPENAI_BASE_URL`.
+- **Mock**: `--mock-llm` (offline).
+- **OpenAI-compatible**: set `OPENAI_API_KEY`, `OPENAI_MODEL`, optional `OPENAI_BASE_URL`.
 
 ## Run one scenario
 ```bash
 python -m reloop.agents.cli.run_one --scenario retail_f1_base_v0 --out artifacts
 # or provide a custom base prompt: --base-prompt path/to/prompt.txt
+# optional caps: --repair-limit 5 --max-turns 8
 ```
 
 ## Run a suite
