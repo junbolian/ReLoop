@@ -52,7 +52,8 @@ def _check_solver_params(code: str, failures: List[str]) -> None:
 
 
 def _check_print_contract(code: str, failures: List[str]) -> None:
-    if "status=" not in code:
+    status_pattern = re.compile(r"status\s*[:=]", re.IGNORECASE)
+    if not status_pattern.search(code):
         failures.append("Script must print solver status.")
     if "GRB.OPTIMAL" not in code and "GRB.optimal" not in code:
         failures.append("Script must branch on GRB.OPTIMAL when printing objective.")

@@ -5,12 +5,16 @@ import hashlib
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, TypedDict
+import ast
+import re
 
 from langchain_core.messages import BaseMessage
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 
 from .llm_client import LLMClient
 from .prompt_stack import PromptStack
+from pydantic import ValidationError
+
 from .schemas import (
     AgentStateModel,
     CodeVersion,
@@ -86,6 +90,7 @@ class AgentOrchestrator:
         graph.add_node("static_audit", self._static_audit)
         graph.add_node("step6_run_and_diagnose", self._step6_run_and_diagnose)
 
+        graph.set_entry_point("profile_data")
         graph.add_edge("profile_data", "step0")
         graph.add_edge("step0", "step1")
         graph.add_edge("step1", "step2")
@@ -130,7 +135,9 @@ class AgentOrchestrator:
                 "base_prompt_hash": initial_state["base_prompt_hash"],
             },
         )
-        final_state = self.graph.invoke(initial_state)
+        final_state = self.graph.invoke(
+            initial_state, {"recursion_limit": max(50, self.repair_limit * 10)}
+        )
         return _validated_state(final_state)
 
     def _next_turn_index(self, state: AgentState) -> int:
@@ -186,18 +193,59 @@ class AgentOrchestrator:
         state: AgentState,
         step: str,
         prior_outputs: Dict[str, Any],
+        default_on_fail: Any = None,
     ) -> Any:
-        try:
-            return json.loads(text), None
-        except json.JSONDecodeError:
-            repaired, idx = self._call_llm(
-                state,
-                step,
-                prior_outputs=prior_outputs,
-                repair_mode="json",
-                previous_response=text,
-            )
-            return json.loads(repaired), idx
+        def _json_candidates(raw: str):
+            stripped = raw.strip()
+            if stripped.startswith("```"):
+                # remove fences and possible language tag
+                stripped = re.sub(r"^```[a-zA-Z]*", "", stripped).strip()
+                stripped = stripped.rstrip("`").strip()
+            candidates = [stripped]
+            # balanced brace/bracket scanning
+            for start_char, end_char in (("{", "}"), ("[", "]")):
+                opens = [m.start() for m in re.finditer(re.escape(start_char), stripped)]
+                closes = [m.start() for m in re.finditer(re.escape(end_char), stripped)]
+                if opens and closes and max(closes) > min(opens):
+                    candidates.append(stripped[min(opens) : max(closes) + 1])
+            # remove trailing commas
+            dedup = []
+            for cand in candidates:
+                cleaned = re.sub(r",(\s*[}\]])", r"\1", cand)
+                if cleaned not in dedup:
+                    dedup.append(cleaned)
+            return dedup
+
+        def _coerce_json(raw: str):
+            for candidate in _json_candidates(raw):
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    try:
+                        val = ast.literal_eval(candidate)
+                        return val
+                    except Exception:
+                        continue
+            return None
+
+        parsed = _coerce_json(text)
+        if parsed is not None:
+            return parsed, None
+
+        repaired, idx = self._call_llm(
+            state,
+            step,
+            prior_outputs=prior_outputs,
+            repair_mode="json",
+            previous_response=text,
+        )
+        repaired_parsed = _coerce_json(repaired)
+        if repaired_parsed is None:
+            state["last_error"] = f"json_parse_failed_{step}"
+            if default_on_fail is not None:
+                return default_on_fail, idx
+            raise ValueError(f"Could not parse JSON for {step}")
+        return repaired_parsed, idx
 
     def _step0_contract(self, state: AgentState) -> AgentState:
         content, msg_idx = self._call_llm(state, "step0", prior_outputs=None)
@@ -217,7 +265,19 @@ class AgentOrchestrator:
     def _step1_tags(self, state: AgentState) -> AgentState:
         prior = {"step0_contract": state["step0_contract"].model_dump(mode="json")}
         content, msg_idx = self._call_llm(state, "step1", prior_outputs=prior)
-        payload, repair_idx = self._parse_json_with_repair(content, state, "step1", prior)
+        raw_payload, repair_idx = self._parse_json_with_repair(
+            content, state, "step1", prior, default_on_fail=[]
+        )
+
+        def _normalize(item: Dict[str, Any]) -> Dict[str, Any]:
+            if "extracted" not in item:
+                item["extracted"] = {"sets": [], "params": [], "decisions": [], "rule_hints": []}
+            if "rule_hints" in item and isinstance(item.get("rule_hints"), list):
+                item["extracted"].setdefault("rule_hints", item["rule_hints"])
+                item.pop("rule_hints", None)
+            return item
+
+        payload = [_normalize(dict(obj)) for obj in raw_payload]
         tags = [TaggedSentence.model_validate(item) for item in payload]
         state["step1_tags"] = tags
         idx = repair_idx or msg_idx
@@ -236,8 +296,39 @@ class AgentOrchestrator:
             "step1_tags": [t.model_dump(mode="json") for t in state["step1_tags"]],
         }
         content, msg_idx = self._call_llm(state, "step2", prior_outputs=prior)
-        payload, repair_idx = self._parse_json_with_repair(content, state, "step2", prior)
-        spec = SpecSheet.model_validate(payload)
+        payload, repair_idx = self._parse_json_with_repair(
+            content, state, "step2", prior, default_on_fail={}
+        )
+
+        def _fallback_spec() -> SpecSheet:
+            return SpecSheet(
+                sets=[],
+                decisions=[],
+                objective_terms=[],
+                constraint_families=[],
+                edge_cases=[],
+                open_questions=[],
+            )
+
+        try:
+            spec = SpecSheet.model_validate(payload)
+        except ValidationError:
+            # Try one format-repair round with validation hint
+            repaired_text, repair_idx2 = self._call_llm(
+                state,
+                "step2",
+                prior_outputs=prior,
+                repair_mode="json",
+                previous_response=json.dumps(payload),
+            )
+            payload2, repair_idx3 = self._parse_json_with_repair(
+                repaired_text, state, "step2", prior, default_on_fail={}
+            )
+            try:
+                spec = SpecSheet.model_validate(payload2)
+                repair_idx = repair_idx3 or repair_idx2 or repair_idx
+            except ValidationError:
+                spec = _fallback_spec()
         state["step2_spec_sheet"] = spec
         idx = repair_idx or msg_idx
         self.persistence.persist_turn(
@@ -254,7 +345,9 @@ class AgentOrchestrator:
             "spec_sheet": state["step2_spec_sheet"].model_dump(mode="json"),
         }
         content, msg_idx = self._call_llm(state, "step3", prior_outputs=prior)
-        payload, repair_idx = self._parse_json_with_repair(content, state, "step3", prior)
+        payload, repair_idx = self._parse_json_with_repair(
+            content, state, "step3", prior, default_on_fail=[]
+        )
         templates = [ConstraintTemplate.model_validate(item) for item in payload]
         state["step3_templates"] = templates
         idx = repair_idx or msg_idx

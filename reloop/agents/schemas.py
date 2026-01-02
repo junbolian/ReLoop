@@ -124,7 +124,7 @@ class ConstraintTemplate(BaseModel):
 
 
 class SanityCheckResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
     id: int
     name: str
     pass_: bool = Field(alias="pass")

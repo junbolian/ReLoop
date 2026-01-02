@@ -62,7 +62,7 @@ Thumbs.db
 # ----------------------------
 # Data
 # ----------------------------
-runs/
+artifacts/
 
 # If you DO want to keep a small sample jsonl in repo, you can negate it like:
 # !data/sample.jsonl
