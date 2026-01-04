@@ -21,6 +21,15 @@ Output schema (exact keys):
 }
 
 Rules:
+- Use ONLY what is implied by the narrative + data_profile. Do not invent mechanisms.
 - If the narrative says “unmet demand is lost and penalized”, you MUST include lost sales as a soft violation and reference costs.lost_sales.
 - If shelf life exists in data_profile, you MUST mention expiration/waste as a hard physical mechanism (even if waste is penalized).
-- Do not add items that are not implied by the narrative or data_profile.
+- Hard constraints must include all physical mechanisms implied by the narrative or data_profile
+  (e.g., inventory flow, perishability, capacity limits), not only policy or accounting rules.
+- Soft violations refer only to unmet economic objectives, not to physical feasibility.
+- If a required mechanism appears in neither hard_constraints nor soft_violations, the output is invalid.
+
+Data_profile-driven structural requirements (override when narrative is silent):
+- If data_profile indicates "network.trans_edges" exists and has length 0, hard_constraints MUST include "no transshipment (X absent)".
+- If data_profile indicates "network.sub_edges" exists and has length > 0, hard_constraints MUST include BOTH: "substitution network exists (S active)", AND "substitution consumes supplying inventory (supply-side coupling)".
+- If data_profile indicates "lead_time" exists, hard_constraints MUST include "orders arrive after lead_time (time shift)" even if values may be zero.

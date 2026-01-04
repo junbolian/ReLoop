@@ -1,32 +1,88 @@
 STEP 1 — TAG NATURAL LANGUAGE INTO 5 INFORMATION TYPES
 
 Task:
-Using the scenario narrative text provided earlier, split it into atomic sentences/clauses (as needed) and tag EACH as one of:
+Using the scenario narrative text provided earlier, split it into atomic sentences or clauses
+(as needed for semantic clarity) and tag EACH fragment as exactly one of:
+
 - "SET_OBJECT"
 - "PARAM_FACT"
 - "DECISION"
 - "RULE_CONSTRAINT_SOURCE"
 - "OBJECTIVE_PREFERENCE"
 
+This step is for semantic extraction ONLY.
+Do NOT make modeling decisions, write equations, or resolve ambiguities.
+Your job is to identify what kinds of information are present in the text and what mechanisms they imply.
+
 Output requirements:
-- Output MUST be a single JSON array (no wrapper object), no surrounding text.
-- Each element must have the exact keys below.
+- Output MUST be a single JSON array.
+- No surrounding text.
+- Each array element corresponds to one atomic sentence or clause.
+- Use double quotes for all strings.
+- No trailing commas.
 
-Element schema:
+Element schema (exact keys and structure required):
 {
-  "id": "S1",
-  "text": "verbatim sentence/fragment",
-  "tag": "SET_OBJECT|PARAM_FACT|DECISION|RULE_CONSTRAINT_SOURCE|OBJECTIVE_PREFERENCE",
-  "extracted": {
-    "sets": ["P","L","T","A"] ,
-    "params": ["demand_curve","demand_share","shelf_life","lead_time","cold_capacity","production_cap","labor_cap","moq","pack_size","budget_per_period","waste_limit_pct","sub_edges","trans_edges","costs.inventory","costs.lost_sales","costs.waste","costs.purchasing","costs.fixed_order","costs.transshipment"],
-    "decisions": ["I","y","W","Q","L","d","S","X","z","n"],
-    "rule_hints": ["short hint of what rule this sentence implies"]
-  }
+    "id": "S1",
+    "text": "verbatim sentence or clause from the scenario",
+    "tag": "SET_OBJECT|PARAM_FACT|DECISION|RULE_CONSTRAINT_SOURCE|OBJECTIVE_PREFERENCE",
+    "extracted": {
+        "sets": [],
+        "params": [],
+        "decisions": [],
+        "rule_hints": []
+    }
 }
+Allowed vocabulary for extracted fields (use ONLY these tokens when applicable):
+sets: ["P","L","T","A"]
+params: [
+"demand_curve","demand_share","shelf_life","lead_time",
+"cold_capacity","cold_usage","production_cap","labor_cap","labor_usage","return_rate",
+"moq","pack_size","budget_per_period","waste_limit_pct",
+"sub_edges","trans_edges",
+"costs.inventory","costs.lost_sales","costs.waste",
+"costs.purchasing","costs.fixed_order","costs.transshipment"
+]
+decisions: ["I","y","W","Q","L","d","S","X","z","n"]
 
-Rules:
-- "extracted.sets/params/decisions" must only include items that are actually implicated by the sentence.
-- If the sentence implies substitution, include "S" and "sub_edges" in extracted.
-- If the sentence implies no transshipment, include "trans_edges" with a rule_hint indicating X should be absent or fixed to 0.
-- If unsure, keep extracted lists empty and put the uncertainty in rule_hints like "unclear".
+Tagging guidance:
+
+1) SET_OBJECT
+Use when the text introduces entities, indices, or dimensions
+(e.g., products, locations, time periods, remaining life).
+
+2) PARAM_FACT
+Use when the text states that some quantity exists, varies, or is exogenous
+(e.g., demand varies over time, capacities exist, costs are defined),
+without implying a decision.
+
+3) DECISION
+Use ONLY when the text explicitly describes something the planner chooses or controls
+(e.g., how much to order, allocation across locations, how demand is fulfilled).
+
+4) RULE_CONSTRAINT_SOURCE
+Use when the text implies a rule that restricts feasibility or enforces a mechanism.
+This includes physical laws, flow conservation, capacity limits, timing rules,
+or structural relationships that MUST hold.
+
+IMPORTANT:
+- If a fragment implies perishability/shelf life, rule_hints MUST indicate an inter-period aging/expiration mechanism,
+  not merely “waste cost”.
+- If a fragment implies inventory evolves over time, rule_hints MUST state “inter-period state transition”.
+- If a fragment implies demand must be handled within the same period, rule_hints MUST reflect “no backorder / same-period fulfillment”.
+- If a fragment implies substitution, include "sub_edges" in params and "S" in decisions; rule_hints must mention directionality.
+- If a fragment explicitly implies no transshipment, include "trans_edges" in params and add a rule_hints entry: "transshipment absent or fixed to 0".
+- If a fragment implies “repeated weekly decisions / long horizon / seasonal curve”, add a rule_hints entry: "time_series_alignment_needed (pad-last/clip)".
+
+5) OBJECTIVE_PREFERENCE
+Use when the text states what the planner wants to minimize or prioritize,
+or how costs are aggregated.
+
+Extraction rules:
+- extracted.sets / params / decisions must include ONLY items directly implicated by the given fragment.
+- Do NOT infer missing mechanisms beyond what the text supports.
+- If the implication is unclear, leave extracted lists empty and note the uncertainty in rule_hints (e.g., "unclear whether labor binds").
+- Distinguish physical feasibility vs economic penalties:
+  physical mechanisms belong in RULE_CONSTRAINT_SOURCE,
+  penalties belong in OBJECTIVE_PREFERENCE (or Step0 soft_violations).
+- When applicable, rule_hints should explicitly state whether the implied mechanism is intra-period or inter-period.
