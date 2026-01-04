@@ -6,10 +6,15 @@ Produce a structured model specification (NOT code) using:
 - Step1 tagged sentences
 - data_profile (keys present + indexing scheme, not numeric values)
 
+This step defines the full mathematical structure of the model.
+Do NOT write executable code.
+Do NOT introduce modeling choices beyond what is implied by Step0, Step1, and data_profile.
+
 Output requirements:
-- Output MUST be a single JSON object, no surrounding text.
-- Must match the schema below exactly (keys and nesting).
-- No numeric constants unless they are symbolic placeholders (e.g., "data['periods']").
+- Output MUST be a single JSON object.
+- No surrounding text.
+- Must match the schema below exactly (keys, nesting, and ordering).
+- No numeric constants unless symbolic (e.g., "data['periods']").
 
 Schema:
 {
@@ -19,54 +24,201 @@ Schema:
     {"name": "T", "description": "periods index 0..T-1", "source": "data.periods"},
     {"name": "A", "description": "remaining life index per product if shelf_life active", "source": "data.shelf_life"}
   ],
+
   "decisions": [
-    {"name": "I", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "inventory by remaining life", "active_if": "shelf_life"},
-    {"name": "y", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "sales/consumption by remaining life", "active_if": "shelf_life"},
-    {"name": "W", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "waste/disposal", "active_if": "always"},
-    {"name": "Q", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "orders/production allocated to location", "active_if": "always"},
-    {"name": "L", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "lost sales", "active_if": "lost_sales_allowed"},
+    {"name": "I", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "inventory state by remaining life", "active_if": "shelf_life"},
+    {"name": "y", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "sales/consumption drawn from inventory by remaining life", "active_if": "shelf_life"},
+    {"name": "W", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "waste defined as expired inventory from life bucket a=1", "active_if": "always"},
+    {"name": "Q", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "orders or production allocated to location", "active_if": "always"},
+    {"name": "L", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "lost (unmet) demand", "active_if": "lost_sales_allowed"},
     {"name": "d", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "direct demand served by same product", "active_if": "always"},
-    {"name": "S", "type": "continuous", "domain": ">=0", "indices": ["p_from","p_to","l","t"], "meaning": "substitution flow serving p_to using p_from", "active_if": "sub_edges_nonempty"},
-    {"name": "X", "type": "continuous", "domain": ">=0", "indices": ["l_from","l_to","p","t"], "meaning": "transshipment flow", "active_if": "trans_edges_nonempty"},
-    {"name": "z", "type": "binary", "domain": "{0,1}", "indices": ["p","l","t"], "meaning": "order trigger for fixed cost / MOQ", "active_if": "moq_or_fixed_order"},
-    {"name": "n", "type": "integer", "domain": ">=0", "indices": ["p","l","t"], "meaning": "pack multiple", "active_if": "pack_size"}
+    {"name": "S", "type": "continuous", "domain": ">=0", "indices": ["p_from","p_to","l","t"], "meaning": "substitution flow serving demand of p_to using inventory of p_from", "active_if": "sub_edges_nonempty"},
+    {"name": "X", "type": "continuous", "domain": ">=0", "indices": ["l_from","l_to","p","t"], "meaning": "transshipment flow between locations", "active_if": "trans_edges_nonempty"},
+    {"name": "z", "type": "binary", "domain": "{0,1}", "indices": ["p","l","t"], "meaning": "order trigger activating MOQ or fixed ordering cost", "active_if": "moq_or_fixed_order"},
+    {"name": "n", "type": "integer", "domain": ">=0", "indices": ["p","l","t"], "meaning": "integer pack multiple", "active_if": "pack_size"}
   ],
+
   "objective_terms": [
-    {"name": "inventory_holding", "expression": "sum(inv_cost[p] * eligible_inventory[p,l,t,a])", "source": "costs.inventory", "active_if": "costs.inventory_present"},
-    {"name": "lost_sales_penalty", "expression": "sum(lost_cost[p] * L[p,l,t])", "source": "costs.lost_sales", "active_if": "costs.lost_sales_present"},
-    {"name": "waste_cost", "expression": "sum(waste_cost[p] * W[p,l,t])", "source": "costs.waste", "active_if": "costs.waste_present"},
-    {"name": "purchasing_cost", "expression": "sum(purchasing[p] * Q[p,l,t])", "source": "costs.purchasing", "active_if": "costs.purchasing_present"},
-    {"name": "fixed_order_cost", "expression": "sum(fixed_order * z[p,l,t])", "source": "costs.fixed_order", "active_if": "fixed_order_present"},
-    {"name": "transshipment_cost", "expression": "sum(trans_cost * X[l_from,l_to,p,t])", "source": "costs.transshipment", "active_if": "trans_edges_nonempty_and_cost_present"}
+    {
+      "name": "inventory_holding",
+      "expression": "sum(inv_cost[p] * (I[p,l,t,a] - y[p,l,t,a]) for a in A if a>=2)",
+      "source": "costs.inventory",
+      "active_if": "costs.inventory_present"
+    },
+    {
+      "name": "lost_sales_penalty",
+      "expression": "sum(lost_cost[p] * L[p,l,t])",
+      "source": "costs.lost_sales",
+      "active_if": "costs.lost_sales_present"
+    },
+    {
+      "name": "waste_cost",
+      "expression": "sum(waste_cost[p] * W[p,l,t])",
+      "source": "costs.waste",
+      "active_if": "costs.waste_present"
+    },
+    {
+      "name": "purchasing_cost",
+      "expression": "sum(purchasing[p] * Q[p,l,t])",
+      "source": "costs.purchasing",
+      "active_if": "costs.purchasing_present"
+    },
+    {
+      "name": "fixed_order_cost",
+      "expression": "sum(fixed_order * z[p,l,t])",
+      "source": "costs.fixed_order",
+      "active_if": "fixed_order_present"
+    },
+    {
+      "name": "transshipment_cost",
+      "expression": "sum(trans_cost * X[l_from,l_to,p,t])",
+      "source": "costs.transshipment",
+      "active_if": "trans_edges_nonempty_and_cost_present"
+    }
   ],
+
   "constraint_families": [
-    {"prefix": "demand_route", "meaning": "demand is split into direct served, substitution served, and lost sales", "indices": ["p","l","t"], "sense": "=", "active_if": "demand_present"},
-    {"prefix": "availability", "meaning": "sales/substitution cannot exceed available inventory (by life if active)", "indices": ["p","l","t","a?"], "sense": "<=", "active_if": "always"},
-    {"prefix": "aging", "meaning": "strict aging equality for inventory by remaining life", "indices": ["p","l","t","a"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "expire_clear", "meaning": "items with remaining life 1 at end of period are removed (waste)", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "fresh_inflow", "meaning": "new inflow arrives into freshest bucket (a = shelf_life)", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "storage_cap", "meaning": "weighted cold capacity across products", "indices": ["l","t"], "sense": "<=", "active_if": "cold_capacity_present"},
-    {"prefix": "prod_cap", "meaning": "global production capacity per product per period across all locations", "indices": ["p","t"], "sense": "<=", "active_if": "production_cap_present"},
-    {"prefix": "labor_cap", "meaning": "labor usage across products limited by labor capacity", "indices": ["l","t"], "sense": "<=", "active_if": "labor_cap_present"},
-    {"prefix": "leadtime", "meaning": "orders placed arrive after lead_time", "indices": ["p","l","t"], "sense": "=", "active_if": "lead_time_positive"},
-    {"prefix": "moq_lb", "meaning": "if order triggered then quantity >= MOQ", "indices": ["p","l","t"], "sense": ">=", "active_if": "moq_present"},
-    {"prefix": "moq_ub", "meaning": "if not triggered then quantity = 0 (or <= M z)", "indices": ["p","l","t"], "sense": "<=", "active_if": "moq_present_or_fixed_order"},
-    {"prefix": "pack", "meaning": "order quantities are integer multiples of pack size", "indices": ["p","l","t"], "sense": "=", "active_if": "pack_size_present"},
-    {"prefix": "budget", "meaning": "per-period purchasing + fixed costs within budget", "indices": ["t"], "sense": "<=", "active_if": "budget_present"},
-    {"prefix": "wastecap", "meaning": "waste limited by waste_limit_pct (define base explicitly)", "indices": ["p?","l?","t?"], "sense": "<=", "active_if": "waste_limit_pct_present"}
+    {
+      "prefix": "demand_route",
+      "meaning": "demand is decomposed into direct service, substitution inflow, and lost sales",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "demand_present"
+    },
+    {
+      "prefix": "availability",
+      "meaning": "sales and substitution outflows cannot exceed available inventory (by remaining life if active)",
+      "indices": ["p","l","t","a?"],
+      "sense": "<=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "aging",
+      "meaning": "inter-period inventory aging: inventory with remaining life a+1 becomes life a after sales",
+      "indices": ["p","l","t","a"],
+      "sense": "=",
+      "active_if": "shelf_life"
+    },
+    {
+      "prefix": "expire_clear",
+      "meaning": "expired inventory is defined as leftover in life bucket a=1: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1]",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "shelf_life"
+    },
+    {
+      "prefix": "fresh_inflow",
+      "meaning": "freshest life bucket equals arrivals after lead time plus net transshipment and returns if active",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "shelf_life"
+    },
+    {
+      "prefix": "storage_cap",
+      "meaning": "weighted cold storage capacity across products using cold_usage coefficients",
+      "indices": ["l","t"],
+      "sense": "<=",
+      "active_if": "cold_capacity_present"
+    },
+    {
+      "prefix": "prod_cap",
+      "meaning": "global production capacity per product per period across all locations",
+      "indices": ["p","t"],
+      "sense": "<=",
+      "active_if": "production_cap_present"
+    },
+    {
+      "prefix": "labor_cap",
+      "meaning": "labor usage aggregated across products limited by labor capacity",
+      "indices": ["l","t"],
+      "sense": "<=",
+      "active_if": "labor_cap_present"
+    },
+    {
+      "prefix": "leadtime",
+      "meaning": "orders placed at time t arrive after lead_time periods",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "lead_time_positive"
+    },
+    {
+      "prefix": "returns",
+      "meaning": "returned quantity equals return_rate times previous-period sales and contributes to inflow",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "return_rate_present"
+    },
+    {
+      "prefix": "moq_lb",
+      "meaning": "if order is triggered then quantity must be at least MOQ",
+      "indices": ["p","l","t"],
+      "sense": ">=",
+      "active_if": "moq_present"
+    },
+    {
+      "prefix": "moq_ub",
+      "meaning": "if order is not triggered then quantity must be zero (or bounded by big-M)",
+      "indices": ["p","l","t"],
+      "sense": "<=",
+      "active_if": "moq_present_or_fixed_order"
+    },
+    {
+      "prefix": "pack",
+      "meaning": "order quantities must be integer multiples of pack size",
+      "indices": ["p","l","t"],
+      "sense": "=",
+      "active_if": "pack_size_present"
+    },
+    {
+      "prefix": "budget",
+      "meaning": "per-period purchasing and fixed ordering costs must not exceed budget",
+      "indices": ["t"],
+      "sense": "<=",
+      "active_if": "budget_present"
+    },
+    {
+      "prefix": "wastecap",
+      "meaning": "total waste is bounded by waste_limit_pct times the chosen base quantity",
+      "indices": ["p?","l?","t?"],
+      "sense": "<=",
+      "active_if": "waste_limit_pct_present"
+    }
   ],
+
   "edge_cases": [
-    {"case": "t0_init", "handling": "if initial inventory not provided, assume 0; else map into appropriate life bucket"},
-    {"case": "lead_time_boundary", "handling": "for t < lead_time, arrivals are 0"},
-    {"case": "shelf_life_boundary", "handling": "for a out of range, do not create variables; handle a=1 expiration explicitly"},
-    {"case": "empty_edges", "handling": "if sub_edges empty then do not create S; if trans_edges empty then do not create X"}
+    {
+      "case": "t0_init",
+      "handling": "if initial inventory exists, map it into appropriate remaining-life buckets; otherwise initialize all inventory to zero"
+    },
+    {
+      "case": "lead_time_boundary",
+      "handling": "for periods earlier than lead_time, arrival quantities are zero"
+    },
+    {
+      "case": "shelf_life_boundary",
+      "handling": "only create variables for valid life indices; handle a=1 expiration explicitly"
+    },
+    {
+      "case": "empty_edges",
+      "handling": "if sub_edges empty do not create S; if trans_edges empty do not create X"
+    }
   ],
+
   "open_questions": [
-    {"question": "Define the denominator/base for waste_limit_pct (demand vs sales vs inflow). If not specified, choose demand for same p,l,t as base and justify."}
+    {
+      "question": "Define the base quantity used for waste_limit_pct (e.g., demand, sales, or inflow). If unspecified, default to demand and record justification."
+    }
   ]
 }
 
+
+
+
+
+
 Rules:
-- Must respect naming contract (variable dictionaries names and constraint name prefixes).
-- Do not introduce new variables beyond the naming contract.
-- If a module is not active per data_profile, keep it but set active_if accordingly; it will be skipped later by the compiler.
+- Must respect the naming contract for variables and constraint prefixes.
+- Do not introduce new variables beyond those listed.
+- Do not relax physical feasibility using penalties.
+- If a module is inactive per data_profile, keep it in the spec with active_if marking; it will be skipped later.
+- If contract allows lost sales, L must exist even if penalty is zero; missing cost implies zero, not absence of mechanism.
