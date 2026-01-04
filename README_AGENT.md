@@ -9,9 +9,16 @@ A clean-slate LangGraph orchestrator drives a strict Step0–Step6 workflow for 
 - **Mock**: `--mock-llm` (offline).
 - **OpenAI-compatible**: set `OPENAI_API_KEY`, `OPENAI_MODEL`, optional `OPENAI_BASE_URL`.
 
+# Set Environmental Variable
+```bash
+export OPENAI_API_KEY="sk-785..."
+export OPENAI_MODEL="qwen-plus"  # or "qwen3-max", "qwen3-max-preview"
+export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1" 
+```
+
 ## Run one scenario
 ```bash
-python -m reloop.agents.cli.run_one --scenario retail_f1_base_v0 --out artifacts
+python -m reloop.agents.cli.run_one --scenario retail_f1_52_weeks_v0 --out artifacts
 # or provide a custom base prompt: --base-prompt path/to/prompt.txt
 # optional caps: --repair-limit 5 --max-turns 8
 ```
