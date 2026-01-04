@@ -1,31 +1,106 @@
 STEP 5 — GENERATE THE FINAL GUROBIPY SCRIPT (SINGLE FILE)
 
 Task:
-Using:
-- the immutable BASE PROMPT rules,
-- the spec_sheet,
-- the constraint_templates,
-generate ONE complete Python script as plain text.
+Generate ONE complete Python script that builds and solves the MILP using:
+- global guardrails (system),
+- Step0 contract JSON,
+- spec_sheet JSON (Step2),
+- constraint_templates JSON (Step3),
+- data_profile (types/indexing only; may differ per scenario).
 
 Output requirements (critical):
-- Output ONLY the Python source code. No Markdown. No code fences. No comments.
+- Output ONLY Python source code. No surrounding text.
+- No Markdown. No code fences. No comments.
 - Must import: import gurobipy as gp; from gurobipy import GRB
-- Must assume `data` is already a dict in memory; do NOT modify it.
-- No file I/O.
-- Must set: OutputFlag=0, Threads=1, Seed=0 (unless overridden by harness).
-- Must print solver status always.
-- Only print “final objective” if status == GRB.OPTIMAL.
-- Otherwise also print ObjVal, ObjBound, MIPGap when available.
-- Must follow naming contract: variable dictionaries named exactly I,y,W,Q,L,d,S,X,z,n when active.
-- Constraint names must use the specified prefixes with indices.
+- Assume `data` is already a Python dict in memory. Do NOT modify it.
+- No file I/O and no CLI parsing (no open/json.load/argparse/pathlib/os).
+- Set Gurobi params exactly: OutputFlag=0, Threads=1, Seed=0. Do NOT set TimeLimit/MIPGap unless provided by harness (none here).
+- Print solver status code always.
+- Only print “final_objective” if status == GRB.OPTIMAL.
+- If status != GRB.OPTIMAL, also print (when available) ObjVal, ObjBound, MIPGap; do not claim optimality.
 
-Implementation rules:
-- Do not hard-code numeric constants from any JSON preview. Always read from `data`.
-- For any optional module not present in data, treat its costs as 0 or skip constraints consistently.
-- Big-M values MUST be derived at runtime from available bounds in `data` (e.g., production_cap, budget, demand upper bounds). If no safe bound can be derived, pick a conservative bound using sums of maxima computed from data arrays/dicts at runtime (never a magic constant).
-- If shelf_life active:
-  - Inventory and sales must be indexed by remaining life `a`.
-  - Strict aging equality required.
-  - Waste/expiration handling must clear expiring bucket.
-- If cold_usage present, storage capacity must be weighted.
-- If sub_edges nonempty, implement substitution routing and ensure it consumes the supplying product’s inventory.
+Naming contract (must match exactly when active):
+- Variable dicts: I, y, W, Q, L, d, S, X, z, n.
+- Constraint name prefixes must be exactly those in the spec_sheet/guardrails.
+- Use name=f"{prefix}_{...indices...}" (indices serialized in a stable order).
+
+Core behavioral equivalence target:
+- The produced MILP must be numerically equivalent to the reference “universal retail” MILP behavior:
+  (a) pad-last time-series access,
+  (b) activation-by-nontriviality (keys existing is not enough),
+  (c) strict shelf-life aging equalities when shelf_life active,
+  (d) substitution requires BOTH demand-side routing and supply-side consumption coupling,
+  (e) transshipment exists ONLY if trans_edges nonempty.
+
+Data access rules (must not hard-code numeric constants from previews):
+- All sets and parameters must be read from `data` at runtime.
+- If `data` has explicit demand structure, use it; otherwise construct demand from demand_curve and demand_share.
+- When a parameter/cost is missing, treat it as inactive or zero consistently (no invention).
+
+Time-series alignment rule (REQUIRED):
+- Many parameters are lists indexed by time but list length may differ from T=data["periods"].
+- Implement a single helper to fetch time-varying values with “pad-last / clip” semantics:
+  - if len(list)==0 -> treat as 0,
+  - if t index exceeds length -> use last element,
+  - if list longer than T -> ignore tail via normal indexing.
+- Apply this helper consistently to all time-series lists: demand_curve[p], production_cap[p], labor_cap[l], and any other list-valued series discovered at runtime.
+
+Module activation rules (REQUIRED, do not infer from narrative alone):
+- shelf_life active iff "shelf_life" in data and for some product p: int(data["shelf_life"][p]) >= 1.
+- lead_time active iff "lead_time" in data and exists p with int(lead_time[p]) > 0.
+- substitution active iff network.sub_edges exists and is nonempty.
+- transshipment active iff network.trans_edges exists and is nonempty.
+- budget constraint active iff constraints.budget_per_period is not None.
+- waste cap active iff constraints.waste_limit_pct is not None.
+- pack-size integer variable n active iff constraints.pack_size is present and > 1.
+- order-trigger binary z active iff (constraints.moq > 0) OR (costs.fixed_order != 0).
+
+Big-M rule (no magic constants):
+- If any Big-M is needed (e.g., MOQ trigger), it MUST be derived at runtime from safe upper bounds computed from `data`:
+  - Prefer per-product production_cap maxima (pad-last) and/or per-product total-demand upper bounds derived from demand_curve maxima * max(demand_share).
+  - If budgets exist, you may derive bounds from budget and min purchasing cost when safe.
+  - Never use literal constants like 1e6.
+
+Model content requirements (match spec_sheet + templates):
+- Demand and lost sales:
+  - Must allow unmet demand only via L[p,l,t] when contract indicates “lost and penalized”.
+  - Demand conservation must close each (p,l,t) using d, S (if active), and L.
+- Shelf life (if active):
+  - I[p,l,t,a], y[p,l,t,a] indexed by remaining life a=1..SL[p] (per product).
+  - availability: y <= I for all indices.
+  - expire_clear: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1] (clears expiring bucket).
+  - strict aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1] for t<T and a<SL.
+  - fresh inflow: I[p,l,t,SL] equals arrivals (and other inflows if active) for that period.
+- Production/orders:
+  - Q[p,l,t] are the per-location allocations of production/orders.
+  - Global per-product capacity per period: sum_l Q[p,l,t] <= production_cap[p,t] (pad-last).
+  - Lead time (if active): arrivals at time t come from Q at time t - lead_time[p]; else arrivals equal current-period Q.
+- Storage capacity (if cold_capacity present):
+  - If cold_usage present, storage is weighted: sum_p sum_a I[p,l,t,a]*cold_usage[p] <= cold_capacity[l] (or [l,t] if time-varying).
+- Labor capacity (if labor_cap present):
+  - labor_needed = sum_p labor_usage[p] * sum_a y[p,l,t,a] <= labor_cap[l,t] (pad-last).
+- Substitution (if active):
+  - Create S[p_from,p_to,l,t] for each edge.
+  - Demand-side routing for each product p:
+    demand[p,l,t] = d[p,l,t] + sum_{pf->p} S[pf,p,l,t] + L[p,l,t].
+  - Supply-side coupling for each product p:
+    sum_a y[p,l,t,a] = d[p,l,t] + sum_{p->pt} S[p,pt,l,t].
+- Transshipment (if active):
+  - Create X and include flow balance impacts only when trans_edges nonempty; otherwise do not create X and do not reference it.
+- MOQ/pack/fixed order (if active):
+  - pack: Q = pack_size * n (integer n).
+  - trigger: Q >= moq*z and Q <= M*z (M runtime-derived).
+  - fixed order cost applies to z when present.
+
+Objective (use only cost keys present):
+- Sum of active cost terms over all indices:
+  - purchasing: costs.purchasing[p] * Q[p,l,t]
+  - fixed_order: costs.fixed_order * z[p,l,t]
+  - holding: costs.inventory[p] * sum_{a>=2}(I - y) (post-sales, non-expiring next period)
+  - waste: costs.waste[p] * W[p,l,t]
+  - lost_sales: costs.lost_sales[p] * L[p,l,t]
+  - transshipment: costs.transshipment * X[...] only if transshipment active
+
+Final output:
+- One runnable script that constructs the model, optimizes, and prints required status/objective fields.
+

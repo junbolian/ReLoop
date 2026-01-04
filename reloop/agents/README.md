@@ -8,12 +8,11 @@ This directory contains a clean LangGraph-based orchestrator that runs a strict 
 - State fields (validated by Pydantic v2): run_id, scenario_id, base_prompt_hash, data_profile, step0_contract, step1_tags, step2_spec_sheet, step3_templates, step4_sanity_report, code_versions, static_audit_reports, solve_reports, iis_reports, repair_briefs, repair_count, last_error, conversation_log, base_prompt, scenario_text, data.
 
 ## Prompt stacking (immutable base)
-- The base prompt comes from `scenarios/prompts/<scenario>.txt` (or `.user.txt`). It is never modified and its SHA-256 hash is stored.
+- The base prompt comes from `scenarios/prompts/<scenario>.txt` (or `.user.txt`). It is never modified, its SHA-256 hash is stored, and its text is prefixed to the step prompt content (starting with `01_step0_contract.txt`).
 - Every LLM call uses messages in this exact order:
   1) `reloop/agents/step_prompts/00_global_guardrails.txt`
-  2) BASE PROMPT (immutable)
-  3) step prompt for the current step (01...09 as mapped in `prompt_stack.py`)
-  4) runtime context (scenario narrative, data_profile summary, previous step outputs)
+  2) step prompt for the current step (01...09 as mapped in `prompt_stack.py`), with the base prompt text prefixed
+  3) runtime context (scenario narrative, data_profile summary, previous step outputs)
 - Format repair: if JSON parsing fails in Steps0–4/6, re-call with `07_format_repair_json.txt`; if code formatting fails in Step5, re-call with `08_format_repair_code.txt`.
 - All messages and raw responses are logged per turn in `artifacts/<run_id>/turns/<k>/messages.json`.
 

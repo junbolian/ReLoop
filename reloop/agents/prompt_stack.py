@@ -46,7 +46,11 @@ class PromptStack:
         if not filename:
             raise ValueError(f"No step prompt configured for {step}")
         path = self.step_prompts_dir / filename
-        return path.read_text(encoding="utf-8")
+        prompt_text = path.read_text(encoding="utf-8")
+        # Treat the base prompt as part of the step prompt payload (prefix before the step file).
+        if self.base_prompt:
+            return f"{self.base_prompt.rstrip()}\n\n{prompt_text}"
+        return prompt_text
 
     def assemble_messages(
         self,
@@ -62,7 +66,6 @@ class PromptStack:
 
         messages: List[HumanMessage | SystemMessage] = [
             SystemMessage(content=self.guardrails),
-            SystemMessage(content=self.base_prompt),
             SystemMessage(content=self._step_prompt(step)),
         ]
 
