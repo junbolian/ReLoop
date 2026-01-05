@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_ship_from_store
+Scenario ID: retail_f8_ship_from_store_v4
+
+Business narrative:
+Stores fulfill both walk-in traffic and online orders, effectively acting as small fulfillment centers that ship from store. Storage capacity and labor capacity at stores are scaled up, but labor usage per unit is higher when stores serve both channels. Demand from walk-in and online customers is aggregated into a single local demand stream per product and location, and unmet demand is lost and penalized.
+
+Structure cues:
+- The inventory structure is single-echelon with local demand at each location, storage capacity, and lost sales.
+- The JSON increases storage and labor capacities at all locations while also increasing per-unit labor usage. Both storage and labor constraints must be enforced using these parameters.
+- Stores conceptually serve two demand streams, but the model treats them as a single aggregated demand per product and location. Higher labor usage reflects the additional work from online fulfillment.
+- Inventory remains non-negative and is updated from previous stock and production, minus sales and waste.
+- There is no transshipment; lead times are zero, and substitution behavior remains as encoded.
+- The objective is to minimize total cost while balancing higher labor intensity against increased capacity.

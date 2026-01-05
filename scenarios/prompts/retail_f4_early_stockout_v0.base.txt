@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_early_stockout
+Scenario ID: retail_f4_early_stockout_v0
+
+Business narrative:
+The retailer experiences an upstream supply failure at launch. For several initial periods, no production is possible for any product, but customer demand already exists at the locations. The retailer must decide how much inventory to build before the disruption and how to ration demand while supply is temporarily unavailable. Unserved demand in the disruption window is lost and penalized; customers are not backordered.
+
+Structure cues:
+- The inventory, storage, and lost sales framework matches the base scenario: single-echelon, local inventories, and no transshipment.
+- In the JSON, production capacity for all products is set to zero in early periods. The model must respect this by not assigning any new production in those periods.
+- Inventory remains non-negative and changes from period to period based on previous stock, any allowed production (zero during the disruption), sales, and waste.
+- Storage capacity, substitution behavior, and zero lead times remain unchanged from the baseline.
+- Labor capacity is generous and does not bind.
+- The objective is to minimize total cost while capturing the trade-off between carrying inventory into the supply failure (and paying holding or waste costs) and accepting lost sales during the disruption.

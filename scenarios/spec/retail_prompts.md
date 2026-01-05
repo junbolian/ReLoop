@@ -1,300 +1,298 @@
-# RetailOpt-190 – LLM Prompt Templates
+# RetailOpt-190: Prompt System Documentation
 
-> File: `reloop/scenarios/retailopt_190/spec/retail_prompts.md`
-> Goal: Document how each JSON instance in **RetailOpt-190** is converted into a text-based prompt for LLM-driven optimization agents, consistent with the current code in `reloop/tools` and the JSON schema used by `universal_retail_solver.py`.
+> File: `reloop/scenarios/spec/retail_prompts.md`
 
 ---
 
-## 1. System Prompt Template
+## 1. Prompt Architecture
 
-All models evaluated on this benchmark are expected to receive the same **system prompt**.
-It matches the `SYSTEM_PROMPT` string used by the prompt-generation script in `reloop/tools/`.
+RetailOpt-190 uses **two prompt formats** for different evaluation modes:
 
-```text
-You are an optimization modeling assistant specialized in retail supply chains.
+### Two Prompt Files Per Scenario
 
-Your task:
-- Read a natural-language scenario description and a JSON data blob.
-- Infer the correct mathematical optimization model (MILP) that matches the business logic.
-- Implement that model as Python code using the Gurobi solver (gurobipy).
-- Do NOT change the JSON data. Treat it as given inputs.
+| File | Content | Used By |
+|------|---------|---------|
+| `{scenario_id}.base.txt` | Scenario description only | ReLoop Agent (guardrails injected by step_prompts) |
+| `{scenario_id}.scenario.txt` | Scenario + guardrails + instructions | Zero-shot baseline (single LLM call) |
 
-Requirements:
-- Define all sets and parameters using the JSON fields.
-- Define decision variables with clear, concise names.
-- Add constraints that match the scenario description and the implied structure.
-- Set an objective that minimizes total cost, including holding cost, lost-sales penalties,
-  waste, ordering cost, and other costs implied by the JSON.
-- At the end of the script, build the model, call the solver, and print the objective value
-  and basic summaries of key decisions.
+### Generation
 
-Return:
-- A single Python script as plain text (no Markdown formatting, no code fences).
+```bash
+python -m reloop.tools.generate_prompts
+# Output: scenarios/prompts/{scenario_id}.base.txt
+#         scenarios/prompts/{scenario_id}.scenario.txt
 ```
 
-### 1.1 Execution context for the system prompt
-
-In the benchmark pipeline, the phrase “JSON data blob” refers to the parsed contents of the scenario file that are exposed to the agent as a Python dictionary named `data`. The raw JSON text is **not** embedded in the prompt itself. Instead, for each scenario the evaluation harness:
-
-1. Reads the corresponding JSON file from disk.
-2. Parses it into a Python dictionary.
-3. Binds that dictionary to a variable called `data`.
-4. Executes the Python script returned by the model in an environment where `data` is already defined.
-
-Agents must therefore **read all parameters from `data` only**, without performing any file I/O (no `open`, `json.load`, etc.) and without modifying `data` in place.
-
-The benchmark harness always sends this system prompt, followed by an instance-specific **user prompt** defined below.
-
 ---
 
-## 2. User Prompt Template (Per JSON Instance)
+## 2. Evaluation Modes
 
-For each JSON instance in `scenarios/retailopt_190/data/`, the prompt builder script combines:
+### Mode 1: Zero-shot Baseline
 
-* The archetype-level description from `archetypes.yaml` / `retail_spec.md`, and
-* The file name / scenario ID of the specific JSON instance.
+**Input:** `{scenario_id}.scenario.txt` (complete prompt)
 
-The JSON blob itself is **not** pasted into the prompt; instead, the model is told that a Python variable called `data` already contains the parsed JSON, as described in Section 1.1.
-
-The generic **user prompt template** is:
-
-```text
-[SCENARIO]
-Family: {family_id} ({family_name})
-Archetype: {archetype_id}
-Scenario ID: {scenario_id}
-
-{description}
-
-Operational context:
-- The JSON contains the number of time periods, the list of products, and the list of locations
-  directly as top-level fields (for example: "periods", "products", "locations").
-- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
-  are stored in the "costs" section of the JSON.
-- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
-  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
-  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
-  "lead_time", "constraints", and "network".
-- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
-  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
-  "constraints" and "costs" sections and should be applied uniformly across products and locations
-  unless the scenario description explicitly specifies otherwise.
-- Substitution and transshipment structures are encoded in the "network" section, for example
-  as substitution edges or transshipment edges between locations.
-- The model should respect all of these fields exactly as given and interpret them in a way
-  consistent with the scenario description.
-
-JSON data (do not modify):
-The evaluation harness loads the JSON for this scenario into a Python variable
-called `data`. Your code should read all sets and parameters from `data` using
-these fields and must not change any numeric values or perform any file I/O (for example, do not call open or json.load).
-
-[INSTRUCTION]
-Using ONLY the information above, write a complete Python script that:
-
-1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
-2) Assumes the JSON has already been loaded into a Python variable called `data`,
-3) Builds and solves a mixed-integer linear program that reflects the business
-   description and the structure implied by the JSON fields (including capacities,
-   shelf life, lead times, substitution edges, transshipment edges, and other flags),
-4) Prints the solver status and the optimal objective value.
-
-Do not invent extra data. Do not change any numbers from the JSON.
-Return ONLY the Python source code as plain text, with no comments and no Markdown.
+```
+┌─────────────────────────────────────────┐
+│ [SCENARIO]                              │
+│ Family, archetype, business narrative   │
+│                                         │
+│ [MODELING GUIDELINES]                   │
+│ Guardrails: data format, substitution,  │
+│ shelf-life, boundary conditions         │
+│                                         │
+│ [DATA ACCESS]                           │
+│ Key fields documentation                │
+│                                         │
+│ [INSTRUCTION]                           │
+│ Write GurobiPy script...                │
+└─────────────────────────────────────────┘
+         ↓
+      [LLM] (single call)
+         ↓
+   Python script
+         ↓
+  [Execute + Probes]
+         ↓
+      Results
 ```
 
-This text is exactly the `USER_TEMPLATE` implemented in the prompt-generation script, with `{family_id}`, `{family_name}`, `{archetype_id}`, `{scenario_id}`, and `{description}` filled from `archetypes.yaml`.
+**For:** GPT-4, Claude, DeepSeek, Qwen (all baselines)
 
-Agents should treat `data` as a read-only source of inputs conforming to the JSON schema described in `retail_spec.md` and `universal_retail_solver.py`.
+### Mode 2: ReLoop Agent (Multi-step)
 
----
+**Input:** `{scenario_id}.base.txt` (scenario only)
 
-## 3. Example Prompt File Layout
-
-Each generated prompt file under:
-
-```text
-reloop/scenarios/retailopt_190/prompts/
+```
+┌─────────────────────────────────────────┐
+│ [SCENARIO]                              │
+│ Family, archetype, business narrative   │
+│ (NO guardrails - injected separately)   │
+└─────────────────────────────────────────┘
+         ↓
+   step1: contract extraction
+         ↓
+   step2: spec sheet
+         ↓
+   step3: constraint templates
+         ↓
+   step4: codegen (guardrails injected here)
+         ↓
+  [Probes] → repair if failed
+         ↓
+      Results
 ```
 
-has the following outer structure:
+**For:** Qwen-Max primary experiments
 
-```text
-### SYSTEM PROMPT ###
-<SYSTEM_PROMPT_TEXT>
+---
 
-### USER PROMPT ###
-<USER_PROMPT_TEXT_FOR_THIS_INSTANCE>
+## 3. Guardrails Content
+
+The guardrails are **critical rules** that prevent common errors:
+
+### 3.1 Substitution Semantics (Most Important)
+
+```
+Edge [p_from, p_to] = "upward substitution"
+Meaning: p_to can serve p_from's demand
+
+Example: ["SKU_Basic", "SKU_Premium"]
+→ Premium serves Basic's demand (NOT Basic serves Premium)
+
+Build edge mappings BEFORE constraints:
+  for p_from, p_to in sub_edges:
+      outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT
+      incoming_edges[p_to].append(p_from)  # p_to receives requests IN
 ```
 
-This is purely a file layout convention. The actual API call to the LLM uses:
+### 3.2 Boundary Conditions
 
-* `SYSTEM_PROMPT_TEXT` as the system message, and
-* `USER_PROMPT_TEXT_FOR_THIS_INSTANCE` as the user message.
+```
+[INITIALIZATION at t=1]
+  I[p,l,1,a] = 0  for a < shelf_life[p]
+  I[p,l,1,shelf_life] = Q[p,l,1] if lead_time=0, else 0
 
-The corresponding JSON is **never** inlined inside these `.txt` files. For each scenario, the evaluation harness separately loads the matching JSON file into the Python variable `data` before executing the code returned by the model.
+[AGING BOUNDARY at t=T]
+  Do NOT add aging constraints for t=T (would reference T+1)
 
----
-
-## 4. Example User Prompt (Instance: `retail_f3_storage_bottleneck_v0`)
-
-Below is a concrete example of the **user** portion of the prompt for one RetailOpt-190 instance
-(`retail_f3_storage_bottleneck_v0`). It follows the generic template above and assumes:
-
-* JSON file: `scenarios/retailopt_190/data/retail_f3_storage_bottleneck_v0.json`
-* The JSON has already been parsed into a Python variable named `data`.
-
-```text
-[SCENARIO]
-Family: F3 (Shared Resources and Capacity)
-Archetype: retail_f3_storage_bottleneck
-Scenario ID: retail_f3_storage_bottleneck_v0
-
-Business narrative:
-All locations share a tight storage capacity in each period. The storage space
-represents a generic mix of dry, ambient, or temperature-controlled storage.
-At each (location, period), inventory for all SKUs together must fit into a single
-shared capacity. Higher-volume items consume more storage than smaller items.
-Demand is seasonal but feasible if the model correctly couples inventory across
-products via a single storage-capacity constraint at each (location, period).
-
-Structure cues:
-- Use the same single-echelon inventory and lost-sales logic as in the core
-  operations family: multiple products, multiple locations, and exogenous
-  seasonal demand per product.
-- At every location and period, a single shared storage-capacity constraint
-  limits the volume-weighted sum of on-hand inventory across all products using
-  product-specific storage usage ("cold_usage") and the location capacity
-  ("cold_capacity") from the JSON.
-- There is no transshipment and lead times are zero in this archetype.
-- Substitution behavior remains as defined by the "sub_edges" field in the JSON
-  (which may be empty or include a small number of arcs).
-- Labor capacity and production capacity are as in the base scenario, but must
-  still be respected wherever specified in the JSON.
-
-Operational context:
-- The JSON provides top-level keys "periods", "products", and "locations".
-- Demand for each product is given as a time series in "demand_curve" and is
-  allocated across locations via "demand_share".
-- Storage capacity per location is given in "cold_capacity", and per-unit
-  storage usage per product is given in "cold_usage".
-- Costs for inventory, waste, and lost sales are provided in the "costs" object.
-
-JSON data (do not modify):
-The evaluation harness loads the JSON for this scenario into a Python variable
-called `data`. Your code should read all sets and parameters from `data` using
-these fields and must not change any numeric values or perform any file I/O.
-
-[INSTRUCTION]
-Using ONLY the information above, write a complete Python script that:
-
-1) Imports gurobipy as gp and from gurobipy import GRB,
-2) Assumes the JSON has already been loaded into a Python variable called `data`,
-3) Builds a mixed-integer linear program with at least the following elements:
-
-   - Decision variables for:
-     * Inventory by product, location, period, and (if needed) vintage or shelf-life age,
-     * Orders or inbound quantities by product, location, and period (respecting production caps),
-     * Lost sales by product, location, and period,
-     * Any additional variables needed to represent the shared storage constraint.
-
-   - Inventory balance constraints that track how inventory evolves over time.
-   - A single shared storage-capacity constraint at each (location, period) that
-     couples all SKUs using their per-unit storage usage and the "cold_capacity"
-     values from the JSON.
-   - No transshipment between locations and no positive lead times; inbound flow
-     becomes available immediately unless the JSON specifies otherwise.
-
-4) Sets an objective that minimizes total cost, including:
-   - Inventory holding cost,
-   - Waste cost (if applicable),
-   - Lost-sales penalties.
-
-5) Builds the model, calls the solver, and prints:
-   - The solver status,
-   - The optimal objective value.
-
-Return ONLY the Python source code as plain text, with no comments and no Markdown.
+[FRESH INFLOW]
+  if t > lead_time[p]:
+      I[p,l,t,shelf_life] = Q[p,l,t-lead_time]
+  else:
+      I[p,l,t,shelf_life] = 0
+  NEVER access Q[p,l,0] or negative indices
 ```
 
-This example is illustrative; all other archetypes follow the same structure but use
-their own business narrative and structure cues from `archetypes.yaml` / `retail_spec.md`.
+### 3.3 Variable Naming Contract
 
----
-
-## 5. Repair Prompt Template (ReLoop-style IIS Feedback)
-
-When a solver (for example, the reference `universal_retail_solver.py`) detects infeasibility
-or structural inconsistencies in the LLM-generated model, a **repair prompt** can be built.
-This prompt reuses the same scenario description and JSON semantics, but augments them with
-diagnostics about what went wrong.
-
-A generic repair template is:
-
-```text
-[SCENARIO]
-(same text as the original user prompt for this instance)
-
-[PREVIOUS MODEL]
-Here is the previous Python model you wrote:
-
-<MODEL_CODE_SNIPPET>
-
-[DIAGNOSTICS]
-The solver reports that the model is infeasible or structurally inconsistent.
-An IIS (Irreducible Infeasible Subset) or conflict refinement points to the
-following constraints or relationships as problematic:
-
-<PLAIN_LANGUAGE_SUMMARY_OF_IIS>
-
-[INSTRUCTION]
-Revise the model to resolve these conflicts while keeping the JSON data and the
-scenario description unchanged. In particular, consider:
-
-- Whether constraints that require strict demand satisfaction should be relaxed
-  by introducing lost-sales variables with appropriate penalties.
-- Whether shared capacity constraints couple SKUs correctly at each (location, period).
-- Whether any logical impossibility (for example, demand > maximum possible supply)
-  should be handled through slack variables or lost sales instead of hard equalities.
-
-Return the corrected Python script as plain text, replacing the previous model.
-Do not change any numbers in the JSON or assume access to external data.
+```
+I[p,l,t,a]: inventory by remaining life bucket
+y[p,l,t,a]: sales from life bucket
+W[p,l,t]:   waste (expired)
+Q[p,l,t]:   orders/production
+L[p,l,t]:   lost sales
+S[p_from,p_to,l,t]: substitution flow
 ```
 
-The IIS summary is generated by the evaluation framework using the reference solver and
-its conflict-refinement APIs; the LLM only sees a plain-language description.
+---
+
+## 4. Semantic Probe Verification
+
+### How Probes Work (Code Execution, NOT Prompting)
+
+Probes verify constraints via **actual code execution**:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Step 1: Construct boundary test data                   │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ data = {                                         │   │
+│  │   "demand": {"Basic": 100, "Premium": 0},       │   │
+│  │   "production_cap": {"Basic": 0, "Premium": 80} │   │
+│  │ }                                                │   │
+│  └─────────────────────────────────────────────────┘   │
+│                         ↓                               │
+│  Step 2: Execute LLM code via subprocess                │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ result = subprocess.run(                         │   │
+│  │   [python, "-c", llm_generated_code],           │   │
+│  │   env={"DATA": probe_data}                      │   │
+│  │ )                                                │   │
+│  └─────────────────────────────────────────────────┘   │
+│                         ↓                               │
+│  Step 3: Check observable outcomes                      │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ if status == UNBOUNDED → missing constraint     │   │
+│  │ if objective < expected → wrong implementation  │   │
+│  │ if objective in range → PASS                    │   │
+│  └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 8 Probes
+
+| Probe | Mechanism | Detection Method |
+|-------|-----------|------------------|
+| `substitution_basic` | S variables | Objective range check |
+| `demand_route_constraint` | S_out ≤ demand | UNBOUNDED detection |
+| `no_substitution` | Empty edges | Spurious benefit detection |
+| `production_capacity` | Prod cap | Objective lower bound |
+| `storage_capacity` | Storage cap | INFEASIBLE detection |
+| `aging_dynamics` | Shelf-life | Waste cost verification |
+| `lost_sales_slack` | L variable | INFEASIBLE detection |
+| `nonnegativity` | I ≥ 0 | Negative inventory check |
+
+### Key Insight
+
+Probes test **behavior**, not **code**. They work on any implementation without parsing.
 
 ---
 
-## 6. Relation to the Reference Solver and Time Limits
+## 5. Model Recommendations
 
-* `universal_retail_solver.py` is the **canonical reference model** for RetailOpt-190.
-* It uses a 60-second time limit (`TimeLimit = 60`) and a 1% relative MIP gap
-  (`MIPGap = 0.01`) for all instances, and suppresses solver logs (`OutputFlag = 0`).
-* `run_benchmark.py` runs the reference solver on all 190 JSON files and records:
+### Primary: Qwen-Max
 
-  * `OPTIMAL` when the solver proves optimality within the time limit and gap,
-  * `OPTIMAL (TL)` when it hits the time limit but returns a feasible incumbent,
-  * `TIMEOUT` when it hits the time limit with no incumbent solution,
-  * `INFEASIBLE` when the model is proven infeasible.
+```bash
+export OPENAI_API_KEY="your-dashscope-key"
+export OPENAI_MODEL="qwen-max"
+export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+```
 
-These labels, together with objective values, form the baseline in
-`reloop/eval/benchmark_results.csv`. LLM-generated models are evaluated by
-running the same instances with the same solver settings and comparing
-feasibility rates and objective gaps to this reference.
+**Why:** Best balance of reasoning + code generation capability
+
+### Alternatives
+
+| Model | API | Notes |
+|-------|-----|-------|
+| `qwen-max` | DashScope | Recommended |
+| `qwen2.5-coder-32b-instruct` | DashScope | Code-specialized |
+| `deepseek-chat` | DeepSeek | Cost-effective |
+| `gpt-4o` | OpenAI | Strongest but expensive |
 
 ---
 
-## 7. Summary
+## 6. Silent Failure Problem
 
-* `retail_spec.md` defines the **archetypes and structural intent** of the 38 retail scenarios in RetailOpt-190.
-* `retail_prompts.md` (this file) defines the **system and user prompt formats** used to
-  query LLM-based optimization agents on RetailOpt-190.
-* `universal_retail_solver.py` and `run_benchmark.py` provide the **reference implementation**
-  and evaluation pipeline.
+### Definition
 
-Together, these components ensure that:
+**Silent Failure:** Code that executes successfully and returns OPTIMAL, but produces wrong answers due to constraint semantic errors.
 
-* Every JSON instance has a clear business meaning.
-* Prompt text and JSON semantics are tightly aligned with the actual code.
-* Results from different LLMs are comparable under a fixed 60-second time limit and 1% MIP gap
+### Common Causes
+
+| Error Type | Frequency | Example |
+|------------|-----------|---------|
+| Substitution direction | ~45% | Edge [A,B] misread as "A replaces B" |
+| Missing constraint | ~25% | No demand_route → UNBOUNDED |
+| Wrong indexing | ~20% | Holding cost on all buckets |
+| Boundary errors | ~10% | t=1 initialization wrong |
+
+---
+
+## 7. Ablation Studies
+
+### No Guardrails
+
+```bash
+python -m reloop.tools.generate_prompts --no_guardrails
+```
+
+Expected: Silent failure rate increases significantly
+
+### No Probes
+
+```bash
+python -m reloop.agents.cli.run_one --scenario xxx --no-probes
+```
+
+Expected: Cannot detect silent failures
+
+### No Repair
+
+```bash
+python -m reloop.agents.cli.run_one --scenario xxx --repair-limit 0
+```
+
+Expected: Lower correct rate, same silent failure rate
+
+---
+
+## 8. Research Directions
+
+### Current Limitations
+
+| Limitation | Description |
+|------------|-------------|
+| Manual probe design | 8 probes hand-crafted |
+| No coverage guarantee | May miss some errors |
+| Domain-specific | Retail OR only |
+
+### Future Work
+
+**Direction 1: Automatic Probe Generation**
+```
+Given constraint C(x) ≤ b, auto-generate test data that
+distinguishes correct from incorrect implementations
+```
+
+**Direction 2: Formal Verification**
+```
+Definition (Probe Soundness):
+  Probe P is sound for constraint C ⟺
+    ∀ implementation M' missing C: P(M') = FAIL
+
+Open Problem:
+  Construct minimal sound and complete probe set
+```
+
+---
+
+## 9. Citation
+
+```bibtex
+@misc{reloop2026,
+  author = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
+  title  = {ReLoop: Closing the Silent Failure Gap in LLM-based 
+            Optimization Modeling via Semantic Probes},
+  year   = {2026},
+}
+```

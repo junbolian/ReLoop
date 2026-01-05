@@ -1,208 +1,239 @@
-# ReLoop: RetailOpt-190 Benchmark and Codebase
+# ReLoop: Semantic Probe Verification for LLM-based Optimization
 
-ReLoop is the public codebase for a research project on **retail supply-chain optimization** and **LLM-based text-to-MILP modeling**.
+ReLoop is the public codebase for a research project on **retail supply-chain optimization** and **LLM-based text-to-MILP modeling** with **semantic probe verification**.
 
-This repository currently releases **RetailOpt-190**, a vertically focused **retail text-to-optimization benchmark**, together with a **universal retail MILP solver**, and is intended to eventually host the **full code for the ReLoop paper**, including:
-
-- A universal retail MILP formulation implemented in Gurobi
-- Scenario generators and synthetic retail data
-- Evaluation pipelines for classical solvers
-- Prompt templates and tooling for LLM-based optimization agents
-
-At the moment, the focus is on the **RetailOpt-190 benchmark and reference solver**, which can already be used as an open testbed.
+This repository releases:
+- **RetailOpt-190**: A vertically-focused retail text-to-optimization benchmark
+- **Universal Retail Solver**: Reference MILP implementation with ground truth
+- **Semantic Probes**: 8 boundary tests for detecting constraint errors
+- **ReLoop Agent**: LangGraph-based orchestrator with probe-guided repair
 
 ---
 
-## 1. Repository Structure (current)
+## Key Features
 
-The current layout is:
+| Feature | Description |
+|---------|-------------|
+| **Silent Failure Detection** | Identifies code that runs but produces wrong answers |
+| **Semantic Probes** | 8 boundary tests via code execution (not LLM prompting) |
+| **No Code Template** | Tests actual math→code translation ability |
+| **Probe-Guided Repair** | Diagnosis fed back for targeted fixes |
 
-```text
+---
+
+## Repository Structure
+
+```
 reloop/
 ├── solvers/
-│   └── universal_retail_solver.py       # Universal Retail Solver (reference MILP)
-├── tools/
-│   └── retail_benchmark_generator.py    # Generator for 38 archetypes × 5 variations
+│   └── universal_retail_solver.py    # Reference MILP (ground truth)
+│
+├── agents/
+│   ├── orchestrator_graph.py         # LangGraph state machine
+│   ├── schemas.py                    # Pydantic data models
+│   ├── prompt_stack.py               # Prompt management
+│   ├── step_prompts/                 # 8 prompt files
+│   ├── tools/
+│   │   ├── semantic_probes.py        # 8 probes implementation
+│   │   ├── script_runner.py          # Code execution
+│   │   ├── sanity_checker.py         # Logic validation
+│   │   └── static_auditor.py         # Pattern checking
+│   └── cli/
+│       ├── run_one.py                # Single scenario
+│       └── run_benchmark.py          # Full benchmark
+│
 ├── scenarios/
-|
 │   ├── spec/
-│   │   ├── retail_spec.md          # Structural and semantic specification
-│   │   └── retail_prompts.md       # Prompt templates for LLM agents
-│   ├── data/                       # JSON instances (RetailOpt-190 benchmark)
-│   └── prompts/                    # Per-instance SYSTEM/USER prompt files
+│   │   ├── retail_spec.md            # Archetype specifications
+│   │   └── retail_prompts.md         # Prompt templates
+│   ├── data/                         # 190 JSON instances
+│   └── prompts/                      # Per-instance prompts
+│
 └── eval/
-    ├── run_benchmark.py                # Batch evaluation script
-    └── benchmark_results.csv           # Reference solver results (if generated)
-````
-
-Over time, additional modules (e.g., agent runners, experiment scripts) will be added to support the full set of experiments in the ReLoop paper.
-
----
-
-## 2. RetailOpt-190 Benchmark (short description)
-
-The `scenarios/retailopt_190/` tree contains **RetailOpt-190**, a synthetic retail operations benchmark designed for both
-
-* classical optimization solvers, and
-* LLM-based text-to-optimization agents.
-
-Key points:
-
-* **38 structural archetypes** grouped into 8 families
-  (operations, assortment, resources, dynamics, feasibility, logistics, network, omni-channel).
-* Each archetype has **5 numerical variants**, giving a total of **190 JSON instances**.
-* All instances share a **single JSON schema** and are solved by the same universal MILP in `universal_retail_solver.py`.
-
-For the **full specification and semantics** of the dataset, see:
-
-* `scenarios/retailopt_190/spec/retail_spec.md` – retail stories, active mechanisms, and structural intent.
-* `scenarios/retailopt_190/spec/retail_prompts.md` – prompt templates for LLM agents (system / user / repair prompts) and an example instance.
-
-The per-instance JSON files live in:
-
-* `scenarios/retailopt_190/data/`
-
-The corresponding LLM prompts (one `.txt` per JSON) live in:
-
-* `scenarios/retailopt_190/prompts/`
-
----
-
-## 3. Installation
-
-### 3.1 Requirements
-
-* Python ≥ 3.9
-* [Gurobi Optimizer](https://www.gurobi.com/) with a valid license
-* Python packages:
-
-  * `gurobipy`
-  * `numpy`
-  * `pandas`
-  * `pyyaml`
-  * (plus any extra utilities listed in `requirements.txt`, if present)
-
-Install dependencies with:
-
-```bash
-pip install -r requirements.txt
-```
-
-or manually, e.g.:
-
-```bash
-pip install gurobipy numpy pandas pyyaml
+    ├── run_benchmark.py              # Evaluation script
+    └── evaluate_with_probes.py       # Probe-based evaluation
 ```
 
 ---
 
-## 4. Quick Start
+## Quick Start
 
-### 4.1 Clone the repository
+### 1. Installation
 
 ```bash
 git clone https://github.com/junbolian/ReLoop.git
 cd ReLoop
+pip install -r requirements.txt
 ```
 
-### 4.2 Solve a single JSON instance with the reference solver
+Requirements:
+- Python ≥ 3.10
+- Gurobi with valid license
+- `gurobipy`, `numpy`, `pandas`, `pydantic`, `langgraph`
 
-The universal solver reads one retail JSON, builds the MILP, and calls Gurobi.
+### 2. Model Configuration
 
-Example (adjust arguments if needed according to the script):
+**Recommended: Qwen-Max** (best balance of capability and cost)
+
+```bash
+# Qwen-Max via DashScope API
+export OPENAI_API_KEY="your-dashscope-key"
+export OPENAI_MODEL="qwen-max"
+export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+```
+
+**Alternative Models:**
+
+| Model | API | Notes |
+|-------|-----|-------|
+| `qwen-max` | DashScope | Recommended - best quality |
+| `qwen2.5-coder-32b-instruct` | DashScope | Good for code tasks |
+| `deepseek-chat` | DeepSeek | Cost-effective alternative |
+| `gpt-4o` | OpenAI | Strongest but expensive |
+
+### 3. Run Reference Solver
 
 ```bash
 python -m reloop.solvers.universal_retail_solver \
-  --json scenarios/retailopt_190/data/retail_f1_52_weeks_v0.json
+  --json scenarios/data/retail_f1_52_weeks_v0.json
 ```
 
-The script will print (at least):
-
-* solver status (e.g., `OPTIMAL`, `TIME_LIMIT`, `INFEASIBLE`)
-* total objective value (e.g., total cost)
-
-See `universal_retail_solver.py` for the exact command-line interface and options.
-
-### 4.3 Run the full benchmark
-
-To run the reference solver on **all** JSON files and write a summary CSV:
+### 4. Run Agent on One Scenario
 
 ```bash
-python -m reloop.eval.run_benchmark
+python -m reloop.agents.cli.run_one \
+  --scenario retail_f1_52_weeks_v0 \
+  --out artifacts
 ```
 
-This produces:
+### 5. Run Full Benchmark
 
-```text
-reloop/eval/benchmark_results.csv
+```bash
+python -m reloop.agents.cli.run_benchmark \
+  --suite suite.txt \
+  --out artifacts
 ```
-
-with at least the following columns:
-
-* `scenario` – scenario name (JSON filename without `.json`)
-* `status` – mapped solver status
-* `objective` – total cost (or `N/A` if infeasible / no incumbent)
 
 ---
 
-## 5. LLM Benchmarking (high level)
+## RetailOpt-190 Benchmark
 
-The repository is also designed to support **LLM-based text-to-MILP agents** on top of RetailOpt-190:
+**190 instances** = 38 archetypes × 5 numerical variants
 
-* A **system prompt** describes the agent’s role as a retail optimization modeling assistant.
-* A **user prompt** for each JSON instance provides:
+### 8 Mechanism Families:
 
-  * the family and archetype ID,
-  * a business narrative and structural cues,
-  * instructions on how to read the JSON via a Python variable `data`,
-  * a request to output a plain Python script that builds and solves a MILP using `gurobipy`.
+| Family | Archetypes | Key Mechanisms |
+|--------|------------|----------------|
+| F1: Operations | 4 | Inventory, demand, lost sales, waste |
+| F2: Assortment | 6 | Substitution, cannibalization, promotions |
+| F3: Resources | 4 | Storage capacity, production capacity |
+| F4: Dynamics | 6 | Shelf-life, demand surge, supply risk |
+| F5: Feasibility | 4 | Stress tests, slack variables |
+| F6: Logistics | 4 | MOQ, pack size, lead time, fixed cost |
+| F7: Network | 6 | Transshipment, multi-echelon, hub-spoke |
+| F8: Omni-channel | 4 | Returns, labor, sustainability |
 
-The exact prompt templates and an example user prompt are documented in:
+---
 
-* `scenarios/retailopt_190/spec/retail_prompts.md`
+## Semantic Probes
 
-Per-instance prompt files under `scenarios/retailopt_190/prompts/` have the structure:
+### How Probes Work
 
-```text
-### SYSTEM PROMPT ###
-<system prompt text>
+Semantic probes verify constraint correctness through **code execution**, not LLM prompting:
 
-### USER PROMPT ###
-<user prompt text>
+```
+1. Construct boundary test data (e.g., zero production for one product)
+2. Execute LLM-generated code with test data (subprocess)
+3. Check observable outcomes (objective value, solver status)
+4. Compare against expected behavior → PASS/FAIL
 ```
 
-An external evaluation harness can load these files, call an LLM, inject the JSON into the runtime as `data`, and compare the resulting solutions against the reference solver.
+### 8 Probes:
+
+| Probe | Tests | Detection Method |
+|-------|-------|------------------|
+| `substitution_basic` | S implementation | Objective range check |
+| `demand_route_constraint` | S_out ≤ demand | UNBOUNDED detection |
+| `no_substitution` | Empty edges | Spurious benefit detection |
+| `production_capacity` | Prod cap | Objective lower bound |
+| `storage_capacity` | Storage cap | INFEASIBLE detection |
+| `aging_dynamics` | Shelf-life | Waste cost verification |
+| `lost_sales_slack` | L variable | INFEASIBLE detection |
+| `nonnegativity` | I ≥ 0 | Negative inventory check |
+
+### Key Insight
+
+Probes test **behavior**, not **code**. They work on any implementation without parsing it.
 
 ---
 
-## 6. Roadmap
+## Agent Pipeline
 
-This repository is under active development. Planned additions include:
+```
+profile_data → step1 → step2 → step3 → sanity → step4 → audit → probe → run
+               contract spec   templates        codegen        verify
+                                                    ↑            │
+                                                    └── repair ──┘
+```
 
-* Full experiment scripts for all results reported in the ReLoop paper
-* Agent runners for multiple LLM providers
-* Closed-loop (generator–verifier–repair) runners using IIS feedback
-* Additional diagnostics and visualization tools
-
-Once those components are public, this README will be updated with detailed “reproduce-the-paper” instructions.
+### Steps:
+1. **Step 1**: Lock task contract (optimize, controls, constraints)
+2. **Step 2**: Build spec sheet (sets, decisions, objective)
+3. **Step 3**: Map to constraint templates (math formulas)
+4. **Step 4**: Generate Gurobi code (no template given)
+5. **Probe**: Run 8 semantic probes
+6. **Repair**: If probes fail, diagnose and retry (up to 5x)
 
 ---
 
-## 7. Citation
+## Research Directions
 
-If you use ReLoop or the **RetailOpt-190** benchmark in academic work, please cite the accompanying paper (once available). A temporary placeholder BibTeX entry is:
+### Current Limitations
+
+1. **Manual probe design**: 8 probes are hand-crafted by domain experts
+2. **No coverage guarantee**: Unknown if probes cover all constraint types
+3. **No formal framework**: Probe correctness is empirical, not proven
+
+### Future Work
+
+| Direction | Research Question | Potential Venue |
+|-----------|-------------------|-----------------|
+| **Automatic Probe Generation** | Given constraint C, auto-generate test data that distinguishes correct/incorrect implementations | ICML/NeurIPS |
+| **Semantic Coverage** | How to measure and ensure probes cover all critical constraints? | AAAI/IJCAI |
+| **Formal Verification** | Can we prove probe soundness (no false negatives)? | POPL/CAV |
+| **Cross-Domain Generalization** | Do probe design principles transfer to other OR domains? | CPAIOR |
+
+### Formalization Sketch
+
+```
+Definition (Silent Failure):
+  Model M has silent failure on data d ⟺ 
+    M.solve(d).status = OPTIMAL ∧ M.solve(d).obj ≠ ground_truth(d)
+
+Definition (Probe Soundness):
+  Probe P is sound for constraint C ⟺ 
+    ∀ implementation M missing C: P(M) = FAIL
+
+Open Problem:
+  Given optimization model spec S, construct minimal probe set {P₁...Pₖ} 
+  that is sound and complete for all single-constraint errors.
+```
+
+---
+
+## Citation
 
 ```bibtex
 @misc{reloop2026,
-  author       = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
-  title        = {ReLoop: Solver-Guided LLMs for Semantically Reliable Text-to-Optimization in Retail Supply Chains},
-  year         = {2026},
+  author = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
+  title  = {ReLoop: Closing the Silent Failure Gap in LLM-based 
+            Optimization Modeling via Semantic Probes},
+  year   = {2026},
 }
 ```
 
 ---
 
-## 8. License
+## License
 
-This repository is released for research and educational use.
-Please refer to the `LICENSE` file for the exact terms and conditions. If no license is included yet, all rights are reserved by the authors until a license is added.
+Released for research and educational use. See `LICENSE` for details.

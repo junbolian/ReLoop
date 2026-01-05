@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F5 (Feasibility and Model Repair)
+Archetype: retail_f5_storage_overflow
+Scenario ID: retail_f5_storage_overflow_v1
+
+Business narrative:
+Storage capacities are set extremely close to zero so that almost any inbound inventory risks violating capacity if not very tightly controlled. The scenario stresses whether the model correctly enforces capacity and uses waste and lost sales to maintain feasibility rather than silently overfilling locations.
+
+Structure cues:
+- The inventory and production framework is the same single-echelon system with storage constraints.
+- In the JSON, storage capacities are near zero at all locations. The volume-weighted sum of on-hand inventory must remain within these tiny capacities at every period.
+- Inventory must stay non-negative and is adjusted through production, sales, and waste. In most periods, on-hand inventory must be kept very low to satisfy capacity.
+- Unmet demand becomes lost sales, and discarding inventory becomes an important decision despite its cost.
+- There is no transshipment, lead times are zero, and substitution behavior is unchanged.
+- The objective is to minimize total cost, trading off waste and lost sales under extremely strict storage capacity.

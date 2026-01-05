@@ -1,0 +1,18 @@
+[SCENARIO]
+Family: F1 (Core Operations)
+Archetype: retail_f1_base
+Scenario ID: retail_f1_base_v3
+
+Business narrative:
+The retailer manages weekly inventory for several products across multiple distribution centers that directly serve final customer demand. Demand for each product at each location is seasonal and exogenous. Products are replenished each period up to a per-product production or procurement capacity, and any demand that is not served immediately in the period is permanently lost and penalized. Customers are never backlogged or promised future delivery. Inventory is held locally at each distribution center, and there is no movement of stock between locations in this archetype.
+
+Structure cues:
+- Time is a discrete sequence of periods defined in the JSON. Decisions about how much to produce or procure and how much to ship to each location are made at the beginning of each period; demand is realized and served within that same period.
+- Inventory evolves by carrying over what remains from the previous period, adding any new production assigned to the location, and subtracting units that are sold or intentionally discarded as waste. On-hand stock is never allowed to become negative.
+- Any demand that cannot be met from available local inventory in the period is treated as lost sales and incurs the lost sales penalty. There is no concept of backorders, reservations, or delayed fulfillment.
+- Production for each product in each period cannot exceed the given production capacity. Production is available without delay in this archetype because lead times are effectively zero.
+- Storage capacity at each location and period limits the total volume of on-hand inventory using product-specific storage usage coefficients and location capacities from the JSON. These limits must be respected even in periods where they do not bind.
+- Substitution: Edge [Basic, Premium] means Basic's demand can be served by Premium's inventory when Basic stock is insufficient. S[Basic, Premium] represents units of Basic's demand fulfilled by Premium.
+- There is no transshipment of inventory between locations; each location can only serve its own local demand from its own inventory.
+- Labor capacity is set high enough that it does not bind in this archetype, but if labor constraints are included they must be consistent with the JSON parameters.
+- The objective is to minimize total cost over the horizon, including inventory holding costs, waste costs, and lost sales penalties. No fixed ordering costs, minimum order quantities, lead times, reverse flows, or global budgets are active here.

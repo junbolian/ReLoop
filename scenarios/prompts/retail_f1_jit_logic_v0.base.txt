@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F1 (Core Operations)
+Archetype: retail_f1_jit_logic
+Scenario ID: retail_f1_jit_logic_v0
+
+Business narrative:
+This scenario represents a just-in-time regime where holding inventory is very expensive. The retailer still faces exogenous seasonal demand at each location, cannot backorder customers, and has limited per-product production capacity per period. Because holding costs are high, the retailer is incentivized to keep inventories as lean as possible while still avoiding excessive lost sales.
+
+Structure cues:
+- The physical network and decision timing are the same as in retail_f1_base: single-echelon, multi-product, multi-location, with local demand and local inventory.
+- Inventory at each location carries over from the previous period, is increased by local production that arrives without delay, and is reduced by sales and any intentional waste. Stock levels must remain non-negative, and any demand in excess of available stock is treated as lost sales.
+- Storage capacity constraints, substitution behavior (Basic's demand served by Premium), and the absence of transshipment all match the baseline archetype.
+- Holding cost coefficients in the JSON are scaled up substantially compared with retail_f1_base, making on-hand inventory much more expensive relative to lost sales. The underlying constraint structure is unchanged.
+- The objective is to minimize total cost including holding, waste, and lost sales, with the higher holding cost forcing a just-in-time style of operation.

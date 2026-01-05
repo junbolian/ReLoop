@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_supply_risk
+Scenario ID: retail_f4_supply_risk_v0
+
+Business narrative:
+The retailer faces persistent but moderate supply risk in the middle of the season. Production capacity is reduced over a mid-horizon band of periods, and waste becomes more expensive. Demand remains exogenous and local, with no backorders and no transshipment. The retailer must decide how much to build inventory before the risk window, balancing the danger of stockouts against the risk of obsolescence and waste.
+
+Structure cues:
+- The inventory, storage, and lost sales framework is the same single-echelon structure as in the base scenario.
+- In the JSON, per-product production capacities are reduced over a specified mid-horizon band of periods, but not set to zero. Outside this band, capacities are higher and should be used to build inventory when beneficial.
+- Waste cost parameters are increased for all products so that discarding inventory is more expensive, making overbuilding before the risk window more costly.
+- Inventory at each product, location, and period remains non-negative and is updated from previous stock, allowed production, sales, and waste.
+- Storage capacity constraints, substitution behavior, zero lead times, and generous labor capacity are unchanged from the baseline.
+- The objective is to minimize total cost while trading off early inventory builds against the increased waste cost and mid-season supply risk.

@@ -1,105 +1,106 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel, ConfigDict, Field
 
+# ==============================================================================
+# DATA PROFILE
+# ==============================================================================
+
+class DataFieldProfile(BaseModel):
+    path: str
+    kind: str  # "scalar", "list", "dict"
+    type: str
+    length: Optional[int] = None
+    element_type: Optional[str] = None
+    key_types: Optional[str] = None
+    sample_keys: Optional[List[str]] = None
+
+
+class DataProfile(BaseModel):
+    summary: str
+    fields: List[DataFieldProfile]
+
+
+# ==============================================================================
+# STEP 1: CONTRACT
+# ==============================================================================
 
 class SoftViolation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     name: str
-    penalty_source: str
+    penalty: Optional[str] = None
+    penalty_source: Optional[str] = None
 
 
-class Step0Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class Step1Contract(BaseModel):
+    """Contract extracted in Step 1."""
     optimize: str
     controls: List[str]
     hard_constraints: List[str]
-    soft_violations: List[SoftViolation]
-    contract_summary: str
+    soft_violations: List[SoftViolation] = []
+    summary: Optional[str] = None
+    contract_summary: Optional[str] = None
 
 
-class Extraction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    sets: List[str] = Field(default_factory=list)
-    params: List[str] = Field(default_factory=list)
-    decisions: List[str] = Field(default_factory=list)
-    rule_hints: List[str] = Field(default_factory=list)
-
-
-class TaggedSentence(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    text: str
-    tag: Literal[
-        "SET_OBJECT",
-        "PARAM_FACT",
-        "DECISION",
-        "RULE_CONSTRAINT_SOURCE",
-        "OBJECTIVE_PREFERENCE",
-    ]
-    extracted: Extraction
-
+# ==============================================================================
+# STEP 2: SPEC SHEET
+# ==============================================================================
 
 class SetDef(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     name: str
     description: str
     source: str
 
 
-class DecisionVar(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionDef(BaseModel):
     name: str
     type: str
     domain: str
     indices: List[str]
     meaning: str
-    active_if: str
+    active_if: str = "always"
 
 
 class ObjectiveTerm(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     name: str
     expression: str
     source: str
-    active_if: str
+    active_if: str = "always"
 
 
 class ConstraintFamily(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     prefix: str
     meaning: str
     indices: List[str]
     sense: str
-    active_if: str
+    active_if: str = "always"
 
 
 class EdgeCase(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     case: str
     handling: str
 
 
 class OpenQuestion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     question: str
 
 
 class SpecSheet(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    sets: List[SetDef]
-    decisions: List[DecisionVar]
-    objective_terms: List[ObjectiveTerm]
-    constraint_families: List[ConstraintFamily]
-    edge_cases: List[EdgeCase]
-    open_questions: List[OpenQuestion]
+    """Spec sheet from Step 2."""
+    sets: List[SetDef] = []
+    decisions: List[DecisionDef] = []
+    objective_terms: List[ObjectiveTerm] = []
+    constraint_families: List[ConstraintFamily] = []
+    edge_cases: List[EdgeCase] = []
+    open_questions: List[OpenQuestion] = []
 
 
-class EquationTemplate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+# ==============================================================================
+# STEP 3: CONSTRAINT TEMPLATES
+# ==============================================================================
+
+class Equation(BaseModel):
     name_suffix: str
     sense: str
     lhs: str
@@ -107,182 +108,186 @@ class EquationTemplate(BaseModel):
 
 
 class ConstraintTemplate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Constraint template from Step 3."""
     prefix: str
-    template_type: Literal[
-        "BALANCE",
-        "CAPACITY",
-        "DYNAMICS",
-        "NETWORK",
-        "SUBSTITUTION",
-        "DISCRETE",
-    ]
+    template_type: str
     applies_when: str
     indices: List[str]
-    equations: List[EquationTemplate]
-    notes: List[str] = Field(default_factory=list)
+    equations: List[Equation]
+    notes: List[str] = []
 
 
-class SanityCheckResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    id: int
+# ==============================================================================
+# SANITY CHECK
+# ==============================================================================
+
+class SanityCheck(BaseModel):
+    """Sanity check result."""
+    id: Optional[int] = None
     name: str
-    pass_: bool = Field(alias="pass")
-    reason: str
-    fix_hint: str
-
-    @property
-    def passed(self) -> bool:
-        return self.pass_
+    passed: bool = True
+    message: str = ""
+    fix_hint: str = ""
+    
+    class Config:
+        extra = "allow"
 
 
 class SanityReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    checks: List[SanityCheckResult]
     overall_pass: bool
-    blockers: List[str]
-    recommended_next_step: Literal["PROCEED_TO_CODEGEN", "REVISE_SPEC"]
+    checks: List[SanityCheck]
+    blockers: List[str] = []
+    recommended_next_step: Optional[str] = None
 
+
+# ==============================================================================
+# CODE VERSION
+# ==============================================================================
 
 class CodeVersion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     step: str
     content: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
 
+
+# ==============================================================================
+# STATIC AUDIT
+# ==============================================================================
 
 class StaticAuditReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     passed: bool
-    failures: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    issues: List[str] = []
 
+
+# ==============================================================================
+# SEMANTIC PROBE
+# ==============================================================================
+
+class ProbeResult(BaseModel):
+    """Result of a single semantic probe."""
+    probe_name: str
+    result: str
+    expected: Optional[Any] = None  # FIX: Changed from str to Any
+    actual: Optional[Any] = None    # FIX: Changed from str to Any
+    diagnosis: Optional[str] = None
+
+
+class SemanticProbeReport(BaseModel):
+    """Aggregate result of all semantic probes."""
+    total: int
+    passed: int
+    failed: int
+    crashed: int = 0
+    pass_rate: float
+    failed_probes: List[str] = []
+    probe_results: List[ProbeResult] = []
+    diagnoses: Dict[str, str] = {}
+
+
+# ==============================================================================
+# SOLVE REPORT
+# ==============================================================================
 
 class SolveReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    status: Optional[str] = None
-    obj_val: Optional[float] = None
-    obj_bound: Optional[float] = None
-    mip_gap: Optional[float] = None
+    status: str
+    obj_val: Optional[float] = Field(None, alias="objVal")
+    obj_bound: Optional[float] = Field(None, alias="objBound")
+    mip_gap: Optional[float] = Field(None, alias="mipGap")
     stdout: str = ""
     stderr: str = ""
-    exit_code: Optional[int] = None
-    elapsed_sec: Optional[float] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    exit_code: int = 0
+
+    class Config:
+        populate_by_name = True
 
 
-class IISReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    constraints: List[str] = Field(default_factory=list)
-    prefix_summary: Dict[str, int] = Field(default_factory=dict)
-    error: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class RepairAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    change_type: Literal[
-        "ADD",
-        "REMOVE",
-        "TIGHTEN",
-        "RELAX",
-        "ALIGN_TIME",
-        "ADD_SOFT_SLACK",
-        "FIX_SUBSTITUTION_COUPLING",
-        "FIX_BOUNDS",
-    ]
-    where: Literal[
-        "spec_sheet.constraint_families",
-        "constraint_templates",
-        "codegen_instructions",
-    ]
-    description: str
-    acceptance_test: str
-
-
-class RepairDiagnosis(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    category: Literal[
-        "INFEASIBLE",
-        "UNBOUNDED",
-        "WEIRD_SOLUTION",
-        "FORMAT_ERROR",
-        "AUDIT_FAIL",
-        "RUNTIME_ERROR",
-    ]
-    most_likely_causes: List[str]
-    evidence: List[str]
-    affected_constraint_prefixes: List[str] = Field(default_factory=list)
-
-
-class NextStepPrompting(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    extra_instructions_to_inject: List[str] = Field(default_factory=list)
-
+# ==============================================================================
+# REPAIR BRIEF
+# ==============================================================================
 
 class RepairBrief(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: Literal["SPEC", "CODEGEN"]
-    diagnosis: RepairDiagnosis
-    repairs: List[RepairAction]
-    next_step_prompting: NextStepPrompting
+    """Repair diagnosis from Step 5."""
+    target: str = "CODEGEN"
+    error_type: Optional[str] = None
+    likely_cause: Optional[str] = None
+    fix: Optional[str] = None
+    failed_probes: List[str] = []
+    diagnosis: Optional[Dict[str, Any]] = None
+    repairs: Optional[List[Dict[str, Any]]] = None
+    next_step_prompting: Optional[Dict[str, Any]] = None
 
+
+# ==============================================================================
+# CONVERSATION LOG
+# ==============================================================================
 
 class MessageEntry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Literal["system", "human", "assistant"]
+    role: str
     content: str
     step: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ConversationTurn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     step: str
     messages: List[MessageEntry]
     response_text: Optional[str] = None
-    raw_response: Any = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    raw_response: Optional[Any] = None
 
 
-class DataFieldProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    kind: Literal["scalar", "list", "dict"]
-    type: str
-    length: Optional[int] = None
-    key_types: Optional[str] = None
-    element_type: Optional[str] = None
-    sample_keys: List[str] = Field(default_factory=list)
-    notes: Optional[str] = None
+# ==============================================================================
+# EVALUATION RESULT
+# ==============================================================================
+
+class EvaluationResult(BaseModel):
+    """Result of evaluating a scenario with semantic probes."""
+    scenario_id: str
+    syntax_valid: bool
+    probes_total: int
+    probes_passed: int
+    probes_failed: int
+    model_status: Optional[str] = None
+    model_objective: Optional[float] = None
+    ground_truth_objective: Optional[float] = None
+    objective_error_pct: Optional[float] = None
+    objective_match: bool = False
+    final_verdict: str
 
 
-class DataProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    summary: str
-    fields: List[DataFieldProfile]
-
+# ==============================================================================
+# AGENT STATE MODEL
+# ==============================================================================
 
 class AgentStateModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Pydantic model for validating agent state."""
     run_id: str
     scenario_id: str
     base_prompt_hash: str
+    data: Dict[str, Any]
+    scenario_text: str = ""
+    base_prompt: str = ""
     data_profile: Optional[DataProfile] = None
-    step0_contract: Optional[Step0Contract] = None
-    step1_tags: List[TaggedSentence] = Field(default_factory=list)
+    step1_contract: Optional[Step1Contract] = None
     step2_spec_sheet: Optional[SpecSheet] = None
-    step3_templates: List[ConstraintTemplate] = Field(default_factory=list)
-    step4_sanity_report: Optional[SanityReport] = None
-    code_versions: List[CodeVersion] = Field(default_factory=list)
-    static_audit_reports: List[StaticAuditReport] = Field(default_factory=list)
-    solve_reports: List[SolveReport] = Field(default_factory=list)
-    iis_reports: List[IISReport] = Field(default_factory=list)
-    repair_briefs: List[RepairBrief] = Field(default_factory=list)
+    step3_templates: Optional[List[ConstraintTemplate]] = None
+    sanity_report: Optional[SanityReport] = None
+    code_versions: List[CodeVersion] = []
+    static_audit_reports: List[StaticAuditReport] = []
+    semantic_probe_reports: List[SemanticProbeReport] = []
+    solve_reports: List[SolveReport] = []
+    repair_briefs: List[RepairBrief] = []
     repair_count: int = 0
     last_error: Optional[str] = None
-    conversation_log: List[ConversationTurn] = Field(default_factory=list)
-    scenario_text: Optional[str] = None
-    base_prompt: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    conversation_log: List[ConversationTurn] = []
     turn_index: int = 0
+
+    class Config:
+        extra = "allow"
+
+
+# ==============================================================================
+# ALIASES FOR BACKWARD COMPATIBILITY
+# ==============================================================================
+
+Step0Contract = Step1Contract
+Step1SpecSheet = SpecSheet
+Step2Templates = ConstraintTemplate
+SanityCheckResult = SanityCheck

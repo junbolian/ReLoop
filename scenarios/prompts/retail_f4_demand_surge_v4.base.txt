@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_demand_surge
+Scenario ID: retail_f4_demand_surge_v4
+
+Business narrative:
+The retailer experiences a single-period viral demand spike where demand suddenly multiplies for all products. Production capacity and other structural elements remain unchanged; only the magnitude of demand in that period is much higher. The retailer must decide whether to build extra inventory in advance or accept lost sales during the surge.
+
+Structure cues:
+- The inventory and production structure is the same as in the base scenario.
+- In the JSON, one mid-horizon period has demand for each product scaled up by a large factor, representing the surge. This period is treated as having much higher exogenous demand.
+- Inventory stays non-negative and is updated using previous stock, current production, sales, and waste.
+- Storage capacity and substitution behavior are unchanged, there is no transshipment, and lead times remain effectively zero.
+- The objective is to minimize total cost, with the demand spike increasing the importance of planning ahead for that particular period.

@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F2 (Assortment and Substitution)
+Archetype: retail_f2_circular_sub
+Scenario ID: retail_f2_circular_sub_v2
+
+Business narrative:
+The retailer offers several products in a category where customers are willing to switch along a circular pattern when their first choice is unavailable. The basic, premium, and short-life products form a directed substitution ring, so demand may move from one item to the next according to that ring. Demand remains exogenous by product and location, and any demand that cannot be satisfied even after considering allowed substitution is treated as a lost sale.
+
+Structure cues:
+- The overall structure is still single-echelon inventory with per-product production capacities, local storage, and lost sales when demand is not met.
+- Inventory at each location evolves from carried-over stock, new production, sales to customers who originally requested that product, and sales to customers diverted from other products along the substitution ring, minus any discarded units. Inventory must remain non-negative.
+- The substitution graph in the JSON defines a directed ring among the products. Each edge [A, B] means A's demand can be served by B's inventory. When demand for product A cannot be fully served from A's own stock, the model may serve part of that demand using B's inventory if edge [A, B] exists.
+- Any remaining unmet demand after using all allowed substitutions becomes lost sales with a penalty cost. Customers are not backordered.
+- Storage capacity constraints and zero lead times remain in effect, and there is no transshipment between locations.
+- The objective is to minimize total cost including holding, waste, and lost sales while respecting the substitution pattern encoded in the JSON.
