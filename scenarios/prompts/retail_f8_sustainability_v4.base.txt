@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_sustainability
+Scenario ID: retail_f8_sustainability_v4
+
+Business narrative:
+The retailer operates under a sustainability or regulatory constraint that limits total waste. Over the entire planning horizon, the total quantity discarded as waste must not exceed a fixed fraction of total demand. Demand is local and exogenous; unmet demand is lost and penalized. The retailer must balance serving demand, avoiding stockouts, and limiting waste.
+
+Structure cues:
+- The inventory and production structure is the same single-echelon system with storage capacity and lost sales as in the base scenario.
+- The JSON specifies a waste limit percentage. Over the horizon, the total waste across all products, locations, and periods must not exceed the given fraction of total demand.
+- Inventory is updated from previous stock and production, minus sales and waste, and remains non-negative.
+- Storage capacity constraints and substitution behavior remain active as defined in the JSON, and there is no transshipment.
+- The objective is to minimize total cost subject to the global waste cap, making trade-offs between holding more inventory, losing sales, and discarding units explicit.

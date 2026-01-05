@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F1 (Core Operations)
+Archetype: retail_f1_high_waste
+Scenario ID: retail_f1_high_waste_v3
+
+Business narrative:
+This scenario keeps the same basic single-echelon structure as the core operations baseline but represents categories where waste is extremely expensive, such as highly perishable or sensitive products. The retailer still serves exogenous seasonal demand from local inventories at distribution centers with no transshipment and no backorders. Any units that must be discarded because they are no longer usable incur a much higher penalty than in the baseline, creating strong pressure to avoid overstocking.
+
+Structure cues:
+- The network is the same as in retail_f1_base: multiple products, multiple locations that directly serve final demand, and per-product production capacities in each period.
+- Inventory is held at each location, evolves from period to period by adding local production and subtracting sales and waste, and is never allowed to go negative. Unserved demand is treated as lost sales and penalized as in the baseline.
+- Storage capacity constraints by location and period must still be respected using product-specific storage usage and the location capacities from the JSON.
+- The substitution pattern (Basic's demand served by Premium), absence of transshipment, zero lead times, and effectively non-binding labor capacities are the same as in the baseline scenario.
+- The only intended structural change is in the cost weights: waste costs in the JSON are much larger, so discarding inventory is heavily discouraged, but the constraint system itself is not altered.
+- The objective continues to minimize the sum of holding costs, waste costs, and lost sales penalties over all products, locations, and periods.

@@ -5,7 +5,6 @@ import hashlib
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, TypedDict
-import ast
 import re
 
 from langchain_core.messages import BaseMessage
@@ -24,16 +23,21 @@ from .schemas import (
     RepairBrief,
     SolveReport,
     SanityReport,
+    SemanticProbeReport,
     SpecSheet,
-    Step0Contract,
-    TaggedSentence,
+    Step1Contract,
 )
 from .tools.data_profiler import profile_data
 from .tools.persistence import PersistenceManager
 from .tools.sanity_checker import run_sanity_checks
-from .tools.script_runner import run_script
+from .tools.script_runner import run_script, check_syntax
 from .tools.static_auditor import audit_script
+from .tools.semantic_probes import ProbeRunner, get_probe_diagnosis
 
+
+# ==============================================================================
+# STATE DEFINITION
+# ==============================================================================
 
 class AgentState(TypedDict, total=False):
     run_id: str
@@ -41,21 +45,30 @@ class AgentState(TypedDict, total=False):
     base_prompt_hash: str
     data: Dict[str, Any]
     scenario_text: str
+    base_prompt: str
+    
+    # Data profile
     data_profile: DataProfile
-    step0_contract: Step0Contract
-    step1_tags: list[TaggedSentence]
-    step2_spec_sheet: SpecSheet
-    step3_templates: list[ConstraintTemplate]
-    step4_sanity_report: SanityReport
+    
+    # Step outputs (matching user's original step numbering: 1-5)
+    step1_contract: Step1Contract           # Step 1: Contract
+    step2_spec_sheet: SpecSheet             # Step 2: Spec Sheet
+    step3_templates: list[ConstraintTemplate]  # Step 3: Templates
+    sanity_report: SanityReport             # Sanity Check (code-based)
+    
+    # Code and verification
     code_versions: list[CodeVersion]
     static_audit_reports: list[Any]
+    semantic_probe_reports: list[SemanticProbeReport]
     solve_reports: list[Any]
-    iis_reports: list[Any]
+    
+    # Repair
     repair_briefs: list[RepairBrief]
     repair_count: int
     last_error: Optional[str]
+    
+    # Conversation
     conversation_log: list[ConversationTurn]
-    base_prompt: str
     turn_index: int
 
 
@@ -64,67 +77,105 @@ def _validated_state(state: AgentState) -> AgentState:
     return state
 
 
+# ==============================================================================
+# ORCHESTRATOR
+# ==============================================================================
+
 class AgentOrchestrator:
+    """
+    LangGraph orchestrator for the ReLoop pipeline.
+    
+    Flow (using user's original step numbering):
+        profile_data -> step1 -> step2 -> step3 -> sanity_check -> step4_codegen 
+                                                                    |
+                                                              static_audit
+                                                                    |
+                                                             semantic_probe
+                                                                    |
+                                                          step5_run_and_repair
+    """
+    
     def __init__(
         self,
         llm_client: LLMClient,
         prompt_stack: PromptStack,
         persistence: PersistenceManager,
         repair_limit: int = 5,
-        max_turns: int = 8,
+        max_turns: int = 12,
+        run_probes: bool = True,
     ):
         self.llm = llm_client
         self.prompt_stack = prompt_stack
         self.persistence = persistence
         self.repair_limit = repair_limit
         self.max_turns = max_turns
+        self.run_probes = run_probes
+        self.probe_runner = ProbeRunner() if run_probes else None
         self.graph = self._build_graph()
 
     def _build_graph(self):
         graph = StateGraph(AgentState)
+        
+        # Add nodes
         graph.add_node("profile_data", self._profile_data)
-        graph.add_node("step0", self._step0_contract)
-        graph.add_node("step1", self._step1_tags)
+        graph.add_node("step1", self._step1_contract)
         graph.add_node("step2", self._step2_spec_sheet)
         graph.add_node("step3", self._step3_templates)
-        graph.add_node("step4", self._step4_sanity)
-        graph.add_node("step5_codegen", self._step5_codegen)
+        graph.add_node("sanity_check", self._sanity_check)
+        graph.add_node("step4_codegen", self._step4_codegen)
         graph.add_node("static_audit", self._static_audit)
-        graph.add_node("step6_run_and_diagnose", self._step6_run_and_diagnose)
+        graph.add_node("semantic_probe", self._semantic_probe)
+        graph.add_node("step5_run_and_repair", self._step5_run_and_repair)
 
+        # Set entry point and edges
         graph.set_entry_point("profile_data")
-        graph.add_edge("profile_data", "step0")
-        graph.add_edge("step0", "step1")
+        graph.add_edge("profile_data", "step1")
         graph.add_edge("step1", "step2")
         graph.add_edge("step2", "step3")
-        graph.add_edge("step3", "step4")
+        graph.add_edge("step3", "sanity_check")
+        
+        # After sanity: proceed or revise
         graph.add_conditional_edges(
-            "step4",
+            "sanity_check",
             self._route_after_sanity,
             {
                 "revise_spec": "step2",
-                "codegen": "step5_codegen",
+                "codegen": "step4_codegen",
                 "done": END,
             },
         )
-        graph.add_edge("step5_codegen", "static_audit")
-
+        
+        graph.add_edge("step4_codegen", "static_audit")
+        
+        # After static audit: retry codegen or proceed to probes
         graph.add_conditional_edges(
             "static_audit",
             self._route_after_audit,
             {
-                "retry_codegen": "step5_codegen",
-                "run": "step6_run_and_diagnose",
+                "retry_codegen": "step4_codegen",
+                "probe": "semantic_probe",
+                "done": END,
+            },
+        )
+        
+        # After semantic probe: run if passed, repair if failed
+        graph.add_conditional_edges(
+            "semantic_probe",
+            self._route_after_probe,
+            {
+                "run": "step5_run_and_repair",
+                "repair_codegen": "step4_codegen",
                 "done": END,
             },
         )
 
+        # After run: done or repair
         graph.add_conditional_edges(
-            "step6_run_and_diagnose",
+            "step5_run_and_repair",
             self._route_after_run,
             {
                 "revise_spec": "step2",
-                "regenerate_code": "step5_codegen",
+                "regenerate_code": "step4_codegen",
                 "done": END,
             },
         )
@@ -148,6 +199,37 @@ class AgentOrchestrator:
         state["turn_index"] = state.get("turn_index", 0) + 1
         return state["turn_index"]
 
+    # ==========================================================================
+    # HELPER: Strip markdown fences (FIXED - no extra LLM call)
+    # ==========================================================================
+    
+    @staticmethod
+    def _strip_markdown(code: str) -> str:
+        """Remove markdown code fences from LLM response."""
+        code = code.strip()
+        
+        # Remove ```python or ```json or ``` at start
+        if code.startswith("```python"):
+            code = code[9:]
+        elif code.startswith("```json"):
+            code = code[7:]
+        elif code.startswith("```"):
+            code = code[3:]
+        
+        # Remove leading newline after fence
+        if code.startswith("\n"):
+            code = code[1:]
+        
+        # Remove ``` at end
+        if code.endswith("```"):
+            code = code[:-3]
+        
+        return code.strip()
+
+    # ==========================================================================
+    # NODE: profile_data
+    # ==========================================================================
+    
     def _profile_data(self, state: AgentState) -> AgentState:
         profile = profile_data(state["data"])
         state["data_profile"] = profile
@@ -155,278 +237,204 @@ class AgentOrchestrator:
         self.persistence.persist_turn(
             state["run_id"], idx, "profile_data", step_outputs=profile
         )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "profile_data"},
-        )
         return state
+
+    # ==========================================================================
+    # LLM CALL HELPER
+    # ==========================================================================
 
     def _call_llm(
         self,
         state: AgentState,
         step: str,
         prior_outputs: Optional[Dict[str, Any]] = None,
+        runtime_extra: Optional[list[str]] = None,
         repair_mode: Optional[str] = None,
         previous_response: Optional[str] = None,
-    ):
-        messages: list[BaseMessage] = self.prompt_stack.assemble_messages(
+        probe_diagnosis: Optional[str] = None,
+    ) -> tuple[str, int]:
+        data_profile_dict = None
+        if state.get("data_profile"):
+            dp = state["data_profile"]
+            if hasattr(dp, "model_dump"):
+                data_profile_dict = dp.model_dump(mode="json")
+            elif isinstance(dp, dict):
+                data_profile_dict = dp
+
+        messages = self.prompt_stack.assemble_messages(
             step=step,
             scenario_text=state.get("scenario_text", ""),
-            data_profile=state.get("data_profile").model_dump(mode="json")
-            if state.get("data_profile")
-            else None,
+            data_profile=data_profile_dict,
             prior_outputs=prior_outputs,
+            runtime_extra=runtime_extra,
             repair_mode=repair_mode,
             previous_response=previous_response,
+            probe_diagnosis=probe_diagnosis,
         )
+
         response = self.llm.complete(messages)
+        content = response.content
+
+        idx = self._next_turn_index(state)
         turn = self.prompt_stack.log_turn(step, messages, response)
         state.setdefault("conversation_log", []).append(turn)
-        idx = self._next_turn_index(state)
-        self.persistence.persist_turn(
-            state["run_id"],
-            idx,
-            step,
-            messages=turn,
-        )
-        return response.content, idx
+        self.persistence.persist_turn(state["run_id"], idx, step, messages=turn)
+
+        return content, idx
 
     def _parse_json_with_repair(
         self,
         text: str,
         state: AgentState,
         step: str,
-        prior_outputs: Dict[str, Any],
-        default_on_fail: Any = None,
-    ) -> Any:
-        def _json_candidates(raw: str):
-            stripped = raw.strip()
-            if stripped.startswith("```"):
-                # remove fences and possible language tag
-                stripped = re.sub(r"^```[a-zA-Z]*", "", stripped).strip()
-                stripped = stripped.rstrip("`").strip()
-            candidates = [stripped]
-            # balanced brace/bracket scanning
-            for start_char, end_char in (("{", "}"), ("[", "]")):
-                opens = [m.start() for m in re.finditer(re.escape(start_char), stripped)]
-                closes = [m.start() for m in re.finditer(re.escape(end_char), stripped)]
-                if opens and closes and max(closes) > min(opens):
-                    candidates.append(stripped[min(opens) : max(closes) + 1])
-            # remove trailing commas
-            dedup = []
-            for cand in candidates:
-                cleaned = re.sub(r",(\s*[}\]])", r"\1", cand)
-                if cleaned not in dedup:
-                    dedup.append(cleaned)
-            return dedup
+        prior: Optional[Dict[str, Any]] = None,
+        max_repairs: int = 2,
+    ) -> tuple[Any, Optional[int]]:
+        # Strip markdown fences first
+        text = self._strip_markdown(text)
+        
+        for attempt in range(max_repairs + 1):
+            try:
+                return json.loads(text), None
+            except json.JSONDecodeError as err:
+                if attempt >= max_repairs:
+                    raise ValueError(f"JSON parse failed after {max_repairs} repairs: {err}") from err
+                text, repair_idx = self._call_llm(
+                    state,
+                    step,
+                    prior_outputs=prior,
+                    repair_mode="json",
+                    previous_response=text,
+                )
+                # Strip markdown again after repair
+                text = self._strip_markdown(text)
+        return json.loads(text), None
 
-        def _coerce_json(raw: str):
-            for candidate in _json_candidates(raw):
-                try:
-                    return json.loads(candidate)
-                except json.JSONDecodeError:
-                    try:
-                        val = ast.literal_eval(candidate)
-                        return val
-                    except Exception:
-                        continue
-            return None
-
-        parsed = _coerce_json(text)
-        if parsed is not None:
-            return parsed, None
-
-        repaired, idx = self._call_llm(
-            state,
-            step,
-            prior_outputs=prior_outputs,
-            repair_mode="json",
-            previous_response=text,
-        )
-        repaired_parsed = _coerce_json(repaired)
-        if repaired_parsed is None:
-            state["last_error"] = f"json_parse_failed_{step}"
-            if default_on_fail is not None:
-                return default_on_fail, idx
-            raise ValueError(f"Could not parse JSON for {step}")
-        return repaired_parsed, idx
-
-    def _step0_contract(self, state: AgentState) -> AgentState:
-        content, msg_idx = self._call_llm(state, "step0", prior_outputs=None)
-        payload, repair_idx = self._parse_json_with_repair(content, state, "step0", {})
-        contract = Step0Contract.model_validate(payload)
-        state["step0_contract"] = contract
-        idx = repair_idx or msg_idx
+    # ==========================================================================
+    # NODE: step1 - Contract
+    # ==========================================================================
+    
+    def _step1_contract(self, state: AgentState) -> AgentState:
+        content, msg_idx = self._call_llm(state, "step1")
+        payload, repair_idx = self._parse_json_with_repair(content, state, "step1")
+        contract = Step1Contract.model_validate(payload)
+        state["step1_contract"] = contract
         self.persistence.persist_turn(
-            state["run_id"], idx, "step0", step_outputs=contract
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "step0_contract"},
+            state["run_id"], repair_idx or msg_idx, "step1", step_outputs=contract
         )
         return state
 
-    def _step1_tags(self, state: AgentState) -> AgentState:
-        prior = {"step0_contract": state["step0_contract"].model_dump(mode="json")}
-        content, msg_idx = self._call_llm(state, "step1", prior_outputs=prior)
-        raw_payload, repair_idx = self._parse_json_with_repair(
-            content, state, "step1", prior, default_on_fail=[]
-        )
-
-        def _normalize(item: Dict[str, Any]) -> Dict[str, Any]:
-            if "extracted" not in item:
-                item["extracted"] = {"sets": [], "params": [], "decisions": [], "rule_hints": []}
-            if "rule_hints" in item and isinstance(item.get("rule_hints"), list):
-                item["extracted"].setdefault("rule_hints", item["rule_hints"])
-                item.pop("rule_hints", None)
-            return item
-
-        payload = [_normalize(dict(obj)) for obj in raw_payload]
-        tags = [TaggedSentence.model_validate(item) for item in payload]
-        state["step1_tags"] = tags
-        idx = repair_idx or msg_idx
-        self.persistence.persist_turn(
-            state["run_id"], idx, "step1", step_outputs=[t.model_dump() for t in tags]
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "step1_tags"},
-        )
-        return state
-
+    # ==========================================================================
+    # NODE: step2 - Spec Sheet
+    # ==========================================================================
+    
     def _step2_spec_sheet(self, state: AgentState) -> AgentState:
         prior = {
-            "step0_contract": state["step0_contract"].model_dump(mode="json"),
-            "step1_tags": [t.model_dump(mode="json") for t in state["step1_tags"]],
+            "contract": state["step1_contract"].model_dump(mode="json"),
         }
         content, msg_idx = self._call_llm(state, "step2", prior_outputs=prior)
-        payload, repair_idx = self._parse_json_with_repair(
-            content, state, "step2", prior, default_on_fail={}
-        )
-
-        def _fallback_spec() -> SpecSheet:
-            return SpecSheet(
-                sets=[],
-                decisions=[],
-                objective_terms=[],
-                constraint_families=[],
-                edge_cases=[],
-                open_questions=[],
-            )
-
-        try:
-            spec = SpecSheet.model_validate(payload)
-        except ValidationError:
-            # Try one format-repair round with validation hint
-            repaired_text, repair_idx2 = self._call_llm(
-                state,
-                "step2",
-                prior_outputs=prior,
-                repair_mode="json",
-                previous_response=json.dumps(payload),
-            )
-            payload2, repair_idx3 = self._parse_json_with_repair(
-                repaired_text, state, "step2", prior, default_on_fail={}
-            )
-            try:
-                spec = SpecSheet.model_validate(payload2)
-                repair_idx = repair_idx3 or repair_idx2 or repair_idx
-            except ValidationError:
-                spec = _fallback_spec()
+        payload, repair_idx = self._parse_json_with_repair(content, state, "step2", prior)
+        spec = SpecSheet.model_validate(payload)
         state["step2_spec_sheet"] = spec
-        idx = repair_idx or msg_idx
         self.persistence.persist_turn(
-            state["run_id"], idx, "step2", step_outputs=spec
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "step2_spec_sheet"},
+            state["run_id"], repair_idx or msg_idx, "step2", step_outputs=spec
         )
         return state
 
+    # ==========================================================================
+    # NODE: step3 - Constraint Templates
+    # ==========================================================================
+    
     def _step3_templates(self, state: AgentState) -> AgentState:
         prior = {
+            "contract": state["step1_contract"].model_dump(mode="json"),
             "spec_sheet": state["step2_spec_sheet"].model_dump(mode="json"),
         }
         content, msg_idx = self._call_llm(state, "step3", prior_outputs=prior)
-        payload, repair_idx = self._parse_json_with_repair(
-            content, state, "step3", prior, default_on_fail=[]
-        )
-        templates = [ConstraintTemplate.model_validate(item) for item in payload]
+        payload, repair_idx = self._parse_json_with_repair(content, state, "step3", prior)
+        
+        if isinstance(payload, list):
+            templates = [ConstraintTemplate.model_validate(t) for t in payload]
+        else:
+            templates = [ConstraintTemplate.model_validate(payload)]
+        
         state["step3_templates"] = templates
-        idx = repair_idx or msg_idx
         self.persistence.persist_turn(
-            state["run_id"],
-            idx,
-            "step3",
-            step_outputs=[t.model_dump(mode="json") for t in templates],
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "step3_constraint_templates"},
+            state["run_id"], repair_idx or msg_idx, "step3", step_outputs=templates
         )
         return state
 
-    def _step4_sanity(self, state: AgentState) -> AgentState:
+    # ==========================================================================
+    # NODE: sanity_check
+    # ==========================================================================
+    
+    def _sanity_check(self, state: AgentState) -> AgentState:
+        contract = state.get("step1_contract")
+        spec = state.get("step2_spec_sheet")
+        templates = state.get("step3_templates", [])
+        data_profile = state.get("data_profile")
+        
         report = run_sanity_checks(
-            state.get("step0_contract"),
-            state.get("step2_spec_sheet"),
-            state.get("step3_templates", []),
-            data_profile=state.get("data_profile"),
+            contract=contract,
+            spec_sheet=spec,
+            templates=templates,
+            data_profile=data_profile,
         )
-        state["step4_sanity_report"] = report
+        state["sanity_report"] = report
+        
         idx = self._next_turn_index(state)
         self.persistence.persist_turn(
-            state["run_id"], idx, "step4", sanity_report=report
+            state["run_id"], idx, "sanity_check", step_outputs=report
         )
-        self.persistence.log_event(
-            state["run_id"],
-            {
-                "ts": datetime.utcnow().isoformat(),
-                "event": "step4_sanity",
-                "overall_pass": report.overall_pass,
-            },
-        )
-        if not report.overall_pass:
-            # Route back by setting last_error; conditional edge handles loop
-            state["last_error"] = "sanity_failed"
         return state
 
-    def _step5_codegen(self, state: AgentState) -> AgentState:
+    # ==========================================================================
+    # NODE: step4 - Code Generation (FIXED)
+    # ==========================================================================
+    
+    def _step4_codegen(self, state: AgentState) -> AgentState:
+        # Get probe diagnosis if available from previous iteration
+        probe_diagnosis = None
+        if state.get("semantic_probe_reports"):
+            last_probe = state["semantic_probe_reports"][-1]
+            if last_probe.failed > 0 or last_probe.crashed > 0:
+                probe_diagnosis = "\n".join([
+                    f"- {name}: {diag}" 
+                    for name, diag in last_probe.diagnoses.items()
+                ])
+        
         prior = {
             "spec_sheet": state["step2_spec_sheet"].model_dump(mode="json"),
             "constraint_templates": [
                 t.model_dump(mode="json") for t in state.get("step3_templates", [])
             ],
-            "sanity": state.get("step4_sanity_report").model_dump(
-                mode="json", by_alias=True
-            )
-            if state.get("step4_sanity_report")
+            "sanity": state.get("sanity_report").model_dump(mode="json", by_alias=True)
+            if state.get("sanity_report")
             else None,
         }
-        content, msg_idx = self._call_llm(state, "step5", prior_outputs=prior)
-        code_text = content
-        repair_idx = None
-        if "```" in code_text:
-            code_text, repair_idx = self._call_llm(
-                state,
-                "step5",
-                prior_outputs=prior,
-                repair_mode="code",
-                previous_response=code_text,
-            )
+        
+        content, msg_idx = self._call_llm(
+            state, "step4", 
+            prior_outputs=prior,
+            probe_diagnosis=probe_diagnosis
+        )
+        
+        # ===== FIXED: Strip markdown directly, no extra LLM call =====
+        code_text = self._strip_markdown(content)
+        # =============================================================
+        
         state.setdefault("code_versions", []).append(
-            CodeVersion(step="step5", content=code_text)
+            CodeVersion(step="step4", content=code_text)
         )
         self.persistence.persist_turn(
-            state["run_id"], repair_idx or msg_idx, "step5", code=code_text
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {"ts": datetime.utcnow().isoformat(), "event": "step5_codegen"},
+            state["run_id"], msg_idx, "step4_codegen", code=code_text
         )
         return state
 
+    # ==========================================================================
+    # NODE: static_audit
+    # ==========================================================================
+    
     def _static_audit(self, state: AgentState) -> AgentState:
         code_text = state["code_versions"][-1].content
         audit = audit_script(code_text)
@@ -435,60 +443,97 @@ class AgentOrchestrator:
         self.persistence.persist_turn(
             state["run_id"], idx, "static_audit", static_audit=audit
         )
-        self.persistence.log_event(
-            state["run_id"],
-            {
-                "ts": datetime.utcnow().isoformat(),
-                "event": "static_audit",
-                "passed": audit.passed,
-            },
-        )
         if not audit.passed:
             state["last_error"] = "static_audit_failed"
         return state
 
-    def _step6_run_and_diagnose(self, state: AgentState) -> AgentState:
-        code_text = state["code_versions"][-1].content
-        try:
-            solve_report, iis_report, stdout, stderr = run_script(
-                code_text, state["data"]
+    # ==========================================================================
+    # NODE: semantic_probe
+    # ==========================================================================
+    
+    def _semantic_probe(self, state: AgentState) -> AgentState:
+        """Run semantic probes to detect constraint errors before full benchmark."""
+        
+        if not self.run_probes or self.probe_runner is None:
+            state.setdefault("semantic_probe_reports", []).append(
+                SemanticProbeReport(
+                    total=0, passed=0, failed=0, crashed=0, pass_rate=1.0
+                )
             )
-        except Exception as exc:  # pragma: no cover - defensive
+            return state
+        
+        code_text = state["code_versions"][-1].content
+        
+        # Check syntax first
+        syntax_ok, syntax_err = check_syntax(code_text)
+        if not syntax_ok:
+            state.setdefault("semantic_probe_reports", []).append(
+                SemanticProbeReport(
+                    total=8, passed=0, failed=0, crashed=8, pass_rate=0.0,
+                    diagnoses={"syntax": f"Syntax error: {syntax_err}"}
+                )
+            )
+            state["last_error"] = "syntax_error"
+            return state
+        
+        # Run probes
+        probe_report = self.probe_runner.run_all_probes(code_text)
+        state.setdefault("semantic_probe_reports", []).append(probe_report)
+        
+        idx = self._next_turn_index(state)
+        self.persistence.persist_turn(
+            state["run_id"], idx, "semantic_probe", 
+            step_outputs=probe_report.model_dump(mode="json")
+        )
+        
+        if probe_report.failed > 0 or probe_report.crashed > 0:
+            state["last_error"] = "probe_failed"
+        
+        return state
+
+    # ==========================================================================
+    # NODE: step5 - Run and Repair
+    # ==========================================================================
+    
+    def _step5_run_and_repair(self, state: AgentState) -> AgentState:
+        code_text = state["code_versions"][-1].content
+        
+        try:
+            solve_report, stdout, stderr = run_script(code_text, state["data"])
+        except Exception as exc:
             solve_report = SolveReport(
                 status="RUNTIME_ERROR", stderr=str(exc), stdout="", exit_code=-1
             )
-            iis_report = None
             stdout = ""
             stderr = str(exc)
             state["last_error"] = str(exc)
+        
         state.setdefault("solve_reports", []).append(solve_report)
-        if iis_report:
-            state.setdefault("iis_reports", []).append(iis_report)
+        
         idx = self._next_turn_index(state)
         self.persistence.persist_turn(
             state["run_id"],
             idx,
-            "step6",
+            "step5_run",
             stdout=stdout,
             stderr=stderr,
             solve_report=solve_report,
-            iis_report=iis_report,
-        )
-        self.persistence.log_event(
-            state["run_id"],
-            {
-                "ts": datetime.utcnow().isoformat(),
-                "event": "step6_run",
-                "status": solve_report.status,
-            },
         )
 
-        # Build repair brief via LLM if required
+        # Check if repair needed
         needs_repair = solve_report.status not in ("2", "GRB.OPTIMAL", "OPTIMAL")
-        audit_failed = (
-            state.get("static_audit_reports") and not state["static_audit_reports"][-1].passed
-        )
-        if needs_repair or audit_failed:
+        
+        if needs_repair:
+            # Get probe diagnosis for repair
+            probe_diagnosis = None
+            if state.get("semantic_probe_reports"):
+                last_probe = state["semantic_probe_reports"][-1]
+                if last_probe.diagnoses:
+                    probe_diagnosis = "\n".join([
+                        f"- {name}: {diag}" 
+                        for name, diag in last_probe.diagnoses.items()
+                    ])
+            
             prior = {
                 "spec_sheet": state.get("step2_spec_sheet").model_dump(mode="json")
                 if state.get("step2_spec_sheet")
@@ -498,43 +543,64 @@ class AgentOrchestrator:
                 ],
                 "code": code_text,
                 "solve_report": solve_report.model_dump(mode="json", by_alias=True),
-                "iis_report": iis_report.model_dump(mode="json", by_alias=True) if iis_report else None,
-                "static_audit": state["static_audit_reports"][-1].model_dump(mode="json", by_alias=True)
-                if state.get("static_audit_reports")
-                else None,
+                "probe_diagnosis": probe_diagnosis,
             }
+            
             content, msg_idx = self._call_llm(
-                state, "step6", prior_outputs=prior
+                state, "step5", prior_outputs=prior
             )
             brief_payload, repair_idx = self._parse_json_with_repair(
-                content, state, "step6", prior
+                content, state, "step5", prior
             )
             brief = RepairBrief.model_validate(brief_payload)
             state.setdefault("repair_briefs", []).append(brief)
             state["repair_count"] = state.get("repair_count", 0) + 1
             state["last_error"] = "needs_repair"
+            
             idx_for_brief = repair_idx or msg_idx
             self.persistence.persist_turn(
-                state["run_id"], idx_for_brief, "step6_repair_brief", step_outputs=brief
+                state["run_id"], idx_for_brief, "step5_repair_brief", step_outputs=brief
             )
         else:
             state["last_error"] = None
+        
         return state
+
+    # ==========================================================================
+    # ROUTING FUNCTIONS
+    # ==========================================================================
+    
+    def _route_after_sanity(self, state: AgentState):
+        if state.get("turn_index", 0) >= self.max_turns:
+            return "done"
+        report = state.get("sanity_report")
+        if report and not report.overall_pass:
+            return "revise_spec"
+        return "codegen"
 
     def _route_after_audit(self, state: AgentState):
         if state.get("turn_index", 0) >= self.max_turns:
             return "done"
         if state.get("static_audit_reports") and not state["static_audit_reports"][-1].passed:
             return "retry_codegen"
-        return "run"
+        return "probe"
 
-    def _route_after_sanity(self, state: AgentState):
+    def _route_after_probe(self, state: AgentState):
+        """Route based on semantic probe results."""
         if state.get("turn_index", 0) >= self.max_turns:
             return "done"
-        report = state.get("step4_sanity_report")
-        if report and not report.overall_pass:
-            return "revise_spec"
-        return "codegen"
+        if state.get("repair_count", 0) >= self.repair_limit:
+            return "done"
+        
+        if state.get("semantic_probe_reports"):
+            last_probe = state["semantic_probe_reports"][-1]
+            if last_probe.failed > 0 or last_probe.crashed > 0:
+                if state.get("repair_count", 0) < self.repair_limit:
+                    state["repair_count"] = state.get("repair_count", 0) + 1
+                    return "repair_codegen"
+                return "done"
+        
+        return "run"
 
     def _route_after_run(self, state: AgentState):
         if state.get("turn_index", 0) >= self.max_turns:
@@ -552,6 +618,10 @@ class AgentOrchestrator:
         return "done"
 
 
+# ==============================================================================
+# HELPER FUNCTION
+# ==============================================================================
+
 def build_initial_state(
     scenario_id: str, data: Dict[str, Any], base_prompt: str, scenario_text: str
 ) -> AgentState:
@@ -568,8 +638,8 @@ def build_initial_state(
         "conversation_log": [],
         "code_versions": [],
         "static_audit_reports": [],
+        "semantic_probe_reports": [],
         "solve_reports": [],
-        "iis_reports": [],
         "repair_briefs": [],
         "turn_index": 0,
     }

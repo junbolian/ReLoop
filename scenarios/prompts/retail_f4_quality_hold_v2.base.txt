@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_quality_hold
+Scenario ID: retail_f4_quality_hold_v2
+
+Business narrative:
+A quality issue forces the retailer to halt production of the basic product after a certain time. Existing units of that product can still be sold until they are exhausted or expire, but no new units can be produced during the hold window. Demand for other products is unaffected. Unserved demand for the basic product is lost and penalized, even if substitutes exist.
+
+Structure cues:
+- The inventory and production logic is the same as in the base scenario: single-echelon, local demand, local production, and no transshipment.
+- In the JSON, the production capacity for the basic product is set to zero after a specified time index, while other products retain their production capacities.
+- Inventory for each product and location evolves from period to period based on previous stock, production (which is zero for the basic product during the hold), sales, and waste, and must remain non-negative.
+- Any unmet demand for the basic product after considering allowed substitution becomes lost sales.
+- Storage capacity, substitution behavior, zero lead times, and generous labor capacity remain as usual.
+- The objective is to minimize total cost while capturing the effect of the asymmetric quality hold on the basic product.

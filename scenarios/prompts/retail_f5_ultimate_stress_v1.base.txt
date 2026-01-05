@@ -1,0 +1,16 @@
+[SCENARIO]
+Family: F5 (Feasibility and Model Repair)
+Archetype: retail_f5_ultimate_stress
+Scenario ID: retail_f5_ultimate_stress_v1
+
+Business narrative:
+This is a composite stress test that combines three stressors: tight storage capacity, a mid-horizon production failure during a peak period, and the absence of any substitution between products. Demand is local and exogenous at each location. The scenario is designed as a boss-level test where the only viable strategy is to accept significant lost sales while respecting all physical constraints.
+
+Structure cues:
+- The archetype combines the storage bottleneck of retail_f3_storage_bottleneck, the peak supply failure of retail_f4_peak_failure, and the no-substitution structure of retail_f2_no_substitution.
+- Storage capacities in the JSON are sharply reduced and must be enforced as binding constraints at each location and period.
+- Production capacities are set to zero during a mid-horizon peak window, so no new units can be produced in those periods.
+- The substitution graph is empty (sub_edges = []), so each product's demand can only be served by its own inventory at the location.
+- Inventory at each product, location, and period remains non-negative and reflects previous stock, allowed production, sales, and waste. Unmet demand is explicitly treated as lost sales.
+- There is no transshipment and lead times are zero. Labor capacity remains generous.
+- The objective is to minimize total cost while handling simultaneous capacity, supply, and assortment stress without violating feasibility.

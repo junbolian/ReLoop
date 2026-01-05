@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F5 (Feasibility and Model Repair)
+Archetype: retail_f5_impossible_demand
+Scenario ID: retail_f5_impossible_demand_v2
+
+Business narrative:
+Demand is scaled so high that it is physically impossible to satisfy all of it given the production and storage capacities. Even with perfect planning, some demand must be sacrificed. This scenario is designed to test whether the model correctly accepts that full service is impossible and uses lost sales to remain feasible instead of implicitly assuming 100% service.
+
+Structure cues:
+- The inventory, production, storage, and lost sales framework is the same as in the base scenario.
+- In the JSON, all demand curves are multiplied so that total demand over the horizon far exceeds what can be produced or stored. The model should not attempt to enforce full demand satisfaction; lost sales must be used where necessary.
+- Inventory at each location and period is kept non-negative and reflects previous stock, local production, sales, and waste.
+- Storage capacity and production capacity constraints must both be applied as given.
+- There is no transshipment, lead times are zero, and substitution behavior follows the substitution graph.
+- The objective is to minimize total cost, balancing holding, waste, and large lost sales penalties, effectively performing a form of model repair by accepting partial service.

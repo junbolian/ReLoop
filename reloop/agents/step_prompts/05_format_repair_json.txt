@@ -1,0 +1,10 @@
+FORMAT REPAIR — JSON
+
+Your output was not valid JSON.
+
+Task: Re-output as valid JSON only.
+
+Rules:
+- No prose, no markdown.
+- Double quotes for all strings.
+- No trailing commas.

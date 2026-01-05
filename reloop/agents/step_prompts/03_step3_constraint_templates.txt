@@ -1,0 +1,133 @@
+STEP 3 - CONSTRAINT TEMPLATES
+
+Task:
+Using spec_sheet, produce constraint templates as a JSON array.
+
+Output: Single JSON array. No surrounding text, no markdown.
+
+=============================================================================
+TEMPLATE SCHEMA (all fields required)
+=============================================================================
+
+{
+  "prefix": "constraint_name",
+  "template_type": "BALANCE|CAPACITY|DYNAMICS",
+  "applies_when": "condition",
+  "indices": ["p","l","t"],
+  "equations": [
+    {"name_suffix": "p_l_t", "sense": "=", "lhs": "left side", "rhs": "right side"}
+  ],
+  "notes": ["boundary handling notes"]
+}
+
+=============================================================================
+REQUIRED TEMPLATES (output as JSON array)
+=============================================================================
+
+[
+  {
+    "prefix": "demand_route",
+    "template_type": "BALANCE",
+    "applies_when": "sub_edges nonempty",
+    "indices": ["p", "l", "t"],
+    "equations": [
+      {"name_suffix": "p_l_t", "sense": "<=", "lhs": "sum_{pt} S[p,pt,l,t]", "rhs": "demand[p,l,t]"}
+    ],
+    "notes": ["only when outgoing_edges[p] nonempty; limits substitution to own demand"]
+  },
+  {
+    "prefix": "sales_conservation",
+    "template_type": "BALANCE",
+    "applies_when": "always",
+    "indices": ["p", "l", "t"],
+    "equations": [
+      {"name_suffix": "p_l_t", "sense": "=", "lhs": "sum_a y[p,l,t,a] + L[p,l,t]", "rhs": "demand[p,l,t] + inbound - outbound"}
+    ],
+    "notes": ["inbound = sum S[pf,p,l,t]; outbound = sum S[p,pt,l,t]; if no substitution both are 0"]
+  },
+  {
+    "prefix": "availability",
+    "template_type": "BALANCE",
+    "applies_when": "always",
+    "indices": ["p", "l", "t", "a"],
+    "equations": [
+      {"name_suffix": "p_l_t_a", "sense": "<=", "lhs": "y[p,l,t,a]", "rhs": "I[p,l,t,a]"}
+    ],
+    "notes": ["for all valid a in 1..shelf_life[p]"]
+  },
+  {
+    "prefix": "aging",
+    "template_type": "DYNAMICS",
+    "applies_when": "shelf_life active",
+    "indices": ["p", "l", "t", "a"],
+    "equations": [
+      {"name_suffix": "p_l_t_a", "sense": "=", "lhs": "I[p,l,t+1,a]", "rhs": "I[p,l,t,a+1] - y[p,l,t,a+1]"}
+    ],
+    "notes": ["only for a < shelf_life[p] and t < T; do NOT add for t=T"]
+  },
+  {
+    "prefix": "expire_clear",
+    "template_type": "DYNAMICS",
+    "applies_when": "shelf_life active",
+    "indices": ["p", "l", "t"],
+    "equations": [
+      {"name_suffix": "p_l_t", "sense": "=", "lhs": "W[p,l,t]", "rhs": "I[p,l,t,1] - y[p,l,t,1]"}
+    ],
+    "notes": ["waste is unsold inventory from bucket a=1"]
+  },
+  {
+    "prefix": "fresh_inflow",
+    "template_type": "DYNAMICS",
+    "applies_when": "shelf_life active",
+    "indices": ["p", "l", "t"],
+    "equations": [
+      {"name_suffix": "p_l_t", "sense": "=", "lhs": "I[p,l,t,shelf_life[p]]", "rhs": "Q[p,l,t-lead_time[p]]"}
+    ],
+    "notes": ["if t <= lead_time[p], rhs = 0; never access Q[p,l,0]"]
+  },
+  {
+    "prefix": "storage_cap",
+    "template_type": "CAPACITY",
+    "applies_when": "cold_capacity present",
+    "indices": ["l", "t"],
+    "equations": [
+      {"name_suffix": "l_t", "sense": "<=", "lhs": "sum_p sum_a I[p,l,t,a] * cold_usage[p]", "rhs": "cold_capacity[l]"}
+    ],
+    "notes": []
+  },
+  {
+    "prefix": "prod_cap",
+    "template_type": "CAPACITY",
+    "applies_when": "production_cap present",
+    "indices": ["p", "t"],
+    "equations": [
+      {"name_suffix": "p_t", "sense": "<=", "lhs": "sum_l Q[p,l,t]", "rhs": "production_cap[p][t-1]"}
+    ],
+    "notes": ["production_cap is 0-indexed list"]
+  }
+]
+
+=============================================================================
+SUBSTITUTION SEMANTICS (CRITICAL)
+=============================================================================
+
+sub_edges = [[p_from, p_to], ...] means p_from's demand served by p_to.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
+
+Edge mappings (build BEFORE constraints):
+  for p_from, p_to in sub_edges:
+      outgoing_edges[p_from].append(p_to)   # p_from sends demand OUT
+      incoming_edges[p_to].append(p_from)   # p_to receives requests IN
+
+For product p:
+  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]
+  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]
+
+=============================================================================
+DO NOT
+=============================================================================
+- Do NOT use variable 'd' - use demand[p,l,t] directly
+- Do NOT forget L[p,l,t] in sales_conservation
+- Do NOT add aging for t=T (would access I[p,l,T+1,a])
+- Do NOT access Q[p,l,0] (use conditional for lead_time)
+- Do NOT omit any required fields in the schema

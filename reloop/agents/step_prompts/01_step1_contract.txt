@@ -1,0 +1,25 @@
+STEP 1 — LOCK THE TASK CONTRACT
+
+Task:
+Based on scenario narrative and data_profile, answer:
+1) What are we optimizing?
+2) What can we control?
+3) What are hard constraints?
+4) What are soft violations (penalized)?
+
+Output: Single JSON object, no surrounding text.
+
+Schema:
+{
+  "optimize": "one sentence",
+  "controls": ["order quantities", "inventory allocation", ...],
+  "hard_constraints": ["inventory flow", "capacity limits", "perishability", ...],
+  "soft_violations": [{"name": "lost_sales", "penalty": "costs.lost_sales"}],
+  "summary": "one sentence"
+}
+
+Rules:
+- Lost demand penalized → include in soft_violations with costs.lost_sales.
+- Shelf life exists → include "perishability/aging" in hard_constraints.
+- sub_edges nonempty → include "substitution active" in hard_constraints.
+- trans_edges empty → include "no transshipment" in hard_constraints.

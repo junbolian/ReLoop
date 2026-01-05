@@ -1,0 +1,16 @@
+[SCENARIO]
+Family: F7 (Network and Multi Echelon)
+Archetype: retail_f7_transshipment
+Scenario ID: retail_f7_transshipment_v1
+
+Business narrative:
+The retailer operates a fully connected lateral transshipment network among all locations. Inventory can be moved between any pair of locations at a transshipment cost, allowing local surpluses to be reallocated to locations facing shortages. Demand remains local and exogenous at each site, and unsatisfied demand after considering local stock and inbound transshipments is lost and penalized.
+
+Structure cues:
+- This archetype extends the single-echelon inventory model by allowing transshipment flows along directed edges given in the JSON; in this case, all ordered pairs of distinct locations are connected.
+- For each product and period, inventory at a location changes according to incoming production, incoming transshipments, outgoing transshipments, sales, and waste, and must remain non-negative.
+- Transshipment flows from a location in a period cannot exceed that location's available inventory for the product. All such moves incur transshipment costs as specified in the JSON.
+- Demand remains local: each location's demand must be met from its own on-hand inventory and inbound transshipments, if available.
+- Storage capacity constraints apply to on-hand inventory at each location, while in-transit units can be treated separately if desired.
+- Lead times for transshipment are effectively zero in this archetype, so shipments dispatched in a period are available at the destination within the same period.
+- The objective is to minimize total cost including holding, waste, lost sales, and transshipment costs.
