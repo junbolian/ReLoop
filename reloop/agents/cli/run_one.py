@@ -30,7 +30,9 @@ def _extract_scenario_text(prompt_text: str) -> str:
 def _resolve_prompt_path(scenario_id: str) -> Optional[Path]:
     prompts_dir = Path("scenarios") / "prompts"
     candidates = [
-        prompts_dir / f"{scenario_id}.txt",
+        prompts_dir / f"{scenario_id}.base.txt",      # ReLoop Agent
+        prompts_dir / f"{scenario_id}.scenario.txt",  # Zero-shot
+        prompts_dir / f"{scenario_id}.txt",           
         prompts_dir / f"{scenario_id}.user.txt",
         prompts_dir / "system_prompt.txt",
     ]
@@ -57,7 +59,10 @@ def main():
         "--repair-limit", type=int, default=5, help="Maximum repair iterations."
     )
     parser.add_argument(
-        "--max-turns", type=int, default=8, help="Hard cap on total agent turns."
+        "--max-turns", type=int, default=12, help="Hard cap on total agent turns."
+    )
+    parser.add_argument(
+        "--no-probes", action="store_true", help="Disable semantic probe verification."
     )
     args = parser.parse_args()
 
@@ -97,14 +102,17 @@ def main():
     prompt_stack = PromptStack(base_prompt=base_prompt_text, step_prompts_dir=step_prompts_dir)
     llm = build_llm_client("mock" if args.mock_llm else "openai", model=args.model)
     persistence = PersistenceManager(Path(args.out))
+    
     orchestrator = AgentOrchestrator(
         llm_client=llm,
         prompt_stack=prompt_stack,
         persistence=persistence,
         repair_limit=args.repair_limit,
         max_turns=args.max_turns,
+        run_probes=not args.no_probes,  # NEW: enable/disable probes
     )
 
+    # UPDATED: New state fields (removed iis_reports, step1_tags; renamed steps)
     initial_state = {
         "run_id": uuid.uuid4().hex,
         "scenario_id": scenario_id,
@@ -116,15 +124,33 @@ def main():
         "conversation_log": [],
         "code_versions": [],
         "static_audit_reports": [],
+        "semantic_probe_reports": [],  # NEW: replaces iis_reports
         "solve_reports": [],
-        "iis_reports": [],
         "repair_briefs": [],
         "turn_index": 0,
     }
+    
     AgentStateModel.model_validate(initial_state)
     final_state = orchestrator.run(initial_state)
     artifact_dir = Path(args.out) / initial_state["run_id"]
+    
+    # Print summary
     print(f"Run complete. Artifacts at {artifact_dir}")
+    
+    # Print probe results if available
+    if final_state.get("semantic_probe_reports"):
+        last_probe = final_state["semantic_probe_reports"][-1]
+        print(f"Semantic Probes: {last_probe.passed}/{last_probe.total} passed")
+        if last_probe.failed_probes:
+            print(f"Failed probes: {last_probe.failed_probes}")
+    
+    # Print solve results if available
+    if final_state.get("solve_reports"):
+        last_solve = final_state["solve_reports"][-1]
+        print(f"Solver status: {last_solve.status}")
+        if last_solve.obj_val is not None:
+            print(f"Objective: {last_solve.obj_val}")
+    
     return final_state
 
 

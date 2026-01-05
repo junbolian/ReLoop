@@ -1,0 +1,65 @@
+STEP 5 — REPAIR BRIEF
+
+You will receive error information from running the code, including semantic probe results if available.
+
+Task: Diagnose the error and suggest a fix.
+
+Output: Single JSON object.
+
+Schema:
+{
+  "target": "SPEC|CODEGEN",
+  "error_type": "INFEASIBLE|UNBOUNDED|RUNTIME|FORMAT|PROBE_FAILURE|WRONG_ANSWER",
+  "likely_cause": "one sentence",
+  "fix": "one sentence",
+  "failed_probes": ["probe_name1", "probe_name2"]
+}
+
+=============================================================================
+COMMON ERROR PATTERNS
+=============================================================================
+
+1. INFEASIBLE:
+   - Check: substitution inbound/outbound edges computed correctly?
+   - Check: t=1 initialization (non-fresh buckets = 0)?
+   - Check: demand computed correctly (demand_curve * demand_share)?
+   - Check: L (lost sales) variable present and in constraint?
+
+2. UNBOUNDED:
+   - Cause: missing demand_route constraint (S_out <= demand)
+   - Fix: add constraint when substitution active
+
+3. KeyError / AttributeError:
+   - Cause: wrong data structure assumption
+   - Fix: demand_share is {location: scalar}, sub_edges is [[from, to], ...]
+
+4. WRONG_ANSWER (runs but objective differs):
+   - Check: holding cost only for a >= 2?
+   - Check: production capacity binds on Q, not arrival?
+   - Check: substitution semantics correct?
+     → Edge [A,B] means A's demand can be served by B's inventory
+     → S[A,B,l,t] = quantity of A's demand fulfilled by B
+
+=============================================================================
+SEMANTIC PROBE DIAGNOSIS GUIDE
+=============================================================================
+
+If probe diagnosis is provided, use it to identify the specific constraint error:
+
+| Failed Probe | Likely Issue | Fix |
+|--------------|--------------|-----|
+| substitution_basic | S variables wrong | Check edge direction: [p_from, p_to] means p_from's demand served by p_to |
+| demand_route_constraint | Missing S_out <= demand | Add: sum S[p, *, l, t] <= demand[p, l, t] |
+| no_substitution | Spurious S when empty | Only create S if sub_edges nonempty |
+| production_capacity | Prod cap missing/wrong | Check: sum_l Q[p,l,t] <= prod_cap[p,t] |
+| storage_capacity | Storage cap wrong | Check cold_usage coefficients and aggregation |
+| aging_dynamics | Aging logic wrong | Check: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1] |
+| lost_sales_slack | L missing | Add L to sales_conservation constraint |
+| nonnegativity | Negative inventory | Check lb=0 on all variables |
+
+=============================================================================
+TARGET SELECTION
+=============================================================================
+
+- target = "SPEC" if the mathematical formulation is wrong (missing constraint family)
+- target = "CODEGEN" if the code implementation is wrong but spec is correct

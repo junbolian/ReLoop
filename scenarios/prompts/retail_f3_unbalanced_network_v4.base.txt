@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_unbalanced_network
+Scenario ID: retail_f3_unbalanced_network_v4
+
+Business narrative:
+Storage capacity is highly unbalanced across locations. One location acts as a high-capacity hub with ample space, while all other locations have very limited storage. Demand is still local to each location, and there is no movement of inventory between locations. The retailer must decide how much to store at each site given these asymmetric capacity limits.
+
+Structure cues:
+- The inventory system remains single-echelon with local demand at each location and no transshipment.
+- The JSON concentrates storage capacity at one hub location and gives very small capacities to the satellites. The model must enforce per-location storage constraints using these capacities and product storage usage coefficients.
+- Inventory for each product and location evolves from previous stock and local production, minus sales and waste, without ever going below zero.
+- Production capacities, zero lead times, and substitution behavior are as in the base scenario.
+- The objective is to minimize total cost while respecting the highly asymmetric storage limits across locations.

@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_peak_failure
+Scenario ID: retail_f4_peak_failure_v4
+
+Business narrative:
+An upstream supply failure occurs during a high-demand peak, such as a holiday season. Production capacity drops to zero only during the peak window, while demand for all products remains high. The retailer must build inventory before the peak, use it strategically during the failure, and accept some lost sales if necessary. Demand that cannot be served in the peak periods is lost and penalized.
+
+Structure cues:
+- The inventory, storage, and lost sales structure is the same as in the base scenario.
+- In the JSON, production capacities are set to zero only during a mid-horizon block of periods that coincide with the demand peak. No new production can occur in those periods.
+- Inventory at each location remains non-negative and is updated from period to period based on earlier production, sales, and waste.
+- Substitution behavior, absence of transshipment, zero lead times, and generous labor capacity all remain in effect.
+- The objective is to minimize total cost while planning around the temporary but strategically placed supply failure.

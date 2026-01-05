@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F2 (Assortment and Substitution)
+Archetype: retail_f2_cannibalization
+Scenario ID: retail_f2_cannibalization_v3
+
+Business narrative:
+The retailer heavily promotes a low-margin basic product, strongly increasing its demand and making lost sales on that product relatively cheap, while shared storage is tightened. Because all products share limited storage, stocking more of the promoted basic product can displace higher-margin premium and short-life items. Customers can still switch along the substitution pattern in the category, but the promotional focus on the basic product creates cannibalization pressure.
+
+Structure cues:
+- The underlying inventory and substitution structure is the same as in retail_f2_circular_sub, with a single-echelon system, shared storage at each location, and a directed substitution graph defined in the JSON.
+- The JSON increases demand for the basic product and reduces its lost sales penalty while keeping higher margins on other items, and reduces storage capacity, making space more scarce.
+- Tight shared storage capacity means that choosing to stock more of the basic product can crowd out premium and short-life items in the warehouse, purely through the capacity and cost parameters.
+- Inventory remains non-negative, lost sales capture unsatisfied demand after substitution, and there is still no transshipment or backordering.
+- The objective is to minimize total cost, and the cannibalization effect is driven by the interplay of demand, margin, lost sales penalties, and capacity parameters rather than by any change to the model's basic structure.

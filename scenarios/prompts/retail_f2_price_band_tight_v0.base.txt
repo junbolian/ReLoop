@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F2 (Assortment and Substitution)
+Archetype: retail_f2_price_band_tight
+Scenario ID: retail_f2_price_band_tight_v0
+
+Business narrative:
+The retailer operates a category with a value-oriented basic product and a premium product that are sold under tight price bands and margin trade-offs. Premium carries higher effective margin and stricter implicit service expectations, while basic is cheaper but more price sensitive. When Basic inventory is insufficient, Basic's demand can be served by Premium (upward substitution); the reverse does not occur. Unmet demand after this limited upgrade behavior is lost and penalized.
+
+Structure cues:
+- The physical and inventory structure follows the same pattern as in retail_f1_base: single-echelon, local demand, local inventory, shared storage, and no transshipment.
+- The substitution graph contains a single directed edge [Basic, Premium]. This means: when Basic inventory is insufficient, Premium inventory can serve Basic's demand. S[Basic, Premium] represents units of Basic's demand fulfilled by Premium.
+- Lost sales penalties and purchasing or production costs in the JSON make premium more valuable to protect and basic cheaper but more elastic. This asymmetry is expressed through cost parameters, not through any special-case constraints.
+- Inventory remains non-negative; any demand that cannot be satisfied even after allowing the basic-to-premium substitution is recorded as lost sales.
+- There is no transshipment, lead times are effectively zero, and labor capacity is non-binding.
+- The objective is to minimize total cost including holding, waste, and lost sales while respecting the one-way substitution rule and storage capacity limits.

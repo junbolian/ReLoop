@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_labor_constraint
+Scenario ID: retail_f8_labor_constraint_v3
+
+Business narrative:
+Store and warehouse labor capacity directly limits how much inventory can be handled in each period. Labor is required for activities such as receiving, picking, and replenishment, and total labor usage per period at a location cannot exceed a location-specific cap. Demand is local and exogenous; unmet demand is lost and penalized.
+
+Structure cues:
+- The inventory system is single-echelon with production, storage capacity, and lost sales.
+- The JSON provides a labor capacity per location and period and a per-unit labor usage for each product. Total labor consumed by the relevant activities at a location in a period must not exceed this capacity.
+- A simple representation is to treat labor usage as proportional to the volume of units handled, such as the sum of units received, picked, or moved for that product and period.
+- Inventory balance follows the usual pattern: previous stock plus arrivals minus sales and waste, with non-negative inventory and lost sales for unmet demand.
+- Storage capacity constraints remain in effect and there is no transshipment in this archetype.
+- The objective is to minimize total cost while respecting labor capacity constraints, which may bind in busy periods.

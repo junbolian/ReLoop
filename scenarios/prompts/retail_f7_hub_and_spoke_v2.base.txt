@@ -1,0 +1,16 @@
+[SCENARIO]
+Family: F7 (Network and Multi Echelon)
+Archetype: retail_f7_hub_and_spoke
+Scenario ID: retail_f7_hub_and_spoke_v2
+
+Business narrative:
+The network has one high-capacity hub distribution center that ships to several low-capacity spokes. All lateral movements must pass through the hub; spokes cannot ship directly to each other or back to the hub. Demand occurs at spokes and is local. This captures a hub-and-spoke distribution strategy where stock is pooled at the hub and then pushed out to stores.
+
+Structure cues:
+- Locations are the same as in the base network, but storage capacity in the JSON is concentrated at a single hub location with small capacities at the other locations.
+- The transshipment network consists only of directed edges from the hub to each spoke. Inventory can move from the hub to the spokes but not directly between spokes and not from spokes back to the hub.
+- For each product, location, and period, inventory evolves based on local production (if any), inbound shipments, outbound shipments, sales (at spokes), and waste, and must remain non-negative.
+- Transshipment flows from the hub are limited by the hub's available inventory and incur transshipment costs. Spokes largely rely on inbound shipments from the hub to meet local demand.
+- Storage capacity constraints must be enforced at all locations, with no direct lateral exchange between spokes.
+- Lead times for transshipment are effectively zero, and substitution behavior remains as encoded.
+- The objective is to minimize total cost while exploiting the centralized hub structure.

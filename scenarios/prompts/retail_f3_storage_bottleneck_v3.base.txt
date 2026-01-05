@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_storage_bottleneck
+Scenario ID: retail_f3_storage_bottleneck_v3
+
+Business narrative:
+All locations share a tight storage resource that applies across all products, representing limited chilled, ambient, or dry space. Demand at each location is still exogenous and local, and inventory is not transferred between locations. The main operational challenge is that total stored volume at each site must fit within a strict capacity, so stocking one product reduces room for others.
+
+Structure cues:
+- The inventory, production, and lost sales logic is the same as in retail_f1_base: single-echelon, multiple products and locations, local demand, and no backorders or transshipment.
+- At every location and period, a single shared storage capacity constraint limits the volume-weighted sum of on-hand inventory across all products using product-specific storage usage and the location capacity from the JSON.
+- Inventory levels at each location are kept non-negative and evolve from carried-over stock and new production, minus sales and waste.
+- Substitution edges, if any, are taken from the JSON and follow the standard semantics: edge [A, B] means A's demand can be served by B.
+- Production capacities, zero lead times, and generous labor capacity remain as in the base scenario.
+- The objective is to minimize total cost while the shared storage constraint is designed to be binding and thus central to the trade-offs.

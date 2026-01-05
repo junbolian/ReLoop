@@ -8,14 +8,21 @@ import sys
 import textwrap
 from typing import Any, Dict, Optional, Tuple
 
-from ..schemas import IISReport, SolveReport
-from .iis_tools import summarize_prefix_counts
+from ..schemas import SolveReport
 
 
 def run_script(
     code: str, data: Dict[str, Any], timeout: int = 180
-) -> Tuple[SolveReport, Optional[IISReport], str, str]:
-    """Exec the generated code in an isolated subprocess with pre-loaded data."""
+) -> Tuple[SolveReport, str, str]:
+    """
+    Execute the generated code in an isolated subprocess with pre-loaded data.
+    
+    Returns:
+        Tuple of (SolveReport, stdout, stderr)
+    
+    Note: IIS computation has been removed. Use semantic probes for constraint
+    error diagnosis instead.
+    """
 
     env = os.environ.copy()
     env["RELOOP_CODE_B64"] = base64.b64encode(code.encode("utf-8")).decode("utf-8")
@@ -29,7 +36,7 @@ def run_script(
         try:
             import gurobipy as gp
             from gurobipy import GRB
-        except Exception:  # pragma: no cover - gurobipy may be missing in tests
+        except Exception:
             gp = None
             GRB = None
 
@@ -39,11 +46,10 @@ def run_script(
 
         start = time.time()
         solve_meta = {"status": None, "obj_val": None, "obj_bound": None, "mip_gap": None}
-        iis_constraints = []
 
         try:
             exec(compile(code, "<generated>", "exec"), globals_ns)
-        except SystemExit as exc:  # pragma: no cover - passthrough
+        except SystemExit as exc:
             solve_meta["exit_code"] = int(exc.code) if isinstance(exc.code, int) else 0
         except Exception:
             traceback.print_exc()
@@ -58,25 +64,9 @@ def run_script(
                     solve_meta["obj_val"] = getattr(model, "objVal", None)
                     solve_meta["obj_bound"] = getattr(model, "objBound", None)
                     solve_meta["mip_gap"] = getattr(model, "MIPGap", None)
-                    if gp and status_val in (
-                        gp.GRB.INFEASIBLE,
-                        gp.GRB.INF_OR_UNBD,
-                        gp.GRB.UNBOUNDED,
-                    ):
-                        try:
-                            model.computeIIS()
-                            iis_constraints = [
-                                c.ConstrName
-                                for c in model.getConstrs()
-                                if getattr(c, "IISConstr", 0)
-                            ]
-                        except Exception:
-                            pass
                 except Exception:
                     pass
             print("SOLVE_JSON::" + json.dumps(solve_meta))
-            if iis_constraints:
-                print("IIS_JSON::" + json.dumps(iis_constraints))
         """
     )
 
@@ -89,7 +79,6 @@ def run_script(
     )
 
     solve_meta: Dict[str, Any] = {}
-    iis_constraints: Optional[list] = None
     for line in proc.stdout.splitlines():
         if line.startswith("SOLVE_JSON::"):
             payload = line.split("SOLVE_JSON::", 1)[1]
@@ -97,12 +86,6 @@ def run_script(
                 solve_meta = json.loads(payload)
             except json.JSONDecodeError:
                 solve_meta = {"error": "could not parse solve metadata", "raw": payload}
-        if line.startswith("IIS_JSON::"):
-            payload = line.split("IIS_JSON::", 1)[1]
-            try:
-                iis_constraints = json.loads(payload)
-            except json.JSONDecodeError:
-                iis_constraints = []
 
     solve_report = SolveReport(
         status=str(solve_meta.get("status")) if "status" in solve_meta else None,
@@ -115,9 +98,13 @@ def run_script(
         elapsed_sec=solve_meta.get("elapsed_sec"),
     )
 
-    iis_report: Optional[IISReport] = None
-    if iis_constraints is not None:
-        prefix_summary = summarize_prefix_counts(iis_constraints)
-        iis_report = IISReport(constraints=iis_constraints, prefix_summary=prefix_summary)
+    return solve_report, proc.stdout, proc.stderr
 
-    return solve_report, iis_report, proc.stdout, proc.stderr
+
+def check_syntax(code: str) -> Tuple[bool, Optional[str]]:
+    """Check if code has valid Python syntax."""
+    try:
+        compile(code, '<string>', 'exec')
+        return True, None
+    except SyntaxError as e:
+        return False, str(e)

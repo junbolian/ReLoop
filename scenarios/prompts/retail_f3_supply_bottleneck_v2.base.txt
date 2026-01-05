@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_supply_bottleneck
+Scenario ID: retail_f3_supply_bottleneck_v2
+
+Business narrative:
+Storage space is abundant but upstream production capacity is tight. The main bottleneck is how many units can be produced or procured each period, not how many can be stored. Demand is still exogenous, local to each location, and there are no backorders or transshipment.
+
+Structure cues:
+- The inventory and lost sales logic is the same as in the base scenario.
+- Storage capacities in the JSON are set very high so that storage constraints are effectively non-binding but still formally present.
+- Per-product production capacities are significantly reduced. These caps must be enforced and become the main source of unmet demand.
+- Inventory at each location and period stays non-negative and changes according to local production, sales, and waste.
+- There is no transshipment, lead times are zero, and substitution behavior is determined by the substitution graph with standard semantics.
+- The objective is to minimize total cost, with lost sales penalties playing a central role because of tight production capacity.

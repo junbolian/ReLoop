@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F6 (Logistics and Integer Procurement)
+Archetype: retail_f6_pack_size_integer
+Scenario ID: retail_f6_pack_size_integer_v3
+
+Business narrative:
+Orders must be placed in whole packs or pallets of a fixed size. The retailer can only buy an integer number of packs; partial packs cannot be ordered. Demand and storage remain as before, and demand that cannot be served from on-hand inventory is lost and penalized.
+
+Structure cues:
+- The system is single-echelon with ordering decisions, storage capacity, and lost sales.
+- The JSON specifies a positive global pack size parameter `pack_size` in the "constraints" object. In every period, the order quantity for each product at each location must be a whole number of packs, so the ratio of ordered units to `pack_size` must be a non-negative integer.
+- This pack-size rule introduces integrality into order quantities and must be enforced consistently for all products and periods using the same pack size.
+- Inventory balance with zero lead time is standard: on-hand stock comes from previous stock and ordered units, minus sales and waste, and remains non-negative.
+- There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph.
+- The objective is to minimize total cost subject to the pack-size ordering restriction.

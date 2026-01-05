@@ -1,3 +1,21 @@
+"""
+Generate scenario prompt files for LLM evaluation on RetailOpt-190.
+
+This script generates prompts for TWO evaluation modes:
+
+1. Zero-shot Baseline:
+   - Uses: {scenario_id}.scenario.txt (includes guardrails)
+   - Single LLM call
+   - For all baseline models (GPT-4, Claude, Qwen, etc.)
+
+2. ReLoop Agent:
+   - Uses: base_prompt + step_prompts (00-07)
+   - Multi-step pipeline with probes
+   - For Qwen2.5-Coder-14B primary experiments
+
+Recommended Model: Qwen2.5-Coder-14B-Instruct
+"""
+
 import argparse
 import json
 from pathlib import Path
@@ -7,116 +25,146 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-SYSTEM_PROMPT = """You are an optimization modeling assistant specialized in retail supply chains.
+# ==============================================================================
+# GUARDRAILS (included in Zero-shot prompts for fair comparison)
+# ==============================================================================
 
-Goal: semantic fidelity. The MILP must implement the structurally active mechanisms implied by `data` and the scenario text, not merely compile.
+GUARDRAILS = """
+[CORE RULES]
+- `data` is a pre-loaded Python dict. Do not modify it.
+- No file I/O. Never invent missing data.
+- Never hard-code numeric values.
+- Output must be plain Python code. No prose, no markdown, no comments.
 
-Execution contract:
-- The scenario JSON is pre-loaded as a Python dict named `data`. Do NOT modify `data`.
-- Do NOT perform any file I/O (no open(), json.load(), Path.read_text(), etc.).
-- If the prompt includes a JSON preview, it is for reference only. Do NOT hard-code numeric constants from it.
-  Always read sets/parameters from `data` at runtime.
+[DATA FORMAT]
+- sub_edges: [[p_from, p_to], ...] means p_from's demand can be served by p_to's inventory.
+- trans_edges: [[loc_from, loc_to], ...] for transshipment.
+- demand_share: {location: scalar}, NOT nested by product.
+- demand = demand_curve[p][t-1] * demand_share[l]  (demand_curve is 0-indexed)
+- Time indexing: 1-based (t = 1, 2, ..., T).
 
-Modeling requirements (Strict Flow Logic):
-- Implement a mixed-integer linear program (MILP) in Python using gurobipy.
-- **Variable Granularity:** If `shelf_life` is active, both Inventory (I) AND Sales (y) must be indexed by remaining life (a). This allows precise FIFO tracking and holding cost calculation.
-- **Strict Aging Equality:** Use exact flow conservation for inventory aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1] for a < shelf_life. 
-- **Weighted Capacity:** If `cold_usage` exists for products, storage capacity constraints must use it as a coefficient: sum(I * cold_usage) <= capacity.
-- **Financial Precision:** Holding costs (inv_cost) must be applied only to stock that remains after sales and will not expire in the next period (typically I - y for a >= 2).
+[SUBSTITUTION SEMANTICS - CRITICAL]
+Edge [p_from, p_to] = "upward substitution": p_to can serve p_from's demand.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
 
-Naming contract (required for automatic semantic checking):
-- Use the following variable dictionaries with exactly these names when active:
-  I (inventory by remaining life), y (sales/consumption by remaining life), W (waste),
-  Q (orders), L (lost sales), d (direct demand served),
-  S (substitution routing), X (transshipment), z (order trigger), n (pack integer).
-- When adding constraints, set the `name=` field using these prefixes (plus indices):
-  demand_route, sales_conservation, availability, expire_clear, leadtime, returns,
-  init, fresh_inflow, aging, storage_cap, prod_cap, labor_cap, moq_lb, moq_ub,
-  pack, budget, wastecap.
+Build edge mappings BEFORE constraints:
+  outgoing_edges = {p: [] for p in products}
+  incoming_edges = {p: [] for p in products}
+  for p_from, p_to in sub_edges:
+      outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT to p_to
+      incoming_edges[p_to].append(p_from)  # p_to receives requests IN from p_from
 
-Data structure notes:
-- JSON fields may use different indexing schemes. Always check the actual structure at runtime using isinstance().
-- Product parameters (shelf_life, lead_time, return_rate, labor_usage, cold_usage) are indexed by product only, not by location: {product: value}.
-- Capacity fields may be static or time-varying. Check if the value is a scalar, list, or nested dict:
-  * cold_capacity: {location: number} or {location: {period: number}}
-  * production_cap: {product: [values]} (list indexed by period) or {product: number}
-  * labor_cap: {location: [values]} or {period: number}
-- Demand: if a `demand` field exists as {product: {location: {period: value}}}, use it directly. Otherwise construct from demand_curve and demand_share.
-- Cost and constraint parameters are in the `costs` and `constraints` sections respectively.
-- Network structure (substitution, transshipment) is in the `network` section as lists of edge pairs.
+Compute substitution flows for each product p:
+  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]  # demand p sends out
+  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]  # requests p receives
 
-Critical semantic clarifications:
-- demand_share is indexed by location only: {location: fraction}. Demand for product p at location l in period t equals demand_curve[p][t] * demand_share[l].
-- production_cap is a GLOBAL constraint per product per period: the sum of production across ALL locations for product p in period t must not exceed production_cap[p][t].
-- Substitution edges [p_from, p_to] mean: demand for p_to can be served by p_from's inventory when p_to is unavailable. Example: [SKU_Basic, SKU_Premium] means Basic inventory can satisfy Premium demand (not the reverse).
-- costs.inventory is the holding cost (same as inv_cost). costs.lost_sales is the penalty for unmet demand.
+Substitution constraints:
+  demand_route: outbound <= demand[p,l,t]  (can't substitute more than own demand)
+  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
 
-Objective (reference semantics):
-- Minimize total cost including all cost terms present in `data`: holding/inventory, waste, and lost-sales penalties;
-  plus purchasing/ordering costs if provided; plus (if enabled) transshipment cost and fixed ordering cost.
-- If a cost term is missing in `data`, treat it as zero; do not invent extra data.
+[SHELF-LIFE / AGING]
+- Life buckets: a = 1 (expiring) to a = shelf_life[p] (freshest)
+- Aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1]  (for a < shelf_life, t < T)
+- Expiration: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1]
+- Availability: y[p,l,t,a] <= I[p,l,t,a]
+- Holding cost: apply only to a >= 2 (not expiring bucket a=1)
 
-Solving and reporting contract (required for comparability):
-- Set Gurobi parameters for reproducibility unless explicitly overridden by the evaluation harness:
-  OutputFlag=0, Threads=1, Seed=0.
-  Do NOT set TimeLimit unless provided by the harness/environment.
-- Always print the solver status code.
-- Only treat the printed objective as "final" when status == GRB.OPTIMAL.
-- If status is not GRB.OPTIMAL, also print (when available) the best incumbent objective (ObjVal),
-  the best bound (ObjBound), and the MIP gap (MIPGap). Do not pretend it is optimal.
+[FRESH INFLOW - BOUNDARY CONDITIONS]
+Fresh inventory enters at a = shelf_life[p]:
+  if t > lead_time[p]:
+      I[p,l,t,shelf_life] = Q[p,l,t-lead_time]
+  else:
+      I[p,l,t,shelf_life] = 0
+NEVER access Q[p,l,0] or negative indices - they don't exist.
 
-Return:
-- Output a single Python script as plain text.
-- No Markdown, no code fences, and no comments in the returned code.
+[INITIALIZATION at t=1]
+  I[p,l,1,a] = 0  for a < shelf_life[p]  (non-fresh buckets empty)
+  I[p,l,1,shelf_life] = Q[p,l,1] if lead_time=0, else 0
+
+[AGING BOUNDARY at t=T]
+Do NOT add aging constraints for t=T, as they would reference I[p,l,T+1,a] which doesn't exist.
+
+[VARIABLE NAMING]
+Use these exact names:
+- I[p,l,t,a]: inventory by product, location, period, remaining life bucket
+- y[p,l,t,a]: sales/consumption from life bucket
+- W[p,l,t]: waste (expired inventory)
+- Q[p,l,t]: orders/production
+- L[p,l,t]: lost sales
+- S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+
+[SOLVING]
+- Gurobi params: OutputFlag=0, Threads=1, Seed=0.
+- Print: print(f"status: {m.Status}")
+- If OPTIMAL: print(f"objective: {m.ObjVal}")
 """.strip()
 
 
-USER_TEMPLATE = """[SCENARIO]
+# ==============================================================================
+# SCENARIO TEMPLATE
+# ==============================================================================
+
+SCENARIO_TEMPLATE_ZEROSHOT = """[SCENARIO]
 Family: {family_id} ({family_name})
 Archetype: {archetype_id}
 Scenario ID: {scenario_id}
 
 {description}
 
-Operational context:
-- The JSON contains the number of time periods, the list of products, and the list of locations
-  directly as top-level fields (for example: "periods", "products", "locations").
-- Cost parameters such as holding, lost-sales, waste, purchasing, and any fixed ordering costs
-  are stored in the "costs" section of the JSON.
-- Capacity and operational limits such as storage capacity, production capacity, labor capacity,
-  shelf life, lead times, minimum order quantities, pack sizes, and any waste or budget limits
-  are stored in fields such as "cold_capacity", "production_cap", "labor_cap", "shelf_life",
-  "lead_time", "constraints", and "network".
-- Scenario-level control parameters such as global minimum order quantities, pack sizes, fixed
-  ordering costs, per-period budgets, and waste caps are provided as scalar fields inside the
-  "constraints" and "costs" sections and should be applied uniformly across products and locations
-  unless the scenario description explicitly specifies otherwise.
-- Substitution and transshipment structures are encoded in the "network" section, for example
-  as substitution edges or transshipment edges between locations.
-- The model should respect all of these fields exactly as given and interpret them in a way
-  consistent with the scenario description.
+=============================================================================
+MODELING GUIDELINES
+=============================================================================
+{guardrails}
 
-JSON data (do not modify):
-The evaluation harness loads the JSON for this scenario into a Python variable
-called `data`. Your code should read all sets and parameters from `data` using
-these fields and must not change any numeric values or perform any file I/O
-(for example, do not call open or json.load).
+=============================================================================
+DATA ACCESS
+=============================================================================
+
+The evaluation harness loads the JSON into a Python variable called `data`.
+Read all parameters from `data`. Do not use file I/O.
+
+Key fields:
+- data["periods"]: int (number of time periods)
+- data["products"]: list of product IDs
+- data["locations"]: list of location IDs
+- data["shelf_life"][p]: int, life buckets per product
+- data["lead_time"][p]: int, delivery delay (may be 0)
+- data["demand_curve"][p]: list (0-indexed, use [t-1] for period t)
+- data["demand_share"][l]: scalar share per location
+- data["network"]["sub_edges"]: [[p_from, p_to], ...]
+- data["network"]["trans_edges"]: [[l_from, l_to], ...]
+- data["costs"]["inventory"][p], ["waste"][p], ["lost_sales"][p], ["purchasing"][p]
+- data["production_cap"][p]: list or scalar (per period)
+- data["cold_capacity"][l], data["cold_usage"][p]
 
 {json_block}
 
 [INSTRUCTION]
-Using ONLY the information above, write a complete Python script that:
+Write a complete GurobiPy script that:
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB)
+2) Reads all parameters from `data` (already loaded)
+3) Builds edge mappings for substitution BEFORE creating constraints
+4) Creates all decision variables with correct indices
+5) Sets objective: minimize inventory + waste + lost_sales + purchasing costs
+6) Adds all constraints respecting boundary conditions:
+   - Initialization at t=1
+   - Aging only for t < T
+   - Fresh inflow with lead_time check
+   - Substitution if sub_edges nonempty
+7) Sets Gurobi params: OutputFlag=0, Threads=1, Seed=0
+8) Prints status always; prints objective only if OPTIMAL
 
-1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB),
-2) Assumes the JSON has already been loaded into a Python variable called `data`,
-3) Builds and solves a mixed-integer linear program that reflects the business
-   description and the structure implied by the JSON fields (including capacities,
-   shelf life, lead times, substitution edges, transshipment edges, and other keys/conditions present in `data`),
-4) Sets reproducibility parameters (OutputFlag=0, Threads=1, Seed=0) unless the harness overrides them,
-5) Prints: status always; objective only as final if OPTIMAL; otherwise also print ObjVal/ObjBound/MIPGap when available.
+Return ONLY Python code. No markdown, no comments, no explanations.
+""".strip()
 
-Do not invent extra data. Do not change any numbers from the JSON.
-Return ONLY the Python source code as plain text, with no comments and no Markdown.
+
+# Template for ReLoop Agent (scenario description only, guardrails injected separately)
+SCENARIO_TEMPLATE_AGENT = """[SCENARIO]
+Family: {family_id} ({family_name})
+Archetype: {archetype_id}
+Scenario ID: {scenario_id}
+
+{description}
 """.strip()
 
 
@@ -160,7 +208,7 @@ def build_json_block(data: dict, indent: int):
     txt = json.dumps(data, ensure_ascii=False, indent=indent)
     return (
         "[JSON_PREVIEW]\n"
-        "This JSON preview is for reference only. Do NOT hard-code numbers from it.\n"
+        "This JSON preview is for reference only. Do NOT hard-code numbers.\n"
         "Always read from `data` at runtime.\n"
         f"{txt}\n"
         "[/JSON_PREVIEW]"
@@ -204,41 +252,36 @@ def auto_detect_scenario(root: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Generate scenario prompt files for LLM evaluation."
+    )
     parser.add_argument(
         "--scenario",
         type=str,
         default=None,
-        help="Scenario folder name under reloop/scenarios/. "
-             "If your layout is scenarios/{data,spec}, pass --scenario __ROOT__ or omit to auto-detect.",
+        help="Scenario folder name under reloop/scenarios/.",
     )
     parser.add_argument(
         "--prompts_root",
         type=str,
         default=None,
-        help="Optional override output directory for prompts. "
-             "If omitted, will prefer ROOT/scenarios/prompts when it exists; otherwise scenario_dir/prompts.",
+        help="Optional override output directory for prompts.",
     )
     parser.add_argument(
         "--include_json",
         action="store_true",
-        help="Include a pretty-printed JSON preview in the per-scenario user prompt (reference only).",
+        help="Include a pretty-printed JSON preview in the prompt.",
     )
     parser.add_argument(
         "--json_indent",
         type=int,
         default=2,
-        help="Indent level for the JSON preview when --include_json is set.",
+        help="Indent level for JSON preview.",
     )
     parser.add_argument(
-        "--no_user_files",
+        "--no_guardrails",
         action="store_true",
-        help="Do not write per-scenario .user.txt files.",
-    )
-    parser.add_argument(
-        "--no_combined",
-        action="store_true",
-        help="Do not write combined system+user .txt files. (Default writes combined.)",
+        help="Exclude guardrails (for ablation study only).",
     )
     args = parser.parse_args()
 
@@ -250,17 +293,14 @@ def main():
         scenario_name, detected_candidates, detect_mode = auto_detect_scenario(ROOT)
         if scenario_name is None:
             scenarios_root = ROOT / "scenarios"
-            print("[ERROR] Could not auto-detect scenario folder. Use --scenario <name>.")
+            print("[ERROR] Could not auto-detect scenario folder. Use --scenario <n>.")
             if scenarios_root.exists():
                 dirs = [p.name for p in scenarios_root.iterdir() if p.is_dir()]
                 print(f"[HINT] Found subdirectories under {scenarios_root}: {dirs}")
-                print("[HINT] Your repo currently does NOT match scenarios/<name>/{data,spec} layout.")
-                print("[HINT] A valid scenario folder must contain: data/*.json and spec/archetypes.yaml")
-                print("[HINT] If you intend scenarios/ itself to be the scenario set, create scenarios/data and scenarios/spec (with archetypes.yaml) and put JSONs into scenarios/data.")
             return
         else:
             if detect_mode == "root_is_scenario_set":
-                print("[OK] Auto-detected layout: scenarios/ is the scenario set (data/spec directly under scenarios).")
+                print("[OK] Auto-detected layout: scenarios/ is the scenario set.")
             else:
                 print(f"[OK] Auto-detected scenario folder: {scenario_name}")
                 if len(detected_candidates) > 1:
@@ -293,14 +333,11 @@ def main():
     prompt_dir = choose_prompt_dir(ROOT, scenario_dir, args.prompts_root)
     prompt_dir.mkdir(parents=True, exist_ok=True)
 
-    sys_path = prompt_dir / "system_prompt.txt"
-    with open(sys_path, "w", encoding="utf-8") as f_sys:
-        f_sys.write(SYSTEM_PROMPT)
-        f_sys.write("\n")
-    print(f"[OK] Wrote system prompt -> {sys_path}")
-
     ok_count = 0
     skip_count = 0
+
+    # Guardrails content
+    guardrails_content = "" if args.no_guardrails else GUARDRAILS
 
     for jf in json_files:
         with open(jf, "r", encoding="utf-8") as f:
@@ -323,34 +360,45 @@ def main():
         if args.include_json:
             json_block = build_json_block(data, args.json_indent)
 
-        user_prompt = USER_TEMPLATE.format(
+        # Generate Zero-shot prompt (with guardrails)
+        zeroshot_prompt = SCENARIO_TEMPLATE_ZEROSHOT.format(
             family_id=family_id,
             family_name=family_name,
             archetype_id=archetype_id,
             scenario_id=scenario_id,
             description=description,
+            guardrails=guardrails_content,
             json_block=json_block,
         )
 
-        if not args.no_user_files:
-            out_user = prompt_dir / f"{scenario_id}.user.txt"
-            with open(out_user, "w", encoding="utf-8") as f_out:
-                f_out.write(user_prompt)
-                f_out.write("\n")
-            print(f"[OK] Wrote user prompt for {scenario_id} -> {out_user}")
+        out_file_zeroshot = prompt_dir / f"{scenario_id}.scenario.txt"
+        with open(out_file_zeroshot, "w", encoding="utf-8") as f_out:
+            f_out.write(zeroshot_prompt)
+            f_out.write("\n")
 
-        if not args.no_combined:
-            out_combined = prompt_dir / f"{scenario_id}.txt"
-            with open(out_combined, "w", encoding="utf-8") as f_out:
-                f_out.write(SYSTEM_PROMPT)
-                f_out.write("\n\n")
-                f_out.write(user_prompt)
-                f_out.write("\n")
-            print(f"[OK] Wrote combined prompt for {scenario_id} -> {out_combined}")
+        # Generate Agent base prompt (scenario only, no guardrails)
+        agent_prompt = SCENARIO_TEMPLATE_AGENT.format(
+            family_id=family_id,
+            family_name=family_name,
+            archetype_id=archetype_id,
+            scenario_id=scenario_id,
+            description=description,
+        )
+
+        out_file_agent = prompt_dir / f"{scenario_id}.base.txt"
+        with open(out_file_agent, "w", encoding="utf-8") as f_out:
+            f_out.write(agent_prompt)
+            f_out.write("\n")
+
+        print(f"[OK] {scenario_id} -> .scenario.txt (zero-shot) + .base.txt (agent)")
 
         ok_count += 1
 
-    print(f"Done. prompts_ok={ok_count}, skipped={skip_count}, scenario={scenario_name}, prompt_dir={prompt_dir}")
+    print(f"\nDone. Generated={ok_count}, Skipped={skip_count}")
+    print(f"Output directory: {prompt_dir}")
+    print("[NOTE] Generated two files per scenario:")
+    print("  - {scenario_id}.scenario.txt : Zero-shot baseline (includes guardrails)")
+    print("  - {scenario_id}.base.txt     : ReLoop Agent (scenario only, guardrails injected by step_prompts)")
 
 
 if __name__ == "__main__":

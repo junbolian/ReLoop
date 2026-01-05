@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F6 (Logistics and Integer Procurement)
+Archetype: retail_f6_moq_binary
+Scenario ID: retail_f6_moq_binary_v4
+
+Business narrative:
+The retailer faces a minimum order quantity applied uniformly across the category. In any period, the buyer must either place no order for a product or place an order that is at least as large as the specified global minimum. It is never allowed to place a small positive order below that threshold. This creates an all-or-nothing structure in procurement decisions on top of the usual inventory and storage logic.
+
+Structure cues:
+- The system is single-echelon with ordering decisions, storage capacity, and lost sales.
+- The JSON specifies a positive global minimum order quantity `moq` in the "constraints" object. For each product, location, and period, the order quantity must either be zero or at least this global minimum; intermediate positive quantities below `moq` are forbidden.
+- This all-or-nothing pattern must be enforced consistently across products, locations, and periods so that the model does not exploit fractional orders below the global minimum.
+- Inventory balance follows the standard pattern with zero lead time: on-hand stock in a period comes from previous stock and current orders, minus sales and waste, and cannot become negative.
+- There is no transshipment; substitution behavior follows the JSON graph, and labor capacity is generous.
+- The objective is to minimize total cost including holding, waste, lost sales, and the implicit cost of being forced to buy in minimum lots.

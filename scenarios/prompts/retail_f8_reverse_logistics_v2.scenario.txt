@@ -1,0 +1,126 @@
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_reverse_logistics
+Scenario ID: retail_f8_reverse_logistics_v2
+
+Business narrative:
+A fraction of units sold in each period are returned by customers in the next period and re-enter inventory as reverse flow. Returns are product-specific and location-specific, and can be used to satisfy future demand as long as they have not expired or violated storage limits. Demand is local and exogenous; unmet demand is lost and penalized.
+
+Structure cues:
+- The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
+- The JSON specifies a return rate for each product. For each product and location, a fixed fraction of units sold in one period re-enters as usable inventory at the same location in the next period, subject to shelf-life and storage constraints.
+- Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
+- Storage capacity and shelf-life limitations apply to returned units in the same way as to new units.
+- There is no transshipment in this archetype, and lead times for production are zero.
+- The objective is to minimize total cost including holding, waste, lost sales, and any indirect effect of handling returns as captured in the cost parameters.
+
+=============================================================================
+MODELING GUIDELINES
+=============================================================================
+[CORE RULES]
+- `data` is a pre-loaded Python dict. Do not modify it.
+- No file I/O. Never invent missing data.
+- Never hard-code numeric values.
+- Output must be plain Python code. No prose, no markdown, no comments.
+
+[DATA FORMAT]
+- sub_edges: [[p_from, p_to], ...] means p_from's demand can be served by p_to's inventory.
+- trans_edges: [[loc_from, loc_to], ...] for transshipment.
+- demand_share: {location: scalar}, NOT nested by product.
+- demand = demand_curve[p][t-1] * demand_share[l]  (demand_curve is 0-indexed)
+- Time indexing: 1-based (t = 1, 2, ..., T).
+
+[SUBSTITUTION SEMANTICS - CRITICAL]
+Edge [p_from, p_to] = "upward substitution": p_to can serve p_from's demand.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
+
+Build edge mappings BEFORE constraints:
+  outgoing_edges = {p: [] for p in products}
+  incoming_edges = {p: [] for p in products}
+  for p_from, p_to in sub_edges:
+      outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT to p_to
+      incoming_edges[p_to].append(p_from)  # p_to receives requests IN from p_from
+
+Compute substitution flows for each product p:
+  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]  # demand p sends out
+  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]  # requests p receives
+
+Substitution constraints:
+  demand_route: outbound <= demand[p,l,t]  (can't substitute more than own demand)
+  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
+
+[SHELF-LIFE / AGING]
+- Life buckets: a = 1 (expiring) to a = shelf_life[p] (freshest)
+- Aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1]  (for a < shelf_life, t < T)
+- Expiration: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1]
+- Availability: y[p,l,t,a] <= I[p,l,t,a]
+- Holding cost: apply only to a >= 2 (not expiring bucket a=1)
+
+[FRESH INFLOW - BOUNDARY CONDITIONS]
+Fresh inventory enters at a = shelf_life[p]:
+  if t > lead_time[p]:
+      I[p,l,t,shelf_life] = Q[p,l,t-lead_time]
+  else:
+      I[p,l,t,shelf_life] = 0
+NEVER access Q[p,l,0] or negative indices - they don't exist.
+
+[INITIALIZATION at t=1]
+  I[p,l,1,a] = 0  for a < shelf_life[p]  (non-fresh buckets empty)
+  I[p,l,1,shelf_life] = Q[p,l,1] if lead_time=0, else 0
+
+[AGING BOUNDARY at t=T]
+Do NOT add aging constraints for t=T, as they would reference I[p,l,T+1,a] which doesn't exist.
+
+[VARIABLE NAMING]
+Use these exact names:
+- I[p,l,t,a]: inventory by product, location, period, remaining life bucket
+- y[p,l,t,a]: sales/consumption from life bucket
+- W[p,l,t]: waste (expired inventory)
+- Q[p,l,t]: orders/production
+- L[p,l,t]: lost sales
+- S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+
+[SOLVING]
+- Gurobi params: OutputFlag=0, Threads=1, Seed=0.
+- Print: print(f"status: {m.Status}")
+- If OPTIMAL: print(f"objective: {m.ObjVal}")
+
+=============================================================================
+DATA ACCESS
+=============================================================================
+
+The evaluation harness loads the JSON into a Python variable called `data`.
+Read all parameters from `data`. Do not use file I/O.
+
+Key fields:
+- data["periods"]: int (number of time periods)
+- data["products"]: list of product IDs
+- data["locations"]: list of location IDs
+- data["shelf_life"][p]: int, life buckets per product
+- data["lead_time"][p]: int, delivery delay (may be 0)
+- data["demand_curve"][p]: list (0-indexed, use [t-1] for period t)
+- data["demand_share"][l]: scalar share per location
+- data["network"]["sub_edges"]: [[p_from, p_to], ...]
+- data["network"]["trans_edges"]: [[l_from, l_to], ...]
+- data["costs"]["inventory"][p], ["waste"][p], ["lost_sales"][p], ["purchasing"][p]
+- data["production_cap"][p]: list or scalar (per period)
+- data["cold_capacity"][l], data["cold_usage"][p]
+
+
+
+[INSTRUCTION]
+Write a complete GurobiPy script that:
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB)
+2) Reads all parameters from `data` (already loaded)
+3) Builds edge mappings for substitution BEFORE creating constraints
+4) Creates all decision variables with correct indices
+5) Sets objective: minimize inventory + waste + lost_sales + purchasing costs
+6) Adds all constraints respecting boundary conditions:
+   - Initialization at t=1
+   - Aging only for t < T
+   - Fresh inflow with lead_time check
+   - Substitution if sub_edges nonempty
+7) Sets Gurobi params: OutputFlag=0, Threads=1, Seed=0
+8) Prints status always; prints objective only if OPTIMAL
+
+Return ONLY Python code. No markdown, no comments, no explanations.

@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F7 (Network and Multi Echelon)
+Archetype: retail_f7_multi_sourcing
+Scenario ID: retail_f7_multi_sourcing_v1
+
+Business narrative:
+Products differ in their effective sourcing regimes: some behave like slow but cheap supply, while others behave like fast but expensive supply. Lead times and holding costs vary across products, creating multi-speed inventory dynamics. Demand is local and exogenous at each location, and unmet demand is lost and penalized.
+
+Structure cues:
+- The inventory structure is single-echelon with product-specific lead times, similar to retail_f6_lead_time, together with storage capacity and lost sales.
+- The JSON sets different lead times and holding costs for different products. Orders for each product become available only after that product's lead time, and inventory carried over incurs its corresponding holding cost.
+- For each product, location, and period, on-hand stock is determined by previous on-hand stock, arrivals of past orders whose lead time completes in that period, sales, and waste, and must remain non-negative.
+- Storage capacity, lost sales treatment, and any transshipment options are as in the base network for this family.
+- The scenario does not explicitly encode multiple suppliers, but heterogeneous lead times and cost profiles mimic slow and fast sourcing channels at the product level.
+- The objective is to minimize total cost while correctly handling the different lead times and holding-cost profiles.

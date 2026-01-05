@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F8 (Omni channel and Store Operations)
+Archetype: retail_f8_reverse_logistics
+Scenario ID: retail_f8_reverse_logistics_v4
+
+Business narrative:
+A fraction of units sold in each period are returned by customers in the next period and re-enter inventory as reverse flow. Returns are product-specific and location-specific, and can be used to satisfy future demand as long as they have not expired or violated storage limits. Demand is local and exogenous; unmet demand is lost and penalized.
+
+Structure cues:
+- The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
+- The JSON specifies a return rate for each product. For each product and location, a fixed fraction of units sold in one period re-enters as usable inventory at the same location in the next period, subject to shelf-life and storage constraints.
+- Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
+- Storage capacity and shelf-life limitations apply to returned units in the same way as to new units.
+- There is no transshipment in this archetype, and lead times for production are zero.
+- The objective is to minimize total cost including holding, waste, lost sales, and any indirect effect of handling returns as captured in the cost parameters.

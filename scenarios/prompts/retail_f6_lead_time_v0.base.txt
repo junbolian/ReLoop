@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F6 (Logistics and Integer Procurement)
+Archetype: retail_f6_lead_time
+Scenario ID: retail_f6_lead_time_v0
+
+Business narrative:
+Orders for each product take several periods to arrive. When the retailer places an order, the goods travel in a pipeline and only become available to serve demand after a deterministic lead time that is specific to each product. Demand is local and exogenous; customers are never backordered, so demand that cannot be met by on-hand inventory in a period is lost and penalized.
+
+Structure cues:
+- The inventory system is single-echelon with ordering decisions, storage capacity, and lost sales.
+- The JSON provides a non-zero lead time in periods for each product. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
+- Inventory must distinguish between on-hand units and units that are still in transit. Only on-hand units can be used to satisfy demand in a given period; in-transit units become on-hand when their lead time completes.
+- For each product and location, on-hand stock in a period is determined by previous on-hand stock plus arrivals of past orders whose lead time has completed, minus sales and waste. Stock levels must remain non-negative.
+- Storage capacity, lost sales treatment, absence of transshipment, substitution behavior, and generous labor capacity remain consistent with other families.
+- The objective is to minimize total cost while explicitly capturing the effect of deterministic lead times on inventory decisions.

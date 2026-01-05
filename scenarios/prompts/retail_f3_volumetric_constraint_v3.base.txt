@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_volumetric_constraint
+Scenario ID: retail_f3_volumetric_constraint_v3
+
+Business narrative:
+One product—typically a bulky premium item—uses much more storage volume per unit than the others. Storage capacity at each location becomes tight primarily because of this product, forcing the retailer to choose between stocking bulky high-margin units and smaller items. All demand remains local and exogenous, with no transshipment or backorders.
+
+Structure cues:
+- The overall structure and shared storage framework match retail_f3_storage_bottleneck.
+- Product-specific storage usage parameters in the JSON are much larger for the premium product than for other SKUs. These usage factors must be applied when enforcing the shared storage limit at each location and period.
+- Inventory cannot be negative and is updated based on previous stock, local production, sales, and waste.
+- There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph with standard semantics.
+- The objective is to minimize total cost under capacity constraints that make the volumetrically heavy premium product particularly expensive in terms of space.

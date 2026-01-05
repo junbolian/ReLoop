@@ -1,0 +1,14 @@
+[SCENARIO]
+Family: F4 (Dynamics and Disruptions)
+Archetype: retail_f4_robust_variance
+Scenario ID: retail_f4_robust_variance_v3
+
+Business narrative:
+Demand alternates between high and low phases over the planning horizon, and lost sales are made very expensive. This mimics a robust-planning environment where the retailer must guard against demand variance rather than a single deterministic forecast. Demand is still exogenous and local at each location, with no backorders and no transshipment.
+
+Structure cues:
+- The inventory, storage, and production structure is the same single-echelon system as in the base scenario, with per-product production capacities and local inventories at each location.
+- In the JSON, demand curves oscillate across periods, creating repeated high-demand and low-demand phases; lost sales penalties are increased for all products so that stockouts are very costly.
+- Inventory at each product, location, and period remains non-negative and evolves from previous stock and current production, minus sales and waste.
+- Storage capacity constraints, substitution behavior, zero lead times, and generous labor capacity remain in effect as in other Family 4 archetypes.
+- The objective is to minimize total cost including holding, waste, and large lost sales penalties, encouraging robust safety-stock style planning against the demand variance.

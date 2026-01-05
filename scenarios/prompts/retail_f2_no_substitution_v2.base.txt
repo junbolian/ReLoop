@@ -1,0 +1,15 @@
+[SCENARIO]
+Family: F2 (Assortment and Substitution)
+Archetype: retail_f2_no_substitution
+Scenario ID: retail_f2_no_substitution_v2
+
+Business narrative:
+The retailer manages multiple products that do not substitute for each other. Customers either buy the specific product they requested or, if it is unavailable, do not purchase anything and generate a lost sale. Demand for each product at each location is exogenous and seasonal. Inventory is held locally with no transshipment and no backorders, and there is no cross-product switching under any circumstances.
+
+Structure cues:
+- The physical setup matches retail_f1_base: single-echelon, multi-product, multi-location, with inventory held only at the locations that serve final demand.
+- Inventory at each location and period starts from the previous period's ending stock, is increased by local production or procurement, and is decreased by sales and waste. Stock cannot become negative.
+- Storage capacity constraints limit the volume-weighted on-hand inventory at each location and period using the storage usage parameters and capacities from the JSON.
+- In this archetype, the substitution graph in the JSON is empty (sub_edges = []). The model must not allow demand for one product to be satisfied by any other product; each product's demand can only be met by its own on-hand inventory at that location.
+- There is no transshipment of inventory between locations, lead times are effectively zero, and labor capacity is large relative to demand.
+- The objective is to minimize total cost including holding, waste, and lost sales without any cross-product substitution logic.

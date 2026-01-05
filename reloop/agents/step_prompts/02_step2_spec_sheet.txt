@@ -1,0 +1,82 @@
+STEP 2 - BUILD THE MODEL SPEC SHEET
+
+Task:
+Produce a structured model specification based on Step1 contract and data_profile.
+
+Output: Single JSON object. No surrounding text, no markdown.
+
+=============================================================================
+SCHEMA (all fields required)
+=============================================================================
+
+{
+  "sets": [
+    {"name": "P", "description": "products", "source": "data.products"},
+    {"name": "L", "description": "locations", "source": "data.locations"},
+    {"name": "T", "description": "periods 1..T", "source": "data.periods"},
+    {"name": "A", "description": "remaining life 1..shelf_life[p]", "source": "data.shelf_life"}
+  ],
+
+  "decisions": [
+    {"name": "I", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "inventory by remaining life", "active_if": "always"},
+    {"name": "y", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "sales from life bucket", "active_if": "always"},
+    {"name": "W", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "waste (expired inventory)", "active_if": "always"},
+    {"name": "Q", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "orders/production", "active_if": "always"},
+    {"name": "L", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "lost sales", "active_if": "always"},
+    {"name": "S", "type": "continuous", "domain": ">=0", "indices": ["p_from","p_to","l","t"], "meaning": "substitution flow", "active_if": "sub_edges nonempty"}
+  ],
+
+  "objective_terms": [
+    {"name": "inventory_holding", "expression": "sum inv_cost[p]*(I[p,l,t,a]-y[p,l,t,a]) for a>=2", "source": "costs.inventory", "active_if": "always"},
+    {"name": "waste_cost", "expression": "sum waste_cost[p]*W[p,l,t]", "source": "costs.waste", "active_if": "always"},
+    {"name": "lost_sales_penalty", "expression": "sum lost_cost[p]*L[p,l,t]", "source": "costs.lost_sales", "active_if": "always"},
+    {"name": "purchasing_cost", "expression": "sum purchasing[p]*Q[p,l,t]", "source": "costs.purchasing", "active_if": "always"}
+  ],
+
+  "constraint_families": [
+    {"prefix": "demand_route", "meaning": "outbound substitution bounded by demand", "indices": ["p","l","t"], "sense": "<=", "active_if": "sub_edges nonempty"},
+    {"prefix": "sales_conservation", "meaning": "sales + lost = effective demand", "indices": ["p","l","t"], "sense": "=", "active_if": "always"},
+    {"prefix": "availability", "meaning": "cannot sell more than inventory", "indices": ["p","l","t","a"], "sense": "<=", "active_if": "always"},
+    {"prefix": "aging", "meaning": "inventory ages each period", "indices": ["p","l","t","a"], "sense": "=", "active_if": "shelf_life"},
+    {"prefix": "expire_clear", "meaning": "waste is unsold expiring inventory", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
+    {"prefix": "fresh_inflow", "meaning": "fresh inventory from orders", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
+    {"prefix": "storage_cap", "meaning": "cold storage limit", "indices": ["l","t"], "sense": "<=", "active_if": "cold_capacity"},
+    {"prefix": "prod_cap", "meaning": "production limit", "indices": ["p","t"], "sense": "<=", "active_if": "production_cap"}
+  ],
+
+  "edge_cases": [
+    {"case": "t=1 init", "handling": "I[p,l,1,a]=0 for a<shelf_life; fresh bucket from Q if lead_time=0"},
+    {"case": "t=T boundary", "handling": "no aging constraints for t=T"},
+    {"case": "lead_time boundary", "handling": "if t<=lead_time then fresh_inflow=0"}
+  ],
+
+  "open_questions": []
+}
+
+=============================================================================
+SUBSTITUTION SEMANTICS (CRITICAL)
+=============================================================================
+
+sub_edges = [[p_from, p_to], ...] means p_from's demand can be served by p_to.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to's inventory.
+
+Build edge mappings:
+  outgoing_edges[p_from] = [p_to, ...]   # p_from sends demand OUT
+  incoming_edges[p_to] = [p_from, ...]   # p_to receives requests IN
+
+For each product p:
+  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]
+  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]
+
+Key constraints:
+  demand_route: outbound <= demand[p,l,t]
+  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
+
+=============================================================================
+CRITICAL RULES
+=============================================================================
+- Do NOT create variable 'd' - it is unnecessary
+- L (lost sales) MUST appear in sales_conservation
+- I and y MUST have index 'a' for remaining life bucket
+- S only exists when sub_edges is nonempty
+- Every field in schema is REQUIRED - do not omit any

@@ -1,0 +1,126 @@
+[SCENARIO]
+Family: F3 (Shared Resources and Capacity)
+Archetype: retail_f3_supply_bottleneck
+Scenario ID: retail_f3_supply_bottleneck_v2
+
+Business narrative:
+Storage space is abundant but upstream production capacity is tight. The main bottleneck is how many units can be produced or procured each period, not how many can be stored. Demand is still exogenous, local to each location, and there are no backorders or transshipment.
+
+Structure cues:
+- The inventory and lost sales logic is the same as in the base scenario.
+- Storage capacities in the JSON are set very high so that storage constraints are effectively non-binding but still formally present.
+- Per-product production capacities are significantly reduced. These caps must be enforced and become the main source of unmet demand.
+- Inventory at each location and period stays non-negative and changes according to local production, sales, and waste.
+- There is no transshipment, lead times are zero, and substitution behavior is determined by the substitution graph with standard semantics.
+- The objective is to minimize total cost, with lost sales penalties playing a central role because of tight production capacity.
+
+=============================================================================
+MODELING GUIDELINES
+=============================================================================
+[CORE RULES]
+- `data` is a pre-loaded Python dict. Do not modify it.
+- No file I/O. Never invent missing data.
+- Never hard-code numeric values.
+- Output must be plain Python code. No prose, no markdown, no comments.
+
+[DATA FORMAT]
+- sub_edges: [[p_from, p_to], ...] means p_from's demand can be served by p_to's inventory.
+- trans_edges: [[loc_from, loc_to], ...] for transshipment.
+- demand_share: {location: scalar}, NOT nested by product.
+- demand = demand_curve[p][t-1] * demand_share[l]  (demand_curve is 0-indexed)
+- Time indexing: 1-based (t = 1, 2, ..., T).
+
+[SUBSTITUTION SEMANTICS - CRITICAL]
+Edge [p_from, p_to] = "upward substitution": p_to can serve p_from's demand.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
+
+Build edge mappings BEFORE constraints:
+  outgoing_edges = {p: [] for p in products}
+  incoming_edges = {p: [] for p in products}
+  for p_from, p_to in sub_edges:
+      outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT to p_to
+      incoming_edges[p_to].append(p_from)  # p_to receives requests IN from p_from
+
+Compute substitution flows for each product p:
+  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]  # demand p sends out
+  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]  # requests p receives
+
+Substitution constraints:
+  demand_route: outbound <= demand[p,l,t]  (can't substitute more than own demand)
+  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
+
+[SHELF-LIFE / AGING]
+- Life buckets: a = 1 (expiring) to a = shelf_life[p] (freshest)
+- Aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1]  (for a < shelf_life, t < T)
+- Expiration: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1]
+- Availability: y[p,l,t,a] <= I[p,l,t,a]
+- Holding cost: apply only to a >= 2 (not expiring bucket a=1)
+
+[FRESH INFLOW - BOUNDARY CONDITIONS]
+Fresh inventory enters at a = shelf_life[p]:
+  if t > lead_time[p]:
+      I[p,l,t,shelf_life] = Q[p,l,t-lead_time]
+  else:
+      I[p,l,t,shelf_life] = 0
+NEVER access Q[p,l,0] or negative indices - they don't exist.
+
+[INITIALIZATION at t=1]
+  I[p,l,1,a] = 0  for a < shelf_life[p]  (non-fresh buckets empty)
+  I[p,l,1,shelf_life] = Q[p,l,1] if lead_time=0, else 0
+
+[AGING BOUNDARY at t=T]
+Do NOT add aging constraints for t=T, as they would reference I[p,l,T+1,a] which doesn't exist.
+
+[VARIABLE NAMING]
+Use these exact names:
+- I[p,l,t,a]: inventory by product, location, period, remaining life bucket
+- y[p,l,t,a]: sales/consumption from life bucket
+- W[p,l,t]: waste (expired inventory)
+- Q[p,l,t]: orders/production
+- L[p,l,t]: lost sales
+- S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+
+[SOLVING]
+- Gurobi params: OutputFlag=0, Threads=1, Seed=0.
+- Print: print(f"status: {m.Status}")
+- If OPTIMAL: print(f"objective: {m.ObjVal}")
+
+=============================================================================
+DATA ACCESS
+=============================================================================
+
+The evaluation harness loads the JSON into a Python variable called `data`.
+Read all parameters from `data`. Do not use file I/O.
+
+Key fields:
+- data["periods"]: int (number of time periods)
+- data["products"]: list of product IDs
+- data["locations"]: list of location IDs
+- data["shelf_life"][p]: int, life buckets per product
+- data["lead_time"][p]: int, delivery delay (may be 0)
+- data["demand_curve"][p]: list (0-indexed, use [t-1] for period t)
+- data["demand_share"][l]: scalar share per location
+- data["network"]["sub_edges"]: [[p_from, p_to], ...]
+- data["network"]["trans_edges"]: [[l_from, l_to], ...]
+- data["costs"]["inventory"][p], ["waste"][p], ["lost_sales"][p], ["purchasing"][p]
+- data["production_cap"][p]: list or scalar (per period)
+- data["cold_capacity"][l], data["cold_usage"][p]
+
+
+
+[INSTRUCTION]
+Write a complete GurobiPy script that:
+1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB)
+2) Reads all parameters from `data` (already loaded)
+3) Builds edge mappings for substitution BEFORE creating constraints
+4) Creates all decision variables with correct indices
+5) Sets objective: minimize inventory + waste + lost_sales + purchasing costs
+6) Adds all constraints respecting boundary conditions:
+   - Initialization at t=1
+   - Aging only for t < T
+   - Fresh inflow with lead_time check
+   - Substitution if sub_edges nonempty
+7) Sets Gurobi params: OutputFlag=0, Threads=1, Seed=0
+8) Prints status always; prints objective only if OPTIMAL
+
+Return ONLY Python code. No markdown, no comments, no explanations.
