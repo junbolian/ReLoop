@@ -1,0 +1,9 @@
+{
+  "status": "2",
+  "objVal": 378951.50000000006,
+  "objBound": 378951.50000000006,
+  "mipGap": null,
+  "stdout": "Set parameter Username\nSet parameter LicenseID to value 2742635\nAcademic license - for non-commercial use only - expires 2026-11-21\nStatus: 2\nObjective: 378951.50000000006\nSOLVE_JSON::{\"status\": 2, \"obj_val\": 378951.50000000006, \"obj_bound\": 378951.50000000006, \"mip_gap\": null, \"elapsed_sec\": 0.06005215644836426}\n",
+  "stderr": "",
+  "exit_code": 0
+}

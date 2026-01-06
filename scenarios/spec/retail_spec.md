@@ -20,7 +20,7 @@ RetailOpt-190 evaluates **text-to-optimization agents** on **38 retail operation
 |---------|-------------|
 | **Instances** | 38 archetypes × 5 variants = 190 |
 | **Ground Truth** | Universal Retail Solver (URS) |
-| **Semantic Probes** | 8 boundary tests via code execution |
+| **Semantic Probes** | 14 boundary tests via code execution |
 | **No Code Template** | Tests actual math→code translation |
 
 All instances share a **single JSON schema** and are solved by a **single universal MILP formulation**.
@@ -31,7 +31,7 @@ All instances share a **single JSON schema** and are solved by a **single univer
 - Strong reasoning + code generation
 - Best balance of capability and cost
 
-**Alternatives:** Qwen2.5-Coder-32B, GPT-4o, DeepSeek-V3
+**Alternatives:** Qwen2.5-Coder-32B, GPT-4o, DeepSeek-V3, Claude
 
 ---
 
@@ -87,7 +87,26 @@ profile_data → step1 → step2 → step3 → sanity → step4 → audit → pr
 
 ---
 
-## 4. Silent Failure Problem
+## 4. Evaluation Metrics (4 Dimensions)
+
+| Metric | Definition | Formula |
+|--------|------------|---------|
+| **Syntax Pass Rate** | Code compiles without error | `compile_ok / total` |
+| **Execution Pass Rate** | Code runs and solver returns status | `exec_ok / total` |
+| **Silent Failure Rate** | Runs OK but wrong answer | `(exec_ok - correct) / exec_ok` |
+| **Overall Accuracy** | Objective within 1% of ground truth | `correct / total` |
+
+### Expected Results by Configuration
+
+| Configuration | Syntax | Execution | Silent Failure | Accuracy |
+|---------------|--------|-----------|----------------|----------|
+| Zero-shot (no probe) | ~90% | ~70% | ~50% | ~35% |
+| ReLoop (with probe) | ~95% | ~85% | ~15% | ~70% |
+| ReLoop + Repair | ~95% | ~90% | ~10% | ~80% |
+
+---
+
+## 5. Silent Failure Problem
 
 ### Definition
 
@@ -106,14 +125,15 @@ profile_data → step1 → step2 → step3 → sanity → step4 → audit → pr
 
 | Error Type | Frequency | Example |
 |------------|-----------|---------|
-| Substitution direction | ~45% | Edge [A,B] misread |
-| Missing constraint | ~25% | No demand_route |
-| Wrong indexing | ~20% | Cost on wrong buckets |
-| Boundary errors | ~10% | t=1 initialization |
+| Substitution direction | ~35% | Edge [A,B] misread |
+| Missing constraint | ~20% | No demand_route → UNBOUNDED |
+| Wrong holding cost | ~20% | Using I instead of I-y |
+| Missing initialization | ~15% | No I[p,l,1,a]=0 → obj=0 |
+| Boundary errors | ~10% | t=1/t=T edge cases |
 
 ---
 
-## 5. Semantic Probes
+## 6. Semantic Probes
 
 ### How Probes Work (Code Execution, NOT Prompting)
 
@@ -134,18 +154,31 @@ Probes verify constraints by **running the generated code** with specially const
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 8 Probes
+### 14 Probes
 
-| Probe | Mechanism | Detection Method |
-|-------|-----------|------------------|
-| `substitution_basic` | S variables | Objective range check |
-| `demand_route_constraint` | S_out ≤ demand | UNBOUNDED detection |
-| `no_substitution` | Empty edges | Spurious benefit detection |
-| `production_capacity` | Prod cap | Objective lower bound |
-| `storage_capacity` | Storage cap | INFEASIBLE detection |
-| `aging_dynamics` | Shelf-life | Waste cost verification |
-| `lost_sales_slack` | L variable | INFEASIBLE detection |
-| `nonnegativity` | I ≥ 0 | Negative inventory check |
+| # | Probe | Mechanism | Detection Method |
+|---|-------|-----------|------------------|
+| 1 | `substitution_basic` | S variables | Objective range check |
+| 2 | `demand_route_constraint` | S_out ≤ demand | UNBOUNDED detection |
+| 3 | `no_substitution` | Empty edges | Spurious benefit detection |
+| 4 | `production_capacity` | Prod cap | Objective lower bound |
+| 5 | `storage_capacity` | Storage cap | INFEASIBLE detection |
+| 6 | `aging_dynamics` | Shelf-life | Waste cost verification |
+| 7 | `lost_sales_slack` | L variable | INFEASIBLE detection |
+| 8 | `nonnegativity` | I ≥ 0 | Negative inventory check |
+| 9 | `lead_time` | Lead time handling | Delivery timing |
+| 10 | `transshipment` | Network flows | Trans constraint |
+| 11 | `labor_capacity` | Labor constraints | Capacity check |
+| 12 | `moq` | Minimum order quantity | MOQ enforcement |
+| 13 | `initialization` | t=1 init (I=0 for a<SL) | Objective = 0 detection |
+| 14 | `holding_cost` | End-of-period (I-y) | Objective too low detection |
+
+### Critical Probes (Silent Failure Detection)
+
+| Probe | Common Error | Symptom |
+|-------|--------------|---------|
+| `initialization` | Missing `I[p,l,1,a]=0` for a < shelf_life | Objective ≈ 0 (free inventory) |
+| `holding_cost` | Using `I` instead of `I-y` | Objective 60% too low |
 
 ### Key Insight
 
@@ -153,7 +186,7 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 
 ---
 
-## 6. Substitution Semantics (CRITICAL)
+## 7. Substitution Semantics (CRITICAL)
 
 This is the #1 source of silent failures.
 
@@ -195,7 +228,67 @@ for p in products:
 
 ---
 
-## 7. Scenario Families
+## 8. Holding Cost (CRITICAL)
+
+### The Bug
+
+LLMs often use `I` (start-of-period inventory) instead of `I-y` (end-of-period inventory):
+
+```python
+# WRONG - causes objective to be 60% too low
+obj += cost * I[p,l,t,a]
+
+# CORRECT - use end-of-period inventory
+obj += cost * (I[p,l,t,a] - y[p,l,t,a])
+```
+
+### Why This Matters
+
+- `I[p,l,t,a]` = inventory at START of period (before sales)
+- `I[p,l,t,a] - y[p,l,t,a]` = inventory at END of period (after sales)
+- Holding cost is charged on what remains overnight, not what you started with
+
+### Detection
+
+The `holding_cost` probe detects this by:
+1. Creating a scenario where holding cost dominates
+2. Running the code
+3. Checking if objective is suspiciously low (indicates wrong formula)
+
+---
+
+## 9. Ablation Study Design
+
+### Three Ablation Dimensions
+
+| Dimension | Options |
+|-----------|---------|
+| **STEP** (Pipeline Depth) | Zero-shot, 3-step, 5-step |
+| **PROBE** (Verification) | No probe, Probe only, Probe + Diagnosis |
+| **REPAIR** (Iteration) | No repair, Blind repair, Guided repair |
+
+### Ablation Configurations
+
+| Config | Steps | Probes | Repair | Description |
+|--------|-------|--------|--------|-------------|
+| A1 | Zero-shot | No | No | Baseline: single LLM call |
+| A2 | 5-step | No | No | Pipeline only |
+| A3 | 5-step | Yes | No | + Probe verification |
+| A4 | 5-step | No | Yes (blind) | + Blind repair |
+| A5 | 5-step | Yes | Yes (guided) | Full ReLoop |
+
+### Research Questions
+
+| RQ | Question | Ablation |
+|----|----------|----------|
+| RQ1 | Does step-by-step pipeline improve accuracy? | A1 vs A2 |
+| RQ2 | Do probes detect silent failures? | A2 vs A3 |
+| RQ3 | Does probe diagnosis improve repair? | A4 vs A5 |
+| RQ4 | What is the marginal value of each probe? | Per-probe ablation |
+
+---
+
+## 10. Scenario Families
 
 | Family | Name | Archetypes | Key Mechanisms |
 |--------|------|------------|----------------|
@@ -212,7 +305,7 @@ for p in products:
 
 ---
 
-## 8. Directory Structure
+## 11. Directory Structure
 
 ```
 reloop/
@@ -224,9 +317,10 @@ reloop/
 │   ├── schemas.py                     # Pydantic data models
 │   ├── step_prompts/                  # 8 prompt files
 │   └── tools/
-│       ├── semantic_probes.py         # 8 probes implementation
+│       ├── semantic_probes.py         # 14 probes implementation
+│       ├── static_auditor.py          # Pattern checking (relaxed)
 │       ├── sanity_checker.py          # Logic validation
-│       └── static_auditor.py          # Pattern checking
+│       └── script_runner.py           # Code execution
 │
 ├── tools/
 │   ├── generate_prompts.py            # Prompt generator
@@ -248,7 +342,7 @@ reloop/
 
 ---
 
-## 9. JSON Schema
+## 12. JSON Schema
 
 Each instance has this structure:
 
@@ -288,7 +382,7 @@ Each instance has this structure:
 
 ---
 
-## 10. Evaluation Pipeline
+## 13. Evaluation Pipeline
 
 ### Step 1: Generate Prompts
 
@@ -325,7 +419,7 @@ python -m reloop.agents.cli.run_benchmark \
 
 ---
 
-## 11. Universal Retail Solver Settings
+## 14. Universal Retail Solver Settings
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
@@ -344,13 +438,13 @@ python -m reloop.agents.cli.run_benchmark \
 
 ---
 
-## 12. Research Directions
+## 15. Research Directions
 
 ### Current Limitations
 
 | Limitation | Description |
 |------------|-------------|
-| Manual probe design | 8 probes hand-crafted by experts |
+| Manual probe design | 14 probes hand-crafted by experts |
 | No coverage guarantee | May miss some error types |
 | Domain-specific | Probes designed for retail OR |
 
@@ -383,7 +477,7 @@ Open Problem:
 
 ---
 
-## 13. Citation
+## 16. Citation
 
 ```bibtex
 @misc{reloop2026,

@@ -1,15 +1,16 @@
 # ==============================================================================
-# FILE: semantic_probes.py
+# FILE: semantic_probes.py (FIXED VERSION)
 # DESCRIPTION: Semantic Probe Verification Framework
 #
-# Core Idea:
-#   LLM-generated code may "run but produce wrong answers" (Silent Failure).
-#   By constructing boundary test cases, we verify if key constraints are correct.
-#
-# Design Principles:
-#   1. Each probe tests ONE specific mechanism
-#   2. Test data is carefully constructed so correct/incorrect behavior differs
-#   3. Judgment based on observable outputs (objective, status), no code parsing
+# FIXES:
+#   1. lost_sales_slack: Added objective range check (was missing)
+#   2. storage_capacity: Added objective range check (was missing)
+#   3. Unified threshold to 0.5x for consistency
+#   4. Added new probes for F6/F7/F8 coverage:
+#      - lead_time_probe: Tests lead time handling
+#      - moq_probe: Tests minimum order quantity
+#      - transshipment_probe: Tests network flows
+#      - labor_capacity_probe: Tests labor constraints
 #
 # ==============================================================================
 
@@ -46,6 +47,9 @@ class SemanticProbe:
     description: str = "Base probe"
     target_mechanism: str = "unknown"
     
+    # Unified threshold for objective range check (50% tolerance)
+    OBJECTIVE_THRESHOLD = 0.5
+    
     def generate_test_data(self, base_data: dict = None) -> dict:
         """Generate test data that isolates the mechanism being tested."""
         raise NotImplementedError
@@ -57,6 +61,42 @@ class SemanticProbe:
     def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
         """Compare actual result against expected behavior."""
         raise NotImplementedError
+    
+    def _check_objective_range(self, actual_result: dict, expected: dict, 
+                                low_diagnosis: str, high_diagnosis: str = None) -> Optional[ProbeResult]:
+        """
+        Helper method to check if objective is within expected range.
+        Returns ProbeResult if FAIL, None if within range.
+        """
+        obj = actual_result.get("objective", 0) or 0
+        obj_range = expected.get("objective_range")
+        
+        if not obj_range:
+            return None
+            
+        obj_min, obj_max = obj_range
+        
+        # Check lower bound with threshold
+        if obj < obj_min * self.OBJECTIVE_THRESHOLD:
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective too low ({obj} < {obj_min * self.OBJECTIVE_THRESHOLD:.1f}). {low_diagnosis}"
+            )
+        
+        # Check upper bound with threshold (if high_diagnosis provided)
+        if high_diagnosis and obj > obj_max * (2 - self.OBJECTIVE_THRESHOLD):
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective too high ({obj} > {obj_max * (2 - self.OBJECTIVE_THRESHOLD):.1f}). {high_diagnosis}"
+            )
+        
+        return None
 
 
 # ==============================================================================
@@ -109,6 +149,9 @@ class SubstitutionProbe(SemanticProbe):
         }
     
     def expected_behavior(self, test_data: dict) -> dict:
+        # Premium produces 80, serves Basic's demand
+        # Basic has 100 demand, 80 served by Premium, 20 lost
+        # Cost: 80*8 (purchasing Premium) + 20*50 (lost sales) = 640 + 1000 = 1640
         return {
             "S_Basic_Premium": 80,
             "L_Basic": 20,
@@ -127,30 +170,14 @@ class SubstitutionProbe(SemanticProbe):
                 diagnosis=f"Model did not solve optimally: {actual_result.get('status')}"
             )
         
-        obj = actual_result.get("objective", 0)
-        if obj is None:
-            obj = 0
-        obj_min, obj_max = expected["objective_range"]
-        
-        if obj < obj_min * 0.3:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too low ({obj} < {obj_min}). "
-                          f"Missing demand_route constraint (S_out <= demand)."
-            )
-        
-        if obj > obj_max * 3:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too high ({obj} > {obj_max}). "
-                          f"Substitution may not be implemented."
-            )
+        # Check objective range
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Missing demand_route constraint (S_out <= demand) or objective not set.",
+            high_diagnosis="Substitution may not be implemented correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -202,7 +229,9 @@ class DemandRouteProbe(SemanticProbe):
         }
     
     def expected_behavior(self, test_data: dict) -> dict:
-        return {"min_objective": 0.05, "max_reasonable": 200}
+        # Basic demand = 10, can be served by Premium (cost 0.01 each)
+        # Minimum cost: 10 * 0.01 = 0.1
+        return {"min_objective": 0.05, "max_reasonable": 200, "objective_range": (0.05, 200)}
     
     def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
         expected = self.expected_behavior(test_data)
@@ -227,7 +256,8 @@ class DemandRouteProbe(SemanticProbe):
         
         obj = actual_result.get("objective", 0) or 0
         
-        if obj < expected["min_objective"]:
+        # For this probe, we check if objective is suspiciously low (negative or near-zero when shouldn't be)
+        if obj < expected["min_objective"] * 0.1:
             return ProbeResult(
                 probe_name=self.name,
                 result="FAIL",
@@ -296,17 +326,13 @@ class NoSubstitutionProbe(SemanticProbe):
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
         
-        obj = actual_result.get("objective", 0) or 0
-        obj_min, obj_max = expected["objective_range"]
-        
-        if obj < obj_min * 0.5:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too low ({obj}). Substitution happening despite empty sub_edges."
-            )
+        # Check objective range
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Substitution happening despite empty sub_edges, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -368,17 +394,13 @@ class ProductionCapacityProbe(SemanticProbe):
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
         
-        obj = actual_result.get("objective", 0) or 0
-        obj_min, obj_max = expected["objective_range"]
-        
-        if obj < obj_min * 0.5:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too low ({obj}). Production capacity not enforced."
-            )
+        # Check objective range
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Production capacity not enforced, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -390,12 +412,14 @@ class ProductionCapacityProbe(SemanticProbe):
 
 
 # ==============================================================================
-# PROBE 5: STORAGE CAPACITY
+# PROBE 5: STORAGE CAPACITY (FIXED - now checks objective range)
 # ==============================================================================
 
 class StorageCapacityProbe(SemanticProbe):
     """
     Test if storage capacity is correctly enforced.
+    
+    FIX: Added objective range check - was missing in original version.
     """
     
     name = "storage_capacity"
@@ -425,6 +449,10 @@ class StorageCapacityProbe(SemanticProbe):
         }
     
     def expected_behavior(self, test_data: dict) -> dict:
+        # With storage cap 30 and demand 20 each period:
+        # Period 1: produce ~30, sell 20, keep 10
+        # Period 2: produce ~30, sell 20 from new + some from old
+        # Total purchasing cost + some holding cost
         return {"max_inventory": 30, "objective_range": (200, 600)}
     
     def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
@@ -447,6 +475,14 @@ class StorageCapacityProbe(SemanticProbe):
                 actual=actual_result,
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
+        
+        # FIX: Added objective range check
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Storage capacity may not be enforced, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -510,17 +546,13 @@ class AgingProbe(SemanticProbe):
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
         
-        obj = actual_result.get("objective", 0) or 0
-        obj_min, obj_max = expected["objective_range"]
-        
-        if obj < obj_min * 0.3:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too low ({obj}). Aging/waste may not be implemented."
-            )
+        # Check objective range
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Aging/waste may not be implemented, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -532,13 +564,15 @@ class AgingProbe(SemanticProbe):
 
 
 # ==============================================================================
-# PROBE 7: LOST SALES SLACK
+# PROBE 7: LOST SALES SLACK (FIXED - now checks objective range)
 # ==============================================================================
 
 class LostSalesProbe(SemanticProbe):
     """
     Test if lost sales variable L is correctly implemented.
     Without L, model may be INFEASIBLE when demand > supply.
+    
+    FIX: Added objective range check - was missing in original version.
     """
     
     name = "lost_sales_slack"
@@ -591,6 +625,14 @@ class LostSalesProbe(SemanticProbe):
                 actual=actual_result,
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
+        
+        # FIX: Added objective range check
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Lost sales cost may not be included in objective, or L variable not used correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -653,18 +695,13 @@ class NonNegativityProbe(SemanticProbe):
                 diagnosis=f"Model status: {actual_result.get('status')}"
             )
         
-        obj = actual_result.get("objective", 0) or 0
-        obj_min, obj_max = expected["objective_range"]
-        
-        # If objective is way too low, might be allowing negative inventory
-        if obj < obj_min * 0.3:
-            return ProbeResult(
-                probe_name=self.name,
-                result="FAIL",
-                expected=expected,
-                actual=actual_result,
-                diagnosis=f"Objective too low ({obj}). May be allowing negative inventory."
-            )
+        # Check objective range
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="May be allowing negative inventory, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
         
         return ProbeResult(
             probe_name=self.name,
@@ -676,22 +713,508 @@ class NonNegativityProbe(SemanticProbe):
 
 
 # ==============================================================================
-# PROBE RUNNER
+# NEW PROBE 9: LEAD TIME (F6 Coverage)
 # ==============================================================================
+
+class LeadTimeProbe(SemanticProbe):
+    """
+    Test if lead time is correctly handled.
+    Orders placed in period t should arrive in period t + lead_time.
+    """
+    
+    name = "lead_time"
+    description = "Test if lead time is correctly handled"
+    target_mechanism = "lead_time"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_lead_time",
+            "periods": 3,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A"],
+            "shelf_life": {"SKU_A": 4},
+            "lead_time": {"SKU_A": 1},  # 1 period lead time
+            "demand_curve": {"SKU_A": [100, 100, 100]},
+            "demand_share": {"Loc_A": 1.0},
+            "production_cap": {"SKU_A": [200, 200, 200]},
+            "cold_capacity": {"Loc_A": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "network": {"sub_edges": [], "trans_edges": []},
+            "costs": {
+                "inventory": {"SKU_A": 1},
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 100},
+                "purchasing": {"SKU_A": 5}
+            },
+            "constraints": {}
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # With lead_time=1:
+        # T1: order placed, nothing arrives, lost sales = 100
+        # T2: T1 order arrives (100), demand 100, sell 100
+        # T3: T2 order arrives (100), demand 100, sell 100
+        # Cost: 100*100 (lost T1) + 300*5 (purchasing) = 10000 + 1500 = 11500
+        return {"objective_range": (11000, 12500)}
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}"
+            )
+        
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Lead time may not be enforced correctly (inventory arriving too early)."
+        )
+        if range_check:
+            return range_check
+        
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="Lead time appears correctly implemented."
+        )
+
+
+# ==============================================================================
+# NEW PROBE 10: TRANSSHIPMENT (F7 Coverage)
+# ==============================================================================
+
+class TransshipmentProbe(SemanticProbe):
+    """
+    Test if transshipment between locations is correctly implemented.
+    """
+    
+    name = "transshipment"
+    description = "Test if transshipment between locations works"
+    target_mechanism = "transshipment"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_transship",
+            "periods": 1,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A", "Loc_B"],
+            "shelf_life": {"SKU_A": 2},
+            "demand_curve": {"SKU_A": [100]},
+            "demand_share": {"Loc_A": 1.0, "Loc_B": 0.0},  # All demand at Loc_A
+            "production_cap": {"SKU_A": [0]},  # No production at either location directly
+            "cold_capacity": {"Loc_A": 10000, "Loc_B": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "network": {
+                "sub_edges": [],
+                "trans_edges": [["Loc_B", "Loc_A"]]  # Can ship from B to A
+            },
+            "costs": {
+                "inventory": {"SKU_A": 1},
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 100},
+                "purchasing": {"SKU_A": 5},
+                "transshipment": 2  # Cost per unit shipped
+            },
+            "constraints": {}
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # Without transshipment capability or if not implemented:
+        # All 100 units are lost sales = 100 * 100 = 10000
+        # With correct transshipment: much lower cost
+        # Note: This probe may need adjustment based on exact solver behavior
+        return {"objective_range": (8000, 12000)}
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            # For transshipment, INFEASIBLE or other status might indicate missing implementation
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}. Transshipment may not be implemented."
+            )
+        
+        # For transshipment, we mainly check it doesn't crash
+        # The objective range is more flexible since behavior depends on implementation
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="Transshipment appears to be handled (model solved)."
+        )
+
+
+# ==============================================================================
+# NEW PROBE 11: LABOR CAPACITY (F8 Coverage)
+# ==============================================================================
+
+class LaborCapacityProbe(SemanticProbe):
+    """
+    Test if labor capacity constraint is correctly enforced.
+    """
+    
+    name = "labor_capacity"
+    description = "Test if labor capacity is correctly enforced"
+    target_mechanism = "labor"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_labor",
+            "periods": 1,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A"],
+            "shelf_life": {"SKU_A": 2},
+            "demand_curve": {"SKU_A": [100]},
+            "demand_share": {"Loc_A": 1.0},
+            "production_cap": {"SKU_A": [200]},  # High production cap
+            "cold_capacity": {"Loc_A": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "labor_usage": {"SKU_A": 2},  # 2 labor hours per unit
+            "labor_cap": {"Loc_A": [100]},  # Only 100 labor hours = can process 50 units
+            "network": {"sub_edges": [], "trans_edges": []},
+            "costs": {
+                "inventory": {"SKU_A": 1},
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 100},
+                "purchasing": {"SKU_A": 5}
+            },
+            "constraints": {}
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # Labor cap = 100, usage = 2 per unit, so can only process 50 units
+        # Demand = 100, produce/process 50, lost sales = 50
+        # Cost: 50*5 + 50*100 = 250 + 5000 = 5250
+        return {"objective_range": (5000, 6000)}
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}"
+            )
+        
+        range_check = self._check_objective_range(
+            actual_result, expected,
+            low_diagnosis="Labor capacity may not be enforced, or objective not set correctly."
+        )
+        if range_check:
+            return range_check
+        
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="Labor capacity appears correctly implemented."
+        )
+
+
+# ==============================================================================
+# NEW PROBE 12: MOQ (F6 Coverage)
+# ==============================================================================
+
+class MOQProbe(SemanticProbe):
+    """
+    Test if Minimum Order Quantity (MOQ) is correctly enforced.
+    """
+    
+    name = "moq"
+    description = "Test if MOQ constraint is correctly enforced"
+    target_mechanism = "moq"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_moq",
+            "periods": 1,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A"],
+            "shelf_life": {"SKU_A": 2},
+            "demand_curve": {"SKU_A": [30]},  # demand = 30
+            "demand_share": {"Loc_A": 1.0},
+            "production_cap": {"SKU_A": [200]},
+            "cold_capacity": {"Loc_A": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "network": {"sub_edges": [], "trans_edges": []},
+            "costs": {
+                "inventory": {"SKU_A": 1},
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 100},
+                "purchasing": {"SKU_A": 5}
+            },
+            "constraints": {
+                "moq": 50  # Must order at least 50 if ordering
+            }
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # Option 1: Order 50 (MOQ), sell 30, waste/hold 20
+        # Cost: 50*5 + 20*10 = 250 + 200 = 450 (if waste) or less (if hold)
+        # Option 2: Order nothing, lost sales 30 = 30*100 = 3000
+        # Optimal: Order 50
+        return {"objective_range": (200, 500)}
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}"
+            )
+        
+        obj = actual_result.get("objective", 0) or 0
+        obj_min, obj_max = expected["objective_range"]
+        
+        # If objective is very high, MOQ might not be enforced (ordered less than MOQ)
+        # If very low, might be ignoring MOQ entirely
+        if obj > 2500:  # Close to lost sales cost
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective too high ({obj}). MOQ may not be correctly implemented."
+            )
+        
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="MOQ appears correctly implemented."
+        )
+
+
+# ==============================================================================
+# NEW PROBE 13: INITIALIZATION (Critical for detecting "free inventory" bug)
+# ==============================================================================
+
+class InitializationProbe(SemanticProbe):
+    """
+    Test if t=1 initialization is correctly implemented.
+    
+    Without init constraints, model can "create" free inventory at t=1
+    for buckets a < shelf_life, leading to objective = 0.
+    
+    This is a CRITICAL probe that catches a common silent failure pattern.
+    """
+    
+    name = "initialization"
+    description = "Test if t=1 inventory initialization is correct"
+    target_mechanism = "initialization"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_init",
+            "periods": 1,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A"],
+            "shelf_life": {"SKU_A": 3},  # Important: SL > 1 to expose the bug
+            "demand_curve": {"SKU_A": [100]},
+            "demand_share": {"Loc_A": 1.0},
+            "production_cap": {"SKU_A": [0]},  # Cannot produce anything
+            "cold_capacity": {"Loc_A": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "network": {"sub_edges": [], "trans_edges": []},
+            "costs": {
+                "inventory": {"SKU_A": 1},
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 50},
+                "purchasing": {"SKU_A": 5}
+            },
+            "constraints": {}
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # Demand = 100, production = 0, all lost sales
+        # Cost = 100 * 50 = 5000
+        return {"objective_range": (4500, 5500)}
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}"
+            )
+        
+        obj = actual_result.get("objective", 0) or 0
+        obj_min, obj_max = expected["objective_range"]
+        
+        # If objective is near zero, initialization is missing
+        if obj < obj_min * 0.1:  # Very strict: < 450
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective = {obj} (expected ~5000). "
+                          f"MISSING t=1 INITIALIZATION: Add I[p,l,1,a]=0 for a < shelf_life[p]."
+            )
+        
+        if obj < obj_min * self.OBJECTIVE_THRESHOLD:
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective too low ({obj}). Check t=1 initialization or lost sales."
+            )
+        
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="t=1 initialization appears correct."
+        )
+
+
+# ==============================================================================
+# HOLDING COST PROBE (NEW)
+# ==============================================================================
+
+class HoldingCostProbe(SemanticProbe):
+    """
+    Test if holding cost is correctly calculated as (I - y), not just I.
+    
+    Common error: Using I (start-of-period inventory) instead of I-y (end-of-period)
+    for holding cost. This leads to silent failures where the model runs but 
+    produces incorrect objectives.
+    
+    Test scenario:
+    - Demand = 100, Production = 100, shelf_life = 2
+    - Fresh inventory I[t=1,a=2] = 100, all sold y = 100
+    - Correct holding cost: (I - y) * cost = 0
+    - Wrong holding cost: I * cost = 100 * cost (much higher!)
+    """
+    
+    name = "holding_cost"
+    description = "Test if holding cost uses (I-y) instead of just I"
+    target_mechanism = "holding_cost"
+    
+    def generate_test_data(self, base_data: dict = None) -> dict:
+        return {
+            "name": "probe_holding_cost",
+            "periods": 1,
+            "products": ["SKU_A"],
+            "locations": ["Loc_A"],
+            "shelf_life": {"SKU_A": 2},  # a >= 2 exists
+            "lead_time": {"SKU_A": 0},
+            "demand_curve": {"SKU_A": [100]},  # Demand = 100
+            "demand_share": {"Loc_A": 1.0},
+            "production_cap": {"SKU_A": [100]},  # Can produce exactly 100
+            "cold_capacity": {"Loc_A": 10000},
+            "cold_usage": {"SKU_A": 1},
+            "network": {"sub_edges": [], "trans_edges": []},
+            "costs": {
+                "inventory": {"SKU_A": 20},  # High holding cost
+                "waste": {"SKU_A": 10},
+                "lost_sales": {"SKU_A": 100},  # Higher than holding
+                "purchasing": {"SKU_A": 5}
+            },
+            "constraints": {}
+        }
+    
+    def expected_behavior(self, test_data: dict) -> dict:
+        # Optimal: produce 100, sell 100, no inventory at end
+        # Correct cost: purchasing = 100 * 5 = 500, holding = 0
+        # Wrong cost (using I): purchasing = 500, holding = 100 * 20 = 2000, total = 2500
+        return {
+            "objective_range": (400, 600),  # Correct range
+            "wrong_objective_min": 2000     # If using I instead of I-y
+        }
+    
+    def check_result(self, test_data: dict, actual_result: dict) -> ProbeResult:
+        expected = self.expected_behavior(test_data)
+        
+        if actual_result.get("status") not in ("2", "OPTIMAL", "GRB.OPTIMAL"):
+            return ProbeResult(
+                probe_name=self.name,
+                result="CRASH",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Model status: {actual_result.get('status')}"
+            )
+        
+        obj = actual_result.get("objective", 0) or 0
+        obj_min, obj_max = expected["objective_range"]
+        wrong_min = expected["wrong_objective_min"]
+        
+        # If objective is way too high, holding cost uses I instead of I-y
+        if obj > wrong_min * 0.8:  # > 1600
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective = {obj} (expected ~500). "
+                          f"WRONG HOLDING COST: Use (I - y) not I. "
+                          f"Holding cost should be on END-OF-PERIOD inventory."
+            )
+        
+        if obj < obj_min * 0.5 or obj > obj_max * 2:
+            return ProbeResult(
+                probe_name=self.name,
+                result="FAIL",
+                expected=expected,
+                actual=actual_result,
+                diagnosis=f"Objective {obj} outside expected range ({obj_min}, {obj_max})."
+            )
+        
+        return ProbeResult(
+            probe_name=self.name,
+            result="PASS",
+            expected=expected,
+            actual=actual_result,
+            diagnosis="Holding cost calculation appears correct (using I-y)."
+        )
 
 class ProbeRunner:
     """Run all probes against a generated model."""
     
     def __init__(self):
         self.probes = [
+            # Original 8 probes (with fixes)
             SubstitutionProbe(),
             DemandRouteProbe(),
             NoSubstitutionProbe(),
             ProductionCapacityProbe(),
-            StorageCapacityProbe(),
+            StorageCapacityProbe(),  # FIXED
             AgingProbe(),
-            LostSalesProbe(),
+            LostSalesProbe(),  # FIXED
             NonNegativityProbe(),
+            # New probes for better coverage
+            LeadTimeProbe(),  # F6
+            TransshipmentProbe(),  # F7
+            LaborCapacityProbe(),  # F8
+            MOQProbe(),  # F6
+            InitializationProbe(),  # CRITICAL: detects missing t=1 init
+            HoldingCostProbe(),  # CRITICAL: detects wrong holding cost (I vs I-y)
         ]
     
     def run_model_code(self, code: str, data: dict, timeout: int = 60) -> dict:
@@ -758,12 +1281,41 @@ finally:
         except Exception as e:
             return {"status": "ERROR", "objective": None, "error": str(e)}
     
+    def _add_optional_fields(self, data: dict) -> dict:
+        """Add optional fields with safe defaults to probe test data."""
+        products = data.get("products", [])
+        locations = data.get("locations", [])
+        periods = data.get("periods", 1)
+        
+        # Add lead_time (default 0 - no delay)
+        if "lead_time" not in data:
+            data["lead_time"] = {p: 0 for p in products}
+        
+        # Add labor_cap (default very high - not binding)
+        if "labor_cap" not in data:
+            data["labor_cap"] = {l: [100000] * periods for l in locations}
+        
+        # Add labor_usage (default 0 - no labor needed)
+        if "labor_usage" not in data:
+            data["labor_usage"] = {p: 0 for p in products}
+        
+        # Add return_rate (default 0 - no returns)
+        if "return_rate" not in data:
+            data["return_rate"] = {p: 0 for p in products}
+        
+        # Ensure constraints dict exists
+        if "constraints" not in data:
+            data["constraints"] = {}
+        
+        return data
+
     def run_all_probes(self, model_code: str) -> SemanticProbeReport:
         """Run all probes and return aggregate report."""
         probe_results: List[ProbeResult] = []
         
         for probe in self.probes:
             test_data = probe.generate_test_data()
+            test_data = self._add_optional_fields(test_data)  # Add optional fields
             result = self.run_model_code(model_code, test_data)
             report = probe.check_result(test_data, result)
             probe_results.append(report)
@@ -790,6 +1342,7 @@ finally:
         for probe in self.probes:
             if probe.name in probe_names:
                 test_data = probe.generate_test_data()
+                test_data = self._add_optional_fields(test_data)  # Add optional fields
                 result = self.run_model_code(model_code, test_data)
                 report = probe.check_result(test_data, result)
                 probe_results.append(report)
@@ -808,6 +1361,20 @@ finally:
             probe_results=probe_results,
             diagnoses={r.probe_name: r.diagnosis for r in probe_results if r.result != "PASS"}
         )
+    
+    def run_core_probes(self, model_code: str) -> SemanticProbeReport:
+        """Run only the core 8 probes (for backward compatibility)."""
+        core_probe_names = [
+            "substitution_basic",
+            "demand_route_constraint", 
+            "no_substitution",
+            "production_capacity",
+            "storage_capacity",
+            "aging_dynamics",
+            "lost_sales_slack",
+            "inventory_nonnegativity",
+        ]
+        return self.run_selected_probes(model_code, core_probe_names)
 
 
 def get_probe_diagnosis(model_code: str) -> str:

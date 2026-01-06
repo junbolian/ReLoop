@@ -483,11 +483,14 @@ class AgentOrchestrator:
         idx = self._next_turn_index(state)
         self.persistence.persist_turn(
             state["run_id"], idx, "semantic_probe", 
-            step_outputs=probe_report.model_dump(mode="json")
+            semantic_probe_report=probe_report  # FIX: use correct parameter
         )
         
         if probe_report.failed > 0 or probe_report.crashed > 0:
             state["last_error"] = "probe_failed"
+        else:
+            # CRITICAL: Clear last_error when probes pass!
+            state["last_error"] = None
         
         return state
 
@@ -579,43 +582,71 @@ class AgentOrchestrator:
         return "codegen"
 
     def _route_after_audit(self, state: AgentState):
+        """Route after static audit.
+        
+        SIMPLIFIED: Pass → probe, Fail → retry (up to limit)
+        """
+        # Check limits first
         if state.get("turn_index", 0) >= self.max_turns:
-            return "done"
-        if state.get("static_audit_reports") and not state["static_audit_reports"][-1].passed:
-            return "retry_codegen"
-        return "probe"
+            return "probe"  # Just proceed even if audit failed
+        
+        # Check audit result
+        audit_passed = True
+        if state.get("static_audit_reports"):
+            audit_passed = state["static_audit_reports"][-1].passed
+        
+        if audit_passed:
+            return "probe"
+        
+        # Audit failed - retry codegen (but don't count as repair)
+        return "retry_codegen"
 
     def _route_after_probe(self, state: AgentState):
-        """Route based on semantic probe results."""
-        if state.get("turn_index", 0) >= self.max_turns:
-            return "done"
-        if state.get("repair_count", 0) >= self.repair_limit:
-            return "done"
+        """Route based on semantic probe results.
         
+        SIMPLIFIED: Probes pass → run, Probes fail → repair (up to limit)
+        """
+        # Check probe results
         if state.get("semantic_probe_reports"):
             last_probe = state["semantic_probe_reports"][-1]
             if last_probe.failed > 0 or last_probe.crashed > 0:
-                if state.get("repair_count", 0) < self.repair_limit:
-                    state["repair_count"] = state.get("repair_count", 0) + 1
-                    return "repair_codegen"
-                return "done"
+                # Probes failed - check limits before repair
+                if state.get("repair_count", 0) >= self.repair_limit:
+                    return "run"  # Give up on repair, just run
+                if state.get("turn_index", 0) >= self.max_turns:
+                    return "run"  # Give up on repair, just run
+                # Try repair
+                state["repair_count"] = state.get("repair_count", 0) + 1
+                return "repair_codegen"
         
+        # Probes passed (or skipped) - proceed to run
         return "run"
 
     def _route_after_run(self, state: AgentState):
+        """Route after running code.
+        
+        SIMPLIFIED: Success → done, Failure → repair (up to limit)
+        """
+        # SUCCESS = done immediately!
+        if state.get("last_error") is None:
+            return "done"
+        
+        # FAILURE - check limits
         if state.get("turn_index", 0) >= self.max_turns:
             return "done"
         if state.get("repair_count", 0) >= self.repair_limit:
             return "done"
+        
+        # Try repair
+        state["repair_count"] = state.get("repair_count", 0) + 1
+        
+        # Check repair brief for target
         if state.get("repair_briefs"):
             brief = state["repair_briefs"][-1]
             if brief.target == "SPEC":
                 return "revise_spec"
-            if brief.target == "CODEGEN":
-                return "regenerate_code"
-        if state.get("last_error"):
-            return "regenerate_code"
-        return "done"
+        
+        return "regenerate_code"
 
 
 # ==============================================================================

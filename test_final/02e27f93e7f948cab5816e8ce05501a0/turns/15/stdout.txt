@@ -1,0 +1,6 @@
+Set parameter Username
+Set parameter LicenseID to value 2742635
+Academic license - for non-commercial use only - expires 2026-11-21
+Status: 2
+Objective: 378951.50000000006
+SOLVE_JSON::{"status": 2, "obj_val": 378951.50000000006, "obj_bound": 378951.50000000006, "mip_gap": null, "elapsed_sec": 0.06005215644836426}
