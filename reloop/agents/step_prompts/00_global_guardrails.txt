@@ -12,19 +12,118 @@ You are an optimization modeling agent for retail supply-chain planning.
 - Demand each period: fulfilled, substituted, or lost. No backorders.
 - Expired inventory = waste.
 
-[DATA FORMAT]
-- sub_edges: [[p_from, p_to], ...] means p_from's demand can be served by p_to's inventory.
-- trans_edges: [[loc_from, loc_to], ...] for transshipment.
-- demand_share: {location: scalar}, NOT nested by product.
-- demand = demand_curve[p][t] * demand_share[l].
-- Time indexing: 1-based (t = 1, 2, ..., T).
+=============================================================================
+DATA FORMAT
+=============================================================================
 
-[SUBSTITUTION SEMANTICS]
-Edge [p_from, p_to] = "upward substitution": p_to (premium) can serve p_from (basic) demand.
-- S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
-- For p_from: S is outbound (reduces effective demand).
-- For p_to: S is inbound (increases demand to fulfill).
+- products: list of product IDs
+- locations: list of location IDs  
+- periods: integer T (time runs from 1 to T)
+- shelf_life[p]: remaining life buckets (a = 1 is expiring, a = shelf_life[p] is freshest)
+- lead_time[p]: periods until order arrives (may be 0)
+- demand_curve[p]: list of demands (0-indexed, use [t-1] for period t)
+- demand_share[l]: scalar per location (NOT nested by product)
+- demand[p,l,t] = demand_curve[p][t-1] * demand_share[l]
+- production_cap[p]: list (0-indexed, use [t-1] for period t)
+- cold_capacity[l]: storage limit per location
+- cold_usage[p]: storage units per product unit
+- sub_edges: [[p_from, p_to], ...] substitution pairs
+- trans_edges: [[loc_from, loc_to], ...] transshipment pairs
 
-[SOLVING]
-- Gurobi params: OutputFlag=0, Threads=1, Seed=0.
-- Print status always. Print objective only if OPTIMAL.
+=============================================================================
+SUBSTITUTION SEMANTICS (CRITICAL)
+=============================================================================
+
+Edge [p_from, p_to] means: "p_from's demand can be served by p_to's inventory"
+
+This is "upward substitution" - premium product (p_to) serves basic product (p_from).
+S[p_from, p_to, l, t] = quantity of p_from's demand fulfilled by p_to
+
+Example: sub_edges = [["Basic", "Premium"]]
+- Basic can have its demand met by Premium's inventory
+- Premium CANNOT have its demand met by Basic (no reverse edge)
+
+For each product p:
+- outbound: substitution flow where p is the source (p sends demand out to be served by others)
+- inbound: substitution flow where p is the target (p receives and serves others' demand)
+
+Two constraints involve substitution:
+1. A product cannot substitute out more demand than it actually has
+2. Sales balance: total sales + lost sales = demand + inbound - outbound
+
+=============================================================================
+SHELF-LIFE AND AGING
+=============================================================================
+
+Inventory is tracked by remaining life bucket (a):
+- a = 1: expiring (will become waste if not sold this period)
+- a = shelf_life[p]: freshest (just arrived)
+
+Each period:
+- Fresh inventory arrives at highest bucket (a = shelf_life[p])
+- Unsold inventory ages: moves from bucket a+1 to bucket a
+- Unsold inventory in bucket a=1 becomes waste
+
+Key rules:
+- Holding cost applies ONLY to buckets a >= 2 (a=1 expires, not held overnight)
+- Aging constraint links t+1 inventory to t inventory minus sales
+- Do NOT create aging constraints for t = T (would reference t+1)
+
+=============================================================================
+BOUNDARY CONDITIONS (CRITICAL)
+=============================================================================
+
+1. INITIALIZATION at t=1:
+   All non-fresh inventory buckets must start empty.
+   For buckets a < shelf_life[p]: initial inventory = 0
+   This prevents the model from exploiting "free" phantom inventory.
+
+2. FRESH INFLOW with lead_time:
+   Fresh inventory comes from orders placed lead_time periods ago.
+   If t <= lead_time: no fresh inventory arrives yet (cannot access past orders)
+   If t > lead_time: fresh = order from period (t - lead_time)
+
+3. AGING at t=T:
+   Do NOT create aging constraints for the final period.
+   They would reference period T+1 which does not exist.
+
+4. EMPTY EDGES:
+   If sub_edges is empty: no substitution variables or constraints
+   If trans_edges is empty: no transshipment variables or constraints
+
+=============================================================================
+VARIABLE NAMING CONVENTION
+=============================================================================
+
+- I[p,l,t,a]: START-OF-PERIOD inventory (before sales occur)
+- y[p,l,t,a]: sales from each life bucket (during the period)
+- W[p,l,t]: waste (expired inventory from bucket a=1)
+- Q[p,l,t]: orders/production
+- L[p,l,t]: lost sales (MUST be included - this is the slack variable)
+- S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+
+NOTE: I is the inventory at the START of period t, before any sales.
+      End-of-period inventory = I - y (what remains after sales).
+
+=============================================================================
+OBJECTIVE FUNCTION
+=============================================================================
+
+Minimize total cost including:
+1. Purchasing cost: cost per unit ordered
+2. Inventory holding cost: cost per unit of END-OF-PERIOD inventory
+   - END-OF-PERIOD inventory = I[p,l,t,a] - y[p,l,t,a] (start minus sales)
+   - Apply only for buckets a >= 2 (a=1 expires, not held overnight)
+   - CRITICAL: Use (I - y), NOT just I
+3. Waste cost: penalty per unit expired
+4. Lost sales penalty: penalty per unit of unmet demand
+
+Read all cost coefficients from data["costs"].
+
+=============================================================================
+SOLVING
+=============================================================================
+
+- Gurobi params: OutputFlag=0, Threads=1, Seed=0
+- Print status always
+- Print objective only if OPTIMAL

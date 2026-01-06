@@ -11,72 +11,115 @@ SCHEMA (all fields required)
 
 {
   "sets": [
-    {"name": "P", "description": "products", "source": "data.products"},
-    {"name": "L", "description": "locations", "source": "data.locations"},
-    {"name": "T", "description": "periods 1..T", "source": "data.periods"},
-    {"name": "A", "description": "remaining life 1..shelf_life[p]", "source": "data.shelf_life"}
+    {"name": "...", "description": "...", "source": "data.xxx"}
   ],
 
   "decisions": [
-    {"name": "I", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "inventory by remaining life", "active_if": "always"},
-    {"name": "y", "type": "continuous", "domain": ">=0", "indices": ["p","l","t","a"], "meaning": "sales from life bucket", "active_if": "always"},
-    {"name": "W", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "waste (expired inventory)", "active_if": "always"},
-    {"name": "Q", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "orders/production", "active_if": "always"},
-    {"name": "L", "type": "continuous", "domain": ">=0", "indices": ["p","l","t"], "meaning": "lost sales", "active_if": "always"},
-    {"name": "S", "type": "continuous", "domain": ">=0", "indices": ["p_from","p_to","l","t"], "meaning": "substitution flow", "active_if": "sub_edges nonempty"}
+    {"name": "...", "type": "continuous|integer|binary", "domain": ">=0", 
+     "indices": [...], "meaning": "...", "active_if": "condition or always"}
   ],
 
   "objective_terms": [
-    {"name": "inventory_holding", "expression": "sum inv_cost[p]*(I[p,l,t,a]-y[p,l,t,a]) for a>=2", "source": "costs.inventory", "active_if": "always"},
-    {"name": "waste_cost", "expression": "sum waste_cost[p]*W[p,l,t]", "source": "costs.waste", "active_if": "always"},
-    {"name": "lost_sales_penalty", "expression": "sum lost_cost[p]*L[p,l,t]", "source": "costs.lost_sales", "active_if": "always"},
-    {"name": "purchasing_cost", "expression": "sum purchasing[p]*Q[p,l,t]", "source": "costs.purchasing", "active_if": "always"}
+    {"name": "...", "expression": "semantic description of this cost term", 
+     "source": "costs.xxx", "active_if": "condition or always"}
   ],
 
   "constraint_families": [
-    {"prefix": "demand_route", "meaning": "outbound substitution bounded by demand", "indices": ["p","l","t"], "sense": "<=", "active_if": "sub_edges nonempty"},
-    {"prefix": "sales_conservation", "meaning": "sales + lost = effective demand", "indices": ["p","l","t"], "sense": "=", "active_if": "always"},
-    {"prefix": "availability", "meaning": "cannot sell more than inventory", "indices": ["p","l","t","a"], "sense": "<=", "active_if": "always"},
-    {"prefix": "aging", "meaning": "inventory ages each period", "indices": ["p","l","t","a"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "expire_clear", "meaning": "waste is unsold expiring inventory", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "fresh_inflow", "meaning": "fresh inventory from orders", "indices": ["p","l","t"], "sense": "=", "active_if": "shelf_life"},
-    {"prefix": "storage_cap", "meaning": "cold storage limit", "indices": ["l","t"], "sense": "<=", "active_if": "cold_capacity"},
-    {"prefix": "prod_cap", "meaning": "production limit", "indices": ["p","t"], "sense": "<=", "active_if": "production_cap"}
+    {"prefix": "...", "meaning": "one sentence description", 
+     "indices": [...], "sense": "<=|=|>=", "active_if": "condition or always"}
   ],
 
   "edge_cases": [
-    {"case": "t=1 init", "handling": "I[p,l,1,a]=0 for a<shelf_life; fresh bucket from Q if lead_time=0"},
-    {"case": "t=T boundary", "handling": "no aging constraints for t=T"},
-    {"case": "lead_time boundary", "handling": "if t<=lead_time then fresh_inflow=0"}
+    {"case": "boundary condition", "handling": "how to handle"}
   ],
 
   "open_questions": []
 }
 
 =============================================================================
-SUBSTITUTION SEMANTICS (CRITICAL)
+SETS TO DEFINE
+=============================================================================
+
+- P: products (from data.products)
+- L: locations (from data.locations)
+- T: time periods 1 to data.periods
+- A: remaining life buckets 1 to shelf_life[p] for each product
+
+=============================================================================
+DECISION VARIABLES
+=============================================================================
+
+Core variables (always needed):
+- I: inventory indexed by [p, l, t, a] - must include life bucket index
+- y: sales indexed by [p, l, t, a] - sales from each life bucket
+- W: waste indexed by [p, l, t] - expired inventory
+- Q: orders/production indexed by [p, l, t]
+- L: lost sales indexed by [p, l, t] - CRITICAL: this is the slack variable
+
+Conditional variables:
+- S: substitution flow indexed by [p_from, p_to, l, t] - only if sub_edges nonempty
+
+=============================================================================
+OBJECTIVE TERMS
+=============================================================================
+
+For each cost term, provide a semantic description in the "expression" field.
+Describe WHAT the cost represents, not the mathematical formula.
+
+- purchasing_cost: cost incurred when ordering/producing units
+- inventory_holding: cost of holding END-OF-PERIOD inventory (I - y), only for buckets a >= 2
+  NOTE: I is START-of-period inventory, y is sales, so (I - y) is END-of-period
+- waste_cost: penalty for units that expire from bucket a=1
+- lost_sales_penalty: penalty for demand that cannot be fulfilled
+
+=============================================================================
+CONSTRAINT FAMILIES
+=============================================================================
+
+Identify each constraint family by its PURPOSE:
+
+Balance constraints:
+- demand_route: limits how much demand can be redirected to substitutes
+- sales_conservation: ensures sales + lost = effective demand
+
+Availability constraints:
+- availability: sales from a bucket cannot exceed inventory in that bucket
+
+Dynamics constraints:
+- aging: how inventory moves between life buckets over time
+- expire_clear: defines waste as unsold expiring inventory
+- fresh_inflow: how new inventory enters the freshest bucket
+
+Capacity constraints:
+- storage_cap: total inventory limited by cold storage capacity
+- prod_cap: total production limited by capacity
+
+=============================================================================
+EDGE CASES TO DOCUMENT
+=============================================================================
+
+- t=1 initialization: non-fresh buckets must start empty
+- t=T boundary: no aging constraints (would reference t+1)
+- lead_time handling: fresh inflow depends on past orders
+
+=============================================================================
+SUBSTITUTION SEMANTICS
 =============================================================================
 
 sub_edges = [[p_from, p_to], ...] means p_from's demand can be served by p_to.
-S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to's inventory.
+S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
 
-Build edge mappings:
-  outgoing_edges[p_from] = [p_to, ...]   # p_from sends demand OUT
-  incoming_edges[p_to] = [p_from, ...]   # p_to receives requests IN
-
-For each product p:
-  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]
-  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]
-
-Key constraints:
-  demand_route: outbound <= demand[p,l,t]
-  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
+Conceptually:
+- outbound[p]: substitution where p is the source (p's demand served by others)
+- inbound[p]: substitution where p is the target (p serves others' demand)
 
 =============================================================================
 CRITICAL RULES
 =============================================================================
-- Do NOT create variable 'd' - it is unnecessary
-- L (lost sales) MUST appear in sales_conservation
+
+- Do NOT create variable 'd' for demand - compute demand directly
+- L (lost sales) MUST be included as a decision variable
 - I and y MUST have index 'a' for remaining life bucket
 - S only exists when sub_edges is nonempty
-- Every field in schema is REQUIRED - do not omit any
+- Every field in schema is REQUIRED
+- The "expression" field should contain semantic descriptions, not mathematical formulas

@@ -1,0 +1,240 @@
+{
+  "sets": [
+    {
+      "name": "P",
+      "description": "products",
+      "source": "data.products"
+    },
+    {
+      "name": "L",
+      "description": "locations",
+      "source": "data.locations"
+    },
+    {
+      "name": "T",
+      "description": "time periods 1 to T",
+      "source": "data.periods"
+    },
+    {
+      "name": "A",
+      "description": "remaining life buckets 1 to shelf_life[p] for each product p",
+      "source": "data.shelf_life"
+    }
+  ],
+  "decisions": [
+    {
+      "name": "I",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p",
+        "l",
+        "t",
+        "a"
+      ],
+      "meaning": "inventory of product p at location l at start of period t with remaining life a",
+      "active_if": "always"
+    },
+    {
+      "name": "y",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p",
+        "l",
+        "t",
+        "a"
+      ],
+      "meaning": "sales of product p from location l in period t from life bucket a",
+      "active_if": "always"
+    },
+    {
+      "name": "W",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "meaning": "waste of product p at location l in period t from expired inventory",
+      "active_if": "always"
+    },
+    {
+      "name": "Q",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "meaning": "orders/production of product p for location l in period t",
+      "active_if": "always"
+    },
+    {
+      "name": "L",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "meaning": "lost sales of product p at location l in period t",
+      "active_if": "always"
+    },
+    {
+      "name": "S",
+      "type": "continuous",
+      "domain": ">=0",
+      "indices": [
+        "p_from",
+        "p_to",
+        "l",
+        "t"
+      ],
+      "meaning": "substitution flow where p_from's demand is served by p_to's inventory at location l in period t",
+      "active_if": "network.sub_edges is nonempty"
+    }
+  ],
+  "objective_terms": [
+    {
+      "name": "purchasing_cost",
+      "expression": "cost of ordering/producing units across all products, locations, and periods",
+      "source": "costs.purchasing",
+      "active_if": "always"
+    },
+    {
+      "name": "inventory_holding",
+      "expression": "cost of holding end-of-period inventory (I minus y) for life buckets a >= 2",
+      "source": "costs.inventory",
+      "active_if": "always"
+    },
+    {
+      "name": "waste_cost",
+      "expression": "penalty for units that expire from life bucket a=1",
+      "source": "costs.waste",
+      "active_if": "always"
+    },
+    {
+      "name": "lost_sales_penalty",
+      "expression": "penalty for demand that cannot be fulfilled",
+      "source": "costs.lost_sales",
+      "active_if": "always"
+    }
+  ],
+  "constraint_families": [
+    {
+      "prefix": "demand_route",
+      "meaning": "limits how much of a product's demand can be redirected to substitutes",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "sense": "<=",
+      "active_if": "network.sub_edges is nonempty"
+    },
+    {
+      "prefix": "sales_conservation",
+      "meaning": "ensures total sales plus lost sales equals effective demand after substitution",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "sense": "=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "availability",
+      "meaning": "sales from each life bucket cannot exceed inventory in that bucket",
+      "indices": [
+        "p",
+        "l",
+        "t",
+        "a"
+      ],
+      "sense": "<=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "aging",
+      "meaning": "links inventory between periods accounting for aging and sales",
+      "indices": [
+        "p",
+        "l",
+        "t",
+        "a"
+      ],
+      "sense": "=",
+      "active_if": "t < T and a < shelf_life[p]"
+    },
+    {
+      "prefix": "expire_clear",
+      "meaning": "defines waste as unsold inventory from expiring bucket a=1",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "sense": "=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "fresh_inflow",
+      "meaning": "defines how fresh inventory enters the system based on orders and lead time",
+      "indices": [
+        "p",
+        "l",
+        "t"
+      ],
+      "sense": "=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "storage_cap",
+      "meaning": "total inventory limited by cold storage capacity at each location",
+      "indices": [
+        "l",
+        "t"
+      ],
+      "sense": "<=",
+      "active_if": "always"
+    },
+    {
+      "prefix": "prod_cap",
+      "meaning": "total production across locations limited by production capacity",
+      "indices": [
+        "p",
+        "t"
+      ],
+      "sense": "<=",
+      "active_if": "always"
+    }
+  ],
+  "edge_cases": [
+    {
+      "case": "t=1 initialization",
+      "handling": "non-fresh inventory buckets (a < shelf_life[p]) must start at zero"
+    },
+    {
+      "case": "t=T boundary",
+      "handling": "no aging constraints for final period as they would reference t+1"
+    },
+    {
+      "case": "lead_time handling",
+      "handling": "fresh inflow at t depends on orders from t-lead_time, zero if t <= lead_time"
+    },
+    {
+      "case": "empty sub_edges",
+      "handling": "no substitution variables or constraints when network.sub_edges is empty"
+    },
+    {
+      "case": "empty trans_edges",
+      "handling": "no transshipment variables or constraints as trans_edges is empty in this archetype"
+    }
+  ],
+  "open_questions": []
+}

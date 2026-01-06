@@ -4,120 +4,99 @@ Output ONLY raw Python code. No markdown, no comments.
 First character must be: import
 
 =============================================================================
-CODE STRUCTURE
+TASK
 =============================================================================
 
-import gurobipy as gp
-from gurobipy import GRB
-
-def ts(param, t, default=0):
-    if param is None: return default
-    if isinstance(param, (int, float)): return param
-    if isinstance(param, list):
-        return param[min(t-1, len(param)-1)] if param else default
-    return default
-
-T = int(data["periods"])
-products = list(data["products"])
-locations = list(data["locations"])
-sub_edges = data["network"]["sub_edges"]
-shelf_life = {p: data["shelf_life"][p] for p in products}
-lead_time = {p: data.get("lead_time", {}).get(p, 0) for p in products}
-
-# Edge mappings
-outgoing_edges = {p: [] for p in products}
-incoming_edges = {p: [] for p in products}
-for p_from, p_to in sub_edges:
-    outgoing_edges[p_from].append(p_to)
-    incoming_edges[p_to].append(p_from)
-
-m = gp.Model()
-m.Params.OutputFlag = 0
-m.Params.Threads = 1
-m.Params.Seed = 0
-
-# Variables
-I = m.addVars(products, locations, range(1,T+1), range(1,max(shelf_life.values())+1), name="I")
-y = m.addVars(products, locations, range(1,T+1), range(1,max(shelf_life.values())+1), name="y")
-W = m.addVars(products, locations, range(1,T+1), name="W")
-Q = m.addVars(products, locations, range(1,T+1), name="Q")
-L = m.addVars(products, locations, range(1,T+1), name="L")
-if sub_edges:
-    S = m.addVars([(pf,pt) for pf,pt in sub_edges], locations, range(1,T+1), name="S")
+Translate the constraint templates from Step 3 into GurobiPy code.
+Read all parameters from `data` dict. No file I/O.
 
 =============================================================================
-OBJECTIVE
+OUTPUT FORMAT
 =============================================================================
 
-Minimize: inv_cost*(I-y for a>=2) + waste_cost*W + lost_cost*L + purchase_cost*Q
+End your code with:
+- Set Gurobi params: OutputFlag=0, Threads=1, Seed=0
+- Call optimize()
+- Print status (always)
+- Print objective (only if OPTIMAL)
 
 =============================================================================
-CONSTRAINTS LOOP
+VARIABLE NAMING
 =============================================================================
 
-for p in products:
-    SL = shelf_life[p]
-    LT = lead_time[p]
-    for l in locations:
-        # Initialization at t=1
-        for a in range(1, SL):
-            m.addConstr(I[p,l,1,a] == 0)
-        m.addConstr(I[p,l,1,SL] == Q[p,l,1] if LT == 0 else 0)
-        
-        for t in range(1, T+1):
-            demand_plt = data["demand_curve"][p][t-1] * data["demand_share"][l]
-            
-            # Substitution
-            if sub_edges:
-                outbound = gp.quicksum(S[p,pt,l,t] for pt in outgoing_edges[p]) if outgoing_edges[p] else 0
-                inbound = gp.quicksum(S[pf,p,l,t] for pf in incoming_edges[p]) if incoming_edges[p] else 0
-            else:
-                outbound, inbound = 0, 0
-            
-            # demand_route: can't substitute more than own demand
-            if sub_edges and outgoing_edges[p]:
-                m.addConstr(outbound <= demand_plt)
-            
-            # sales_conservation
-            total_sales = gp.quicksum(y[p,l,t,a] for a in range(1,SL+1))
-            m.addConstr(total_sales + L[p,l,t] == demand_plt + inbound - outbound)
-            
-            # availability
-            for a in range(1, SL+1):
-                m.addConstr(y[p,l,t,a] <= I[p,l,t,a])
-            
-            # expire_clear
-            m.addConstr(W[p,l,t] == I[p,l,t,1] - y[p,l,t,1])
-            
-            # aging (only for t < T)
-            if t < T:
-                for a in range(1, SL):
-                    m.addConstr(I[p,l,t+1,a] == I[p,l,t,a+1] - y[p,l,t,a+1])
-                # fresh_inflow for t+1
-                if t+1 > LT:
-                    m.addConstr(I[p,l,t+1,SL] == Q[p,l,t+1-LT])
-                else:
-                    m.addConstr(I[p,l,t+1,SL] == 0)
-
-m.optimize()
-print(f"status: {m.Status}")
-if m.Status == GRB.OPTIMAL:
-    print(f"objective: {m.ObjVal}")
+Use dictionary-style variables with tuple keys:
+- I[p,l,t,a]: inventory by remaining life bucket
+- y[p,l,t,a]: sales from each life bucket
+- W[p,l,t]: waste
+- Q[p,l,t]: orders/production
+- L[p,l,t]: lost sales
+- S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
 
 =============================================================================
-SUBSTITUTION SEMANTICS
+SUBSTITUTION IMPLEMENTATION
 =============================================================================
 
 sub_edges = [[p_from, p_to], ...] means p_from's demand served by p_to.
-S[p_from, p_to, l, t] = quantity transferred.
 
-outgoing_edges[p_from] = [p_to, ...]  # p_from sends demand out
-incoming_edges[p_to] = [p_from, ...]  # p_to receives requests
+Before creating constraints, build mappings to know:
+- For each product, which products can serve its demand (outgoing)
+- For each product, which products' demand it serves (incoming)
+
+=============================================================================
+BOUNDARY RULES (CRITICAL)
+=============================================================================
+
+1. INITIALIZATION at t=1:
+   - Non-fresh buckets must be zero: for a < shelf_life[p], set I[p,l,1,a] = 0
+   - This is MANDATORY - without it, model may have unbounded free inventory
+   - This causes objective = 0 if missing
+
+2. AGING at t=T:
+   - Do NOT create aging constraints for the final period
+   - They would reference period T+1 which does not exist
+
+3. FRESH INFLOW:
+   - Check if t > lead_time before accessing past orders
+   - If t <= lead_time: fresh inflow = 0
+   - Never access Q[p,l,0] or negative period indices
+
+4. HOLDING COST:
+   - Apply only to life buckets a >= 2
+   - Bucket a=1 is expiring and not held overnight
+
+=============================================================================
+CONSTRAINT CHECKLIST
+=============================================================================
+
+Verify you have implemented ALL of these:
+
+[ ] Initialization: I[p,l,1,a] = 0 for a < shelf_life[p]
+[ ] Fresh inflow: I[p,l,t,shelf_life] from orders (with lead_time check)
+[ ] Aging: inventory moves between buckets (only for t < T)
+[ ] Expire/waste: W = unsold from bucket a=1
+[ ] Availability: y[p,l,t,a] <= I[p,l,t,a]
+[ ] Sales conservation: sum(y) + L = demand + inbound - outbound
+[ ] Demand route: outbound substitution <= demand (if sub_edges nonempty)
+[ ] Storage capacity: weighted inventory sum <= cold_capacity
+[ ] Production capacity: sum of Q <= production_cap
+
+=============================================================================
+OBJECTIVE FUNCTION
+=============================================================================
+
+Minimize total cost including:
+- Purchasing: read from costs["purchasing"]
+- Holding: read from costs["inventory"], apply to (I - y) for a >= 2
+  CRITICAL: Holding cost = cost * (I[p,l,t,a] - y[p,l,t,a]), NOT cost * I[p,l,t,a]
+- Waste: read from costs["waste"]
+- Lost sales: read from costs["lost_sales"]
 
 =============================================================================
 DO NOT
 =============================================================================
-- Hard-code numeric values
-- Use markdown or file I/O
-- Access Q[p,l,0] (use conditional for lead_time)
-- Add aging constraints when t=T (would access t+1=T+1)
+
+- Hard-code any numeric values
+- Use markdown or comments in output
+- Skip any constraints from Step 3
+- Forget the initialization constraints at t=1
+- Access negative or zero time indices

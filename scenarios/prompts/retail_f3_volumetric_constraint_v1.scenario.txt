@@ -23,65 +23,155 @@ MODELING GUIDELINES
 - Output must be plain Python code. No prose, no markdown, no comments.
 
 [DATA FORMAT]
-- sub_edges: [[p_from, p_to], ...] means p_from's demand can be served by p_to's inventory.
-- trans_edges: [[loc_from, loc_to], ...] for transshipment.
-- demand_share: {location: scalar}, NOT nested by product.
-- demand = demand_curve[p][t-1] * demand_share[l]  (demand_curve is 0-indexed)
-- Time indexing: 1-based (t = 1, 2, ..., T).
+- sub_edges: [[p_from, p_to], ...] defines substitution pairs
+- trans_edges: [[loc_from, loc_to], ...] defines transshipment pairs
+- demand_share: {location: scalar}, NOT nested by product
+- demand[p,l,t] = demand_curve[p][t-1] * demand_share[l]
+- Time indexing: 1-based (t = 1, 2, ..., T)
+- production_cap[p] is a list (0-indexed), access with [t-1]
 
-[SUBSTITUTION SEMANTICS - CRITICAL]
-Edge [p_from, p_to] = "upward substitution": p_to can serve p_from's demand.
-S[p_from, p_to, l, t] = quantity of p_from's demand served by p_to.
-
-Build edge mappings BEFORE constraints:
-  outgoing_edges = {p: [] for p in products}
-  incoming_edges = {p: [] for p in products}
-  for p_from, p_to in sub_edges:
-      outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT to p_to
-      incoming_edges[p_to].append(p_from)  # p_to receives requests IN from p_from
-
-Compute substitution flows for each product p:
-  outbound = sum S[p, pt, l, t] for pt in outgoing_edges[p]  # demand p sends out
-  inbound  = sum S[pf, p, l, t] for pf in incoming_edges[p]  # requests p receives
-
-Substitution constraints:
-  demand_route: outbound <= demand[p,l,t]  (can't substitute more than own demand)
-  sales_conservation: sum_a(y[p,l,t,a]) + L[p,l,t] = demand[p,l,t] + inbound - outbound
-
-[SHELF-LIFE / AGING]
-- Life buckets: a = 1 (expiring) to a = shelf_life[p] (freshest)
-- Aging: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1]  (for a < shelf_life, t < T)
-- Expiration: W[p,l,t] = I[p,l,t,1] - y[p,l,t,1]
-- Availability: y[p,l,t,a] <= I[p,l,t,a]
-- Holding cost: apply only to a >= 2 (not expiring bucket a=1)
-
-[FRESH INFLOW - BOUNDARY CONDITIONS]
-Fresh inventory enters at a = shelf_life[p]:
-  if t > lead_time[p]:
-      I[p,l,t,shelf_life] = Q[p,l,t-lead_time]
-  else:
-      I[p,l,t,shelf_life] = 0
-NEVER access Q[p,l,0] or negative indices - they don't exist.
-
-[INITIALIZATION at t=1]
-  I[p,l,1,a] = 0  for a < shelf_life[p]  (non-fresh buckets empty)
-  I[p,l,1,shelf_life] = Q[p,l,1] if lead_time=0, else 0
-
-[AGING BOUNDARY at t=T]
-Do NOT add aging constraints for t=T, as they would reference I[p,l,T+1,a] which doesn't exist.
-
-[VARIABLE NAMING]
-Use these exact names:
+[DECISION VARIABLES]
 - I[p,l,t,a]: inventory by product, location, period, remaining life bucket
-- y[p,l,t,a]: sales/consumption from life bucket
-- W[p,l,t]: waste (expired inventory)
-- Q[p,l,t]: orders/production
-- L[p,l,t]: lost sales
+- y[p,l,t,a]: sales from each life bucket
+- W[p,l,t]: waste (expired inventory from bucket a=1)
+- Q[p,l,t]: orders/production quantity
+- L[p,l,t]: lost sales (slack variable for unmet demand)
 - S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+- X[p,l_from,l_to,t]: transshipment flow (only if trans_edges nonempty)
+
+=============================================================================
+OBJECTIVE FUNCTION (MINIMIZE TOTAL COST)
+=============================================================================
+
+Include ALL applicable cost terms from data["costs"]:
+
+1. PURCHASING COST: cost incurred when ordering/producing units
+   - Read from costs["purchasing"]
+
+2. INVENTORY HOLDING COST: cost of keeping inventory overnight
+   - Read from costs["inventory"]
+   - Apply to END-OF-PERIOD inventory = (I - y), NOT just I
+   - Apply ONLY to buckets a >= 2 (bucket a=1 expires, not held overnight)
+   - CRITICAL: Holding cost is on (I[p,l,t,a] - y[p,l,t,a]), the inventory AFTER sales
+
+3. WASTE COST: penalty for units that expire
+   - Read from costs["waste"]
+
+4. LOST SALES PENALTY: penalty for demand that cannot be fulfilled
+   - Read from costs["lost_sales"]
+
+5. TRANSSHIPMENT COST (if trans_edges nonempty):
+   - Read from costs["transshipment"] if present
+
+6. FIXED ORDER COST (if constraints.fixed_order_cost exists):
+   - Incur fixed cost whenever a positive order is placed
+
+=============================================================================
+SUBSTITUTION SEMANTICS (CRITICAL)
+=============================================================================
+
+Edge [p_from, p_to] means: p_from's demand can be served by p_to's inventory.
+This is "upward substitution" - premium product serves basic product's demand.
+
+S[p_from, p_to, l, t] = quantity of p_from's demand fulfilled by p_to
+
+For each product p, compute:
+- outbound: total substitution flow where p is the source (p sends demand out)
+- inbound: total substitution flow where p is the target (p receives demand in)
+
+Two key constraints involving substitution:
+1. Cannot substitute more demand than the product actually has
+2. Sales conservation must account for substitution flows
+
+=============================================================================
+CORE CONSTRAINTS
+=============================================================================
+
+1. DEMAND ROUTE (only when substitution edges exist for product p):
+   The total demand that product p redirects to substitutes cannot exceed p's own demand
+
+2. SALES CONSERVATION (always):
+   Total sales from all life buckets plus lost sales equals effective demand
+   Effective demand = original demand + inbound substitution - outbound substitution
+
+3. AVAILABILITY (always):
+   Sales from any life bucket cannot exceed inventory in that bucket
+
+4. EXPIRE/WASTE (always):
+   Waste equals unsold inventory from the expiring bucket (a=1)
+
+5. AGING (for t < T, a < shelf_life[p]):
+   Inventory in bucket a at period t+1 equals inventory from bucket a+1 at period t
+   minus sales from that bucket. This represents aging by one bucket per period.
+   DO NOT add aging constraints for t = T (would reference t+1 which doesn't exist)
+
+6. FRESH INFLOW:
+   Fresh inventory enters at the highest life bucket (a = shelf_life[p])
+   If lead_time = 0: fresh equals current period order
+   If lead_time > 0 and t > lead_time: fresh equals order from t - lead_time
+   If t <= lead_time: no fresh inventory arrives yet
+   NEVER access Q[p,l,0] or negative time indices
+
+7. INITIALIZATION at t=1:
+   All non-fresh inventory buckets start empty: I[p,l,1,a] = 0 for a < shelf_life[p]
+   This is CRITICAL - without this, the model may have unbounded "free" inventory
+
+=============================================================================
+CAPACITY CONSTRAINTS
+=============================================================================
+
+8. PRODUCTION CAPACITY:
+   Total orders across all locations cannot exceed production capacity per product per period
+   Check: production_cap[p][t-1] (0-indexed list)
+
+9. STORAGE CAPACITY:
+   Total weighted inventory at each location cannot exceed cold storage capacity
+   Weight = sum over products and life buckets of (inventory * cold_usage[p])
+   Limit = cold_capacity[l]
+
+=============================================================================
+OPTIONAL CONSTRAINTS (check if data fields exist)
+=============================================================================
+
+10. LABOR CAPACITY (if labor_cap and labor_usage in data):
+    Total labor used for handling products cannot exceed location capacity
+    Labor use is typically proportional to sales volume
+
+11. MOQ - Minimum Order Quantity (if constraints.moq exists):
+    Orders must be either zero or at least the minimum quantity
+    Requires binary variable to enforce all-or-nothing logic
+
+12. PACK SIZE (if constraints.pack_size exists):
+    Orders must be integer multiples of pack size
+
+13. FIXED ORDER COST (if costs.fixed_order exists):
+    Incur fixed cost whenever a positive order is placed
+    Requires binary variable to track order placement
+
+14. BUDGET (if constraints.budget_per_period exists):
+    Total purchasing cost per period cannot exceed budget
+
+15. WASTE LIMIT (if constraints.waste_limit_pct exists):
+    Total waste over horizon cannot exceed percentage of total demand
+
+16. TRANSSHIPMENT (if trans_edges nonempty):
+    Create flow variables for inventory movement between locations
+    Flow from a location cannot exceed available inventory
+    Add transshipment flows to inventory balance equations
+
+=============================================================================
+BOUNDARY CONDITIONS SUMMARY
+=============================================================================
+
+- t = 1: Initialize I[p,l,1,a] = 0 for a < shelf_life[p]
+- t = T: No aging constraints (would reference t+1)
+- t <= lead_time: Fresh inflow = 0 (orders haven't arrived)
+- Empty sub_edges: No S variables, no substitution constraints
+- Empty trans_edges: No X variables, no transshipment constraints
 
 [SOLVING]
-- Gurobi params: OutputFlag=0, Threads=1, Seed=0.
-- Print: print(f"status: {m.Status}")
+- Set Gurobi params: OutputFlag=0, Threads=1, Seed=0
+- Print status: print(f"status: {m.Status}")
 - If OPTIMAL: print(f"objective: {m.ObjVal}")
 
 =============================================================================
@@ -102,8 +192,10 @@ Key fields:
 - data["network"]["sub_edges"]: [[p_from, p_to], ...]
 - data["network"]["trans_edges"]: [[l_from, l_to], ...]
 - data["costs"]["inventory"][p], ["waste"][p], ["lost_sales"][p], ["purchasing"][p]
-- data["production_cap"][p]: list or scalar (per period)
+- data["production_cap"][p]: list (per period, 0-indexed)
 - data["cold_capacity"][l], data["cold_usage"][p]
+- data["labor_cap"][l] (if exists), data["labor_usage"][p] (if exists)
+- data["constraints"] (may contain moq, pack_size, budget_per_period, waste_limit_pct)
 
 
 
@@ -111,15 +203,10 @@ Key fields:
 Write a complete GurobiPy script that:
 1) Imports gurobipy (import gurobipy as gp; from gurobipy import GRB)
 2) Reads all parameters from `data` (already loaded)
-3) Builds edge mappings for substitution BEFORE creating constraints
-4) Creates all decision variables with correct indices
-5) Sets objective: minimize inventory + waste + lost_sales + purchasing costs
-6) Adds all constraints respecting boundary conditions:
-   - Initialization at t=1
-   - Aging only for t < T
-   - Fresh inflow with lead_time check
-   - Substitution if sub_edges nonempty
-7) Sets Gurobi params: OutputFlag=0, Threads=1, Seed=0
-8) Prints status always; prints objective only if OPTIMAL
+3) Creates all necessary decision variables with correct indices
+4) Sets objective function with all applicable cost terms
+5) Adds all constraints respecting boundary conditions
+6) Handles optional constraints based on what exists in data
+7) Sets Gurobi params and prints results
 
 Return ONLY Python code. No markdown, no comments, no explanations.
