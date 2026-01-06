@@ -20,14 +20,14 @@ COMMON ERROR PATTERNS
 =============================================================================
 
 1. INFEASIBLE:
-   - Check: substitution inbound/outbound edges computed correctly?
-   - Check: t=1 initialization (non-fresh buckets = 0)?
-   - Check: demand computed correctly (demand_curve * demand_share)?
-   - Check: L (lost sales) variable present and in constraint?
+   - Check: L (lost sales) variable present and in sales_conservation?
+   - Check: t=1 initialization done correctly?
+   - Check: demand computed correctly (demand_curve[t-1] * demand_share)?
+   - Check: substitution inbound/outbound computed correctly?
 
 2. UNBOUNDED:
-   - Cause: missing demand_route constraint (S_out <= demand)
-   - Fix: add constraint when substitution active
+   - Cause: missing demand_route constraint (outbound <= demand)
+   - Fix: add constraint when substitution edges exist
 
 3. KeyError / AttributeError:
    - Cause: wrong data structure assumption
@@ -37,29 +37,64 @@ COMMON ERROR PATTERNS
    - Check: holding cost only for a >= 2?
    - Check: production capacity binds on Q, not arrival?
    - Check: substitution semantics correct?
-     → Edge [A,B] means A's demand can be served by B's inventory
-     → S[A,B,l,t] = quantity of A's demand fulfilled by B
+
+5. OBJECTIVE = 0 (very common!):
+   - Cause: missing t=1 initialization OR objective function not set
+   - Check: I[p,l,1,a] = 0 for a < shelf_life[p] is added
+   - Check: m.setObjective() is called with correct expression
+   - Check: costs are read from data["costs"]
 
 =============================================================================
 SEMANTIC PROBE DIAGNOSIS GUIDE
 =============================================================================
 
-If probe diagnosis is provided, use it to identify the specific constraint error:
+## Core Probes (8)
 
 | Failed Probe | Likely Issue | Fix |
 |--------------|--------------|-----|
-| substitution_basic | S variables wrong | Check edge direction: [p_from, p_to] means p_from's demand served by p_to |
-| demand_route_constraint | Missing S_out <= demand | Add: sum S[p, *, l, t] <= demand[p, l, t] |
-| no_substitution | Spurious S when empty | Only create S if sub_edges nonempty |
-| production_capacity | Prod cap missing/wrong | Check: sum_l Q[p,l,t] <= prod_cap[p,t] |
-| storage_capacity | Storage cap wrong | Check cold_usage coefficients and aggregation |
-| aging_dynamics | Aging logic wrong | Check: I[p,l,t+1,a] = I[p,l,t,a+1] - y[p,l,t,a+1] |
-| lost_sales_slack | L missing | Add L to sales_conservation constraint |
-| nonnegativity | Negative inventory | Check lb=0 on all variables |
+| substitution_basic | S direction wrong or obj=0 | Edge [A,B] means A's demand served by B |
+| demand_route_constraint | Missing outbound <= demand | Add constraint for products with outgoing edges |
+| no_substitution | Spurious S when edges empty | Only create S if sub_edges nonempty |
+| production_capacity | Prod cap missing or obj=0 | Add sum_l Q[p,l,t] <= prod_cap[p][t-1] |
+| storage_capacity | Storage cap wrong or obj=0 | Check cold_usage weighting |
+| aging_dynamics | Aging logic wrong or obj=0 | I[t+1,a] = I[t,a+1] - y[t,a+1] for t<T |
+| lost_sales_slack | L missing or obj=0 | Add L to sales_conservation; include in objective |
+| inventory_nonnegativity | Negative inventory or obj=0 | Check lb=0 on all variables |
+
+## Extended Probes (5)
+
+| Failed Probe | Likely Issue | Fix |
+|--------------|--------------|-----|
+| initialization | Missing t=1 init (obj=0) | Add I[p,l,1,a]=0 for a < shelf_life[p] |
+| lead_time | Lead time not enforced | Handle t <= lead_time case (fresh=0) |
+| moq | MOQ constraint missing | Add binary z: Q >= moq*z, Q <= M*z |
+| transshipment | Trans edges not handled | Create X variables for trans_edges |
+| labor_capacity | Labor cap missing | Add labor constraint if labor_cap exists |
+
+=============================================================================
+OBJECTIVE = 0 DIAGNOSIS (CRITICAL)
+=============================================================================
+
+If multiple probes show objective = 0, check in order:
+
+1. Missing initialization at t=1?
+   - Without I[p,l,1,a]=0 for a<shelf_life, model gets "free" inventory
+   - This is the MOST COMMON cause of obj=0
+
+2. Missing m.setObjective() call?
+   - Objective must be set before optimize()
+
+3. Empty objective expression?
+   - Must accumulate costs in a variable before setting objective
+
+4. Costs not read from data?
+   - Use data["costs"]["lost_sales"][p], etc.
 
 =============================================================================
 TARGET SELECTION
 =============================================================================
 
-- target = "SPEC" if the mathematical formulation is wrong (missing constraint family)
-- target = "CODEGEN" if the code implementation is wrong but spec is correct
+- target = "SPEC" if mathematical formulation is wrong
+- target = "CODEGEN" if code implementation is wrong but spec is correct
+
+When objective = 0 for multiple probes → target = "CODEGEN"
