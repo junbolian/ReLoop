@@ -100,7 +100,14 @@ def main():
 
     step_prompts_dir = Path(__file__).resolve().parent.parent / "step_prompts"
     prompt_stack = PromptStack(base_prompt=base_prompt_text, step_prompts_dir=step_prompts_dir)
-    llm = build_llm_client("mock" if args.mock_llm else "openai", model=args.model)
+    
+    mode = "openai"
+    if args.mock_llm:
+        mode = "mock"
+    elif args.model and (Path(args.model).exists() or "/" in args.model):
+        mode = "local"
+
+    llm = build_llm_client(mode, model=args.model)
     persistence = PersistenceManager(Path(args.out))
     
     orchestrator = AgentOrchestrator(

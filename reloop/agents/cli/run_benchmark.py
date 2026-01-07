@@ -39,7 +39,13 @@ def main():
     if args.limit:
         scenario_ids = scenario_ids[: args.limit]
 
-    llm = build_llm_client("mock" if args.mock_llm else "openai", model=args.model)
+    mode = "openai"
+    if args.mock_llm:
+        mode = "mock"
+    elif args.model and (Path(args.model).exists() or "/" in args.model):
+        mode = "local"
+
+    llm = build_llm_client(mode, model=args.model)
     persistence = PersistenceManager(Path(args.out))
 
     for scenario_id in scenario_ids:
