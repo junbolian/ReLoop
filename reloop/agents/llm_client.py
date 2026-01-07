@@ -261,9 +261,105 @@ class OpenAILLMClient(LLMClient):
         return LLMResponse(content=text, raw=response, usage=usage)
 
 
+class LocalLLMClient(LLMClient):
+    """
+    Local LLM client using HuggingFace Transformers.
+    Supports multi-GPU inference via device_map="auto".
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except ImportError:
+            raise ImportError(
+                "Local models require `torch`, `transformers` and `accelerate`. "
+                "Please install them via pip."
+            )
+
+        self.model_path = model_path
+        self.temperature = temperature
+        self.max_tokens = max_tokens or 4096
+        
+        print(f"Loading local model from {model_path}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path, 
+            trust_remote_code=True
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            device_map="auto",
+            torch_dtype="auto",
+            trust_remote_code=True
+        )
+        print("Model loaded successfully.")
+
+    def complete(self, messages: List[BaseMessage], **kwargs) -> LLMResponse:
+        # Convert LangChain messages to chat format
+        chat = []
+        for msg in messages:
+            role = "user"
+            msg_type = getattr(msg, "type", getattr(msg, "role", ""))
+            if msg_type == "ai":
+                role = "assistant"
+            elif msg_type == "system":
+                role = "system"
+            elif msg_type == "human":
+                role = "user"
+            
+            chat.append({"role": role, "content": getattr(msg, "content", "")})
+
+        # Apply chat template
+        text = self.tokenizer.apply_chat_template(
+            chat,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False  # Setting enable_thinking=False disables thinking mode
+        )
+
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
+        response_ids = self.model.generate(
+            **inputs, 
+            max_new_tokens=self.max_tokens,
+            pad_token_id=self.tokenizer.eos_token_id,
+            do_sample=False  # Keep deterministic for now, can be changed if needed
+        )[0][len(inputs.input_ids[0]):]
+
+        response_text = self.tokenizer.decode(response_ids, skip_special_tokens=True)
+        
+        # Usage stats (approximate)
+        input_tokens = len(inputs.input_ids[0])
+        output_tokens = len(response_ids)
+        
+        # Usage stats (approximate)
+        input_tokens = len(inputs.input_ids[0])
+        output_tokens = len(response_ids)
+        
+        return LLMResponse(
+            content=response_text,
+            raw=None, 
+            usage={
+                "prompt_tokens": input_tokens, 
+                "completion_tokens": output_tokens, 
+                "total_tokens": input_tokens + output_tokens
+            }
+        )
+
+
 def build_llm_client(mode: str = "openai", **kwargs) -> LLMClient:
     if mode == "mock":
         return MockLLMClient()
+    if mode == "local":
+        model_path = kwargs.pop("model", None)
+        if not model_path:
+            raise ValueError("Must provide `model` path when using mode='local'")
+        return LocalLLMClient(model_path=model_path, **kwargs)
     return OpenAILLMClient(**kwargs)
 
 
