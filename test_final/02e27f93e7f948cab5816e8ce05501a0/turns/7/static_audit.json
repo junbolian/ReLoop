@@ -1,8 +1,0 @@
-{
-  "passed": true,
-  "issues": [
-    "[WARNING] Missing OutputFlag=0 setting (recommended).",
-    "[WARNING] Missing Threads=1 setting (recommended).",
-    "[WARNING] Missing Seed=0 setting (recommended)."
-  ]
-}
