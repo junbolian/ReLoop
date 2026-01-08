@@ -1,0 +1,12 @@
+STEP 6 - RUNTIME ERROR REPAIR
+
+You are given a runtime error from executing the last code.
+Fix the code to resolve the error.
+
+Requirements:
+- Output ONLY raw Python code.
+- No markdown, no comments.
+- Keep the same model structure and naming contract.
+
+Input you will receive:
+- The runtime error details (stdout/stderr and status).

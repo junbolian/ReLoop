@@ -11,6 +11,7 @@ from ..orchestrator_graph import AgentOrchestrator
 from ..prompt_stack import PromptStack
 from ..schemas import AgentStateModel
 from ..tools.persistence import PersistenceManager
+from ..tools.sft_exporter import export_codegen_jsonl, export_pre_codegen_jsonl
 
 
 def _load_text(path_or_text: str) -> str:
@@ -140,6 +141,22 @@ def main():
     AgentStateModel.model_validate(initial_state)
     final_state = orchestrator.run(initial_state)
     artifact_dir = Path(args.out) / initial_state["run_id"]
+
+    pre_codegen_path = artifact_dir / "sft_pre_codegen.jsonl"
+    codegen_path = artifact_dir / "sft_codegen.jsonl"
+    export_pre_codegen_jsonl(
+        conversation_log=final_state.get("conversation_log", []),
+        path=pre_codegen_path,
+        scenario_id=scenario_id,
+        run_id=initial_state["run_id"],
+    )
+    export_codegen_jsonl(
+        codegen_conversation=final_state.get("codegen_conversation"),
+        conversation_log=final_state.get("conversation_log", []),
+        path=codegen_path,
+        scenario_id=scenario_id,
+        run_id=initial_state["run_id"],
+    )
     
     # Print summary
     print(f"Run complete. Artifacts at {artifact_dir}")
