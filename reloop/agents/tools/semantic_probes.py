@@ -1,19 +1,3 @@
-# ==============================================================================
-# FILE: semantic_probes.py (FIXED VERSION)
-# DESCRIPTION: Semantic Probe Verification Framework
-#
-# FIXES:
-#   1. lost_sales_slack: Added objective range check (was missing)
-#   2. storage_capacity: Added objective range check (was missing)
-#   3. Unified threshold to 0.5x for consistency
-#   4. Added new probes for F6/F7/F8 coverage:
-#      - lead_time_probe: Tests lead time handling
-#      - moq_probe: Tests minimum order quantity
-#      - transshipment_probe: Tests network flows
-#      - labor_capacity_probe: Tests labor constraints
-#
-# ==============================================================================
-
 from __future__ import annotations
 
 import json
@@ -132,8 +116,10 @@ class SubstitutionProbe(SemanticProbe):
     target_mechanism = "substitution"
     
     def is_applicable(self, code: str) -> bool:
-        """Only applicable if code has substitution variables."""
-        return "S[" in code or "sub_edges" in code
+        """Only applicable if code actually defines substitution variable S."""
+        # Must have S variable definition (S[ or S = {), not just reading sub_edges
+        import re
+        return bool(re.search(r'\bS\s*\[', code) or re.search(r'\bS\s*=\s*\{', code))
     
     def generate_test_data(self, base_data: dict = None) -> dict:
         return {
@@ -216,8 +202,9 @@ class DemandRouteProbe(SemanticProbe):
     target_mechanism = "substitution"
     
     def is_applicable(self, code: str) -> bool:
-        """Only applicable if code has substitution variables."""
-        return "S[" in code or "sub_edges" in code
+        """Only applicable if code actually defines substitution variable S."""
+        import re
+        return bool(re.search(r'\bS\s*\[', code) or re.search(r'\bS\s*=\s*\{', code))
     
     def generate_test_data(self, base_data: dict = None) -> dict:
         return {
@@ -834,8 +821,10 @@ class TransshipmentProbe(SemanticProbe):
     target_mechanism = "transshipment"
     
     def is_applicable(self, code: str) -> bool:
-        """Only applicable if code has transshipment variables."""
-        return "trans_edges" in code or "X[" in code or "transship" in code.lower()
+        """Only applicable if code actually defines transshipment variable X."""
+        import re
+        # Must have X variable definition (X[ or X = {)
+        return bool(re.search(r'\bX\s*\[', code) or re.search(r'\bX\s*=\s*\{', code))
     
     def generate_test_data(self, base_data: dict = None) -> dict:
         return {
@@ -908,8 +897,11 @@ class LaborCapacityProbe(SemanticProbe):
     target_mechanism = "labor"
     
     def is_applicable(self, code: str) -> bool:
-        """Only applicable if code has labor constraints."""
-        return "labor" in code.lower() and "labor_cap" in code
+        """Only applicable if code has labor capacity constraint."""
+        # Must have labor_cap used in a constraint, not just reading from data
+        # Look for: addConstr with labor, or labor_needed/labor_use pattern
+        return ("labor_cap" in code and "addConstr" in code and 
+                ("labor" in code.lower() and ("<=" in code or ">=" in code)))
     
     def generate_test_data(self, base_data: dict = None) -> dict:
         return {
@@ -990,7 +982,11 @@ class MOQProbe(SemanticProbe):
     
     def is_applicable(self, code: str) -> bool:
         """Only applicable if code has MOQ constraints."""
-        return "moq" in code.lower() or ("z[" in code and "z *" not in code)
+        import re
+        # Must have z variable as BINARY and moq constraint
+        has_z_binary = bool(re.search(r'\bz\s*\[', code) and 'BINARY' in code)
+        has_moq_constr = 'moq_lb' in code or 'moq_ub' in code or ('moq' in code.lower() and 'addConstr' in code)
+        return has_z_binary or has_moq_constr
     
     def generate_test_data(self, base_data: dict = None) -> dict:
         return {

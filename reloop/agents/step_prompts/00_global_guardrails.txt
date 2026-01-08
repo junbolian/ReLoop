@@ -27,8 +27,22 @@ DATA FORMAT
 - production_cap[p]: list (0-indexed, use [t-1] for period t)
 - cold_capacity[l]: storage limit per location
 - cold_usage[p]: storage units per product unit
-- sub_edges: [[p_from, p_to], ...] substitution pairs
-- trans_edges: [[loc_from, loc_to], ...] transshipment pairs
+
+Network data (NESTED under data['network']):
+- sub_edges = data.get('network', {}).get('sub_edges', [])
+- trans_edges = data.get('network', {}).get('trans_edges', [])
+- DO NOT use data['sub_edges'] directly - this will cause KeyError!
+
+Optional data (may be missing - use .get() with defaults):
+- labor_cap[l]: list per period (if labor constraints active)
+- labor_usage[p]: labor hours per unit
+- return_rate[p]: fraction of sales returned
+- constraints.moq: minimum order quantity
+- constraints.pack_size: integer pack size
+- constraints.budget_per_period: period budget limit
+- constraints.waste_limit_pct: max waste percentage
+- costs.fixed_order: fixed cost per order
+- costs.transshipment: cost per unit transshipped
 
 =============================================================================
 SUBSTITUTION SEMANTICS (CRITICAL)
@@ -95,12 +109,18 @@ BOUNDARY CONDITIONS (CRITICAL)
 VARIABLE NAMING CONVENTION
 =============================================================================
 
+Core variables (always create):
 - I[p,l,t,a]: START-OF-PERIOD inventory (before sales occur)
 - y[p,l,t,a]: sales from each life bucket (during the period)
 - W[p,l,t]: waste (expired inventory from bucket a=1)
 - Q[p,l,t]: orders/production
 - L[p,l,t]: lost sales (MUST be included - this is the slack variable)
+
+Optional variables (only if feature is active):
 - S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+- X[p,src,dst,t]: transshipment flow (only if trans_edges nonempty)
+- z[p,l,t]: binary order indicator (only if moq > 0 or fixed_order > 0)
+- n[p,l,t]: integer pack count (only if pack_size > 1)
 
 NOTE: I is the inventory at the START of period t, before any sales.
       End-of-period inventory = I - y (what remains after sales).
@@ -117,8 +137,23 @@ Minimize total cost including:
    - CRITICAL: Use (I - y), NOT just I
 3. Waste cost: penalty per unit expired
 4. Lost sales penalty: penalty per unit of unmet demand
+5. Fixed order cost: costs.get("fixed_order", 0) * z (if z exists)
+6. Transshipment cost: costs.get("transshipment", 0) * X (if X exists)
 
 Read all cost coefficients from data["costs"].
+
+=============================================================================
+OPTIONAL CONSTRAINTS (check data and implement if present)
+=============================================================================
+
+- moq > 0: Q >= moq*z, Q <= bigM*z (binary z needed)
+- pack_size > 1: Q = pack_size * n (integer n needed)
+- fixed_order > 0: add fixed_order * z to objective
+- trans_edges nonempty: create X, include in inventory balance
+- budget_per_period set: purchasing cost per period <= budget
+- labor_usage > 0: sum(labor_usage * y) <= labor_cap
+- return_rate > 0: add returns to fresh inflow
+- waste_limit_pct set: total waste <= limit * total_demand
 
 =============================================================================
 SOLVING
