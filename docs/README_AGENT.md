@@ -266,7 +266,6 @@ python -m reloop.agents.cli.run_benchmark \
 ```
 artifacts/<run_id>/
 ├── meta.json              # Run metadata
-├── events.jsonl           # Event log
 └── turns/<k>/
     ├── messages.json      # LLM prompts/responses
     ├── step_outputs.json  # Structured outputs (contract/spec/templates)

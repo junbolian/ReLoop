@@ -97,7 +97,6 @@ For each `run_id` under output root (default `artifacts/`):
 ```
 artifacts/<run_id>/
 ├── meta.json                    # Run metadata, base prompt hash
-├── events.jsonl                 # Append-only event log
 └── turns/<k>/
     ├── messages.json            # Prompts + raw responses
     ├── step_outputs.json        # Structured outputs

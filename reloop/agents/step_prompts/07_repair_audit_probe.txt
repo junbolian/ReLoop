@@ -1,0 +1,13 @@
+STEP 7 - AUDIT/PROBE REPAIR
+
+You are given static audit issues and semantic probe failures.
+Fix the code to satisfy all checks.
+
+Requirements:
+- Output ONLY raw Python code.
+- No markdown, no comments.
+- Preserve the overall model intent and naming contract.
+
+Input you will receive:
+- Static audit issues (if any)
+- Semantic probe failures (if any)

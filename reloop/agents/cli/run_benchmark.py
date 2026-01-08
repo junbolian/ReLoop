@@ -11,6 +11,11 @@ from ..orchestrator_graph import AgentOrchestrator
 from ..prompt_stack import PromptStack
 from ..schemas import AgentStateModel
 from ..tools.persistence import PersistenceManager
+from ..tools.sft_exporter import (
+    export_codegen_jsonl,
+    export_pre_codegen_jsonl,
+    init_jsonl_paths,
+)
 from .run_one import _extract_scenario_text, _load_text, _resolve_prompt_path
 
 
@@ -47,6 +52,9 @@ def main():
 
     llm = build_llm_client(mode, model=args.model)
     persistence = PersistenceManager(Path(args.out))
+    pre_codegen_path = Path(args.out) / "sft_pre_codegen.jsonl"
+    codegen_path = Path(args.out) / "sft_codegen.jsonl"
+    init_jsonl_paths(pre_codegen_path, codegen_path)
 
     for scenario_id in scenario_ids:
         data_path = Path("scenarios") / "data" / f"{scenario_id}.json"
@@ -92,6 +100,19 @@ def main():
         AgentStateModel.model_validate(state)
         final_state = orchestrator.run(state)
         artifact_dir = Path(args.out) / state["run_id"]
+        export_pre_codegen_jsonl(
+            conversation_log=final_state.get("conversation_log", []),
+            path=pre_codegen_path,
+            scenario_id=scenario_id,
+            run_id=state["run_id"],
+        )
+        export_codegen_jsonl(
+            codegen_conversation=final_state.get("codegen_conversation"),
+            conversation_log=final_state.get("conversation_log", []),
+            path=codegen_path,
+            scenario_id=scenario_id,
+            run_id=state["run_id"],
+        )
         print(f"{scenario_id}: completed -> {artifact_dir}")
 
 

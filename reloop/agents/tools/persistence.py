@@ -43,18 +43,9 @@ class PersistenceManager:
         meta_with_time = dict(meta)
         meta_with_time["created_at"] = datetime.utcnow().isoformat()
         _atomic_write_json(run_path / "meta.json", meta_with_time)
-        events_path = run_path / "events.jsonl"
-        if not events_path.exists():
-            _atomic_write_text(events_path, "")
 
     def log_event(self, run_id: str, event: Dict[str, Any]) -> None:
-        events_path = self.run_dir(run_id) / "events.jsonl"
-        if events_path.exists():
-            existing = events_path.read_text(encoding="utf-8")
-            new_body = existing + json.dumps(event, default=str) + "\n"
-        else:
-            new_body = json.dumps(event, default=str) + "\n"
-        _atomic_write_text(events_path, new_body)
+        return
 
     def persist_turn(
         self,
