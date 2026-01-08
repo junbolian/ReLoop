@@ -1,13 +1,5 @@
 # RetailOpt-190: Comprehensive Retail Supply Chain Benchmark
 
-> File: `reloop/scenarios/spec/retail_spec.md`
-> Depends on:
->
-> * `reloop/solvers/universal_retail_solver.py`
-> * `reloop/tools/retail_benchmark_generator.py`
-> * `reloop/agents/` (ReLoop Agent)
-> * `reloop/eval/run_benchmark.py`
-
 ---
 
 ## 1. Overview
@@ -21,92 +13,89 @@ RetailOpt-190 evaluates **text-to-optimization agents** on **38 retail operation
 | **Instances** | 38 archetypes × 5 variants = 190 |
 | **Ground Truth** | Universal Retail Solver (URS) |
 | **Semantic Probes** | 14 boundary tests via code execution |
-| **No Code Template** | Tests actual math→code translation |
+| **Compositional Focus** | Tests constraint interactions, not just isolated mechanisms |
 
 All instances share a **single JSON schema** and are solved by a **single universal MILP formulation**.
 
-### Recommended Model
+### Comparison with Existing Benchmarks
 
-**Primary:** Qwen-Max (via DashScope API)
-- Strong reasoning + code generation
-- Best balance of capability and cost
-
-**Alternatives:** Qwen2.5-Coder-32B, GPT-4o, DeepSeek-V3, Claude
+| Benchmark | Scenarios | Multi-period | Domain | Compositional | Semantic Probes |
+|-----------|-----------|--------------|--------|---------------|-----------------|
+| NL4Opt | ~100 | Few | General OR | ✗ | ✗ |
+| MAMO | ~800 | Some | General OR | ✗ | ✗ |
+| IndustryOR | 100 | Some | Industrial | ✗ | ✗ |
+| **RetailOpt-190** | 190 | All | Supply Chain | ✓ | ✓ |
 
 ---
 
 ## 2. Prompt System
 
-### Two Files Per Scenario
+### Two Evaluation Modes
 
-| File | Content | Used By |
-|------|---------|---------|
-| `{id}.base.txt` | Scenario only | ReLoop Agent |
-| `{id}.scenario.txt` | Scenario + guardrails + instructions | Zero-shot baseline |
+| Mode | Prompt | Used By | Description |
+|------|--------|---------|-------------|
+| Zero-shot Baseline | `{id}.scenario.txt` | GPT-4o, Claude, Qwen, SIRL, ORLM | Single comprehensive prompt |
+| ReLoop Agent | `{id}.base.txt` + step_prompts | ReLoop (our method) | Multi-step pipeline with repair |
 
-### Generation
-
-```bash
-python -m reloop.tools.generate_prompts
-# Output: scenarios/prompts/{scenario_id}.base.txt
-#         scenarios/prompts/{scenario_id}.scenario.txt
-```
-
----
-
-## 3. Evaluation Modes
-
-### Mode 1: Zero-shot Baseline
+### Zero-shot Baseline Prompt Structure
 
 ```
-Input: {scenario_id}.scenario.txt (complete prompt)
-       ↓
-    [LLM] (single call)
-       ↓
-  Python script
-       ↓
-[Execute + Semantic Probes]
-       ↓
-   Results
+[SCENARIO]
+├── Family/Archetype/Scenario ID
+├── Business narrative
+└── Structure cues
+
+[MODELING GUIDELINES]
+├── Core rules (data access, no file I/O)
+├── Data format (nested network, demand_share)
+├── Decision variables (I, y, W, Q, L, S, X, z, n)
+├── Objective function (6 cost terms)
+├── Substitution semantics (CRITICAL)
+├── Core constraints (9 types)
+├── Optional constraints (7 types)
+└── Boundary conditions (t=1, t=T, lead_time)
+
+[INSTRUCTION]
+└── Write complete GurobiPy script...
 ```
 
-**For:** All baseline models (GPT-4, Claude, Qwen, DeepSeek)
-
-### Mode 2: ReLoop Agent (Multi-step with Repair)
+### ReLoop Agent Pipeline
 
 ```
 Input: {scenario_id}.base.txt (scenario only)
        ↓
-profile_data → step1 → step2 → step3 → sanity → step4 → audit → probe → run
-               contract spec   templates        codegen        verify
-                                                   ↑______________|
-                                                   (repair loop)
+Step 0: Global Guardrails
+Step 1: Task Contract      → JSON: optimize, controls, constraints
+Step 2: Model Specification → JSON: sets, decisions, objective_terms
+Step 3: Constraint Templates → JSON: LHS/RHS formulas
+Step 4: Code Generation     → Python code
+       ↓
+[Semantic Probes] → Step 5: Repair (if failed)
+       ↓
+   Results
 ```
-
-**For:** Qwen-Max primary experiments
 
 ---
 
-## 4. Evaluation Metrics (4 Dimensions)
+## 3. Evaluation Metrics
 
 | Metric | Definition | Formula |
 |--------|------------|---------|
-| **Syntax Pass Rate** | Code compiles without error | `compile_ok / total` |
-| **Execution Pass Rate** | Code runs and solver returns status | `exec_ok / total` |
+| **Execution Rate** | Code runs without runtime errors | `exec_ok / total` |
+| **Accuracy** | Status matches AND objective within 1% | `correct / total` |
 | **Silent Failure Rate** | Runs OK but wrong answer | `(exec_ok - correct) / exec_ok` |
-| **Overall Accuracy** | Objective within 1% of ground truth | `correct / total` |
 
-### Expected Results by Configuration
+### Accuracy Criterion
 
-| Configuration | Syntax | Execution | Silent Failure | Accuracy |
-|---------------|--------|-----------|----------------|----------|
-| Zero-shot (no probe) | ~90% | ~70% | ~50% | ~35% |
-| ReLoop (with probe) | ~95% | ~85% | ~15% | ~70% |
-| ReLoop + Repair | ~95% | ~90% | ~10% | ~80% |
+An instance is **correct** if:
+1. Solver status matches ground truth (both feasible, or both infeasible)
+2. For feasible instances: $|y_{pred} - y_{ref}| / |y_{ref}| < 1\%$
+
+The 1% tolerance accounts for MIP solver behavior on complex instances (F6/F7), where the 60-second time limit may yield near-optimal solutions.
 
 ---
 
-## 5. Silent Failure Problem
+## 4. Silent Failure Problem
 
 ### Definition
 
@@ -133,7 +122,7 @@ profile_data → step1 → step2 → step3 → sanity → step4 → audit → pr
 
 ---
 
-## 6. Semantic Probes
+## 5. Semantic Probes
 
 ### How Probes Work (Code Execution, NOT Prompting)
 
@@ -154,7 +143,9 @@ Probes verify constraints by **running the generated code** with specially const
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 14 Probes
+### 14 Probes (8 Core + 6 Extended)
+
+#### Core Probes
 
 | # | Probe | Mechanism | Detection Method |
 |---|-------|-----------|------------------|
@@ -165,13 +156,18 @@ Probes verify constraints by **running the generated code** with specially const
 | 5 | `storage_capacity` | Storage cap | INFEASIBLE detection |
 | 6 | `aging_dynamics` | Shelf-life | Waste cost verification |
 | 7 | `lost_sales_slack` | L variable | INFEASIBLE detection |
-| 8 | `nonnegativity` | I ≥ 0 | Negative inventory check |
-| 9 | `lead_time` | Lead time handling | Delivery timing |
-| 10 | `transshipment` | Network flows | Trans constraint |
-| 11 | `labor_capacity` | Labor constraints | Capacity check |
-| 12 | `moq` | Minimum order quantity | MOQ enforcement |
-| 13 | `initialization` | t=1 init (I=0 for a<SL) | Objective = 0 detection |
-| 14 | `holding_cost` | End-of-period (I-y) | Objective too low detection |
+| 8 | `inventory_nonnegativity` | I ≥ 0 | Negative inventory check |
+
+#### Extended Probes
+
+| # | Probe | Mechanism | Detection Method |
+|---|-------|-----------|------------------|
+| 9 | `initialization` | t=1 init (I=0 for a<SL) | Objective = 0 detection |
+| 10 | `lead_time` | Lead time handling | Delivery timing |
+| 11 | `moq` | Minimum order quantity | MOQ enforcement |
+| 12 | `transshipment` | Network flows | Trans constraint |
+| 13 | `labor_capacity` | Labor constraints | Capacity check |
+| 14 | `waste_limit` | Global waste cap | Waste cap enforcement |
 
 ### Critical Probes (Silent Failure Detection)
 
@@ -186,7 +182,7 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 
 ---
 
-## 7. Substitution Semantics (CRITICAL)
+## 6. Substitution Semantics (CRITICAL)
 
 This is the #1 source of silent failures.
 
@@ -204,8 +200,8 @@ Variable: S[Basic, Premium, l, t] = units of Basic's demand fulfilled by Premium
 ### Edge Mappings (Build BEFORE Constraints)
 
 ```python
-outgoing_edges = {p: [] for p in products}
-incoming_edges = {p: [] for p in products}
+outgoing_edges = {p: [] for p in products}  # Products that can serve MY demand
+incoming_edges = {p: [] for p in products}  # Products whose demand I serve
 for p_from, p_to in sub_edges:
     outgoing_edges[p_from].append(p_to)  # p_from sends demand OUT to p_to
     incoming_edges[p_to].append(p_from)  # p_to receives requests IN from p_from
@@ -216,8 +212,9 @@ for p_from, p_to in sub_edges:
 ```python
 # demand_route: can't substitute more than own demand
 for p in products:
-    outbound = sum(S[p, pt, l, t] for pt in outgoing_edges[p])
-    m.addConstr(outbound <= demand[p, l, t])
+    if outgoing_edges[p]:  # Only if p has outgoing edges
+        outbound = sum(S[p, pt, l, t] for pt in outgoing_edges[p])
+        m.addConstr(outbound <= demand[p, l, t])
 
 # sales_conservation: balance equation
 for p in products:
@@ -228,7 +225,7 @@ for p in products:
 
 ---
 
-## 8. Holding Cost (CRITICAL)
+## 7. Holding Cost (CRITICAL)
 
 ### The Bug
 
@@ -247,25 +244,81 @@ obj += cost * (I[p,l,t,a] - y[p,l,t,a])
 - `I[p,l,t,a]` = inventory at START of period (before sales)
 - `I[p,l,t,a] - y[p,l,t,a]` = inventory at END of period (after sales)
 - Holding cost is charged on what remains overnight, not what you started with
-
-### Detection
-
-The `holding_cost` probe detects this by:
-1. Creating a scenario where holding cost dominates
-2. Running the code
-3. Checking if objective is suspiciously low (indicates wrong formula)
+- Only apply to buckets a ≥ 2 (bucket a=1 expires, not held overnight)
 
 ---
 
-## 9. Ablation Study Design
+## 8. Boundary Conditions (CRITICAL)
+
+### Initialization at t=1
+
+```python
+# All non-fresh inventory buckets must start empty
+for p in products:
+    for l in locations:
+        for a in range(1, shelf_life[p]):  # a < shelf_life[p]
+            m.addConstr(I[p,l,1,a] == 0)
+```
+
+**Without this, the model exploits "free" phantom inventory → objective = 0**
+
+### Aging at t=T
+
+```python
+# Do NOT add aging constraints for t = T (would reference T+1)
+for t in range(1, T):  # t < T, NOT t <= T
+    for a in range(1, shelf_life[p]):  # a < shelf_life[p]
+        m.addConstr(I[p,l,t+1,a] == I[p,l,t,a+1] - y[p,l,t,a+1])
+```
+
+### Fresh Inflow with Lead Time
+
+```python
+for t in range(1, T+1):
+    if t > lead_time[p]:
+        # Fresh = order from lead_time periods ago
+        m.addConstr(I[p,l,t,shelf_life[p]] == Q[p,l,t-lead_time[p]])
+    else:
+        # No fresh inventory yet (orders haven't arrived)
+        m.addConstr(I[p,l,t,shelf_life[p]] == 0)
+# NEVER access Q[p,l,0] or negative time indices
+```
+
+---
+
+## 9. Scenario Families
+
+| Family | Name | Archetypes | Key Mechanisms |
+|--------|------|------------|----------------|
+| F1 | Core Operations | 4 | Multi-period inventory, seasonal demand, lost sales |
+| F2 | Assortment | 6 | Substitution, promotions, ultra-short shelf life |
+| F3 | Resources | 4 | Storage bottleneck, production capacity coupling |
+| F4 | Dynamics | 6 | Supply disruptions, demand volatility |
+| F5 | Feasibility | 4 | Stress tests requiring lost-sales slack |
+| F6 | Logistics | 4 | Lead time, MOQ, pack size, fixed order cost |
+| F7 | Network & Multi-Echelon | 6 | Transshipment, hub-spoke, three-echelon |
+| F8 | Omni-channel | 4 | Returns, labor constraints, sustainability |
+
+**Total:** 38 archetypes × 5 variants = **190 instances**
+
+### Difficulty Progression
+
+- **F1-F4**: Single-mechanism scenarios (baseline difficulty)
+- **F5-F8**: Multi-constraint interactions (compositional difficulty)
+
+Expected pattern: All methods similar on F1-F4; ReLoop leads on F5-F8.
+
+---
+
+## 10. Ablation Study Design
 
 ### Three Ablation Dimensions
 
 | Dimension | Options |
 |-----------|---------|
-| **STEP** (Pipeline Depth) | Zero-shot, 3-step, 5-step |
-| **PROBE** (Verification) | No probe, Probe only, Probe + Diagnosis |
-| **REPAIR** (Iteration) | No repair, Blind repair, Guided repair |
+| **STEP** (Pipeline Depth) | Zero-shot, 5-step |
+| **PROBE** (Verification) | No probe, Probe + Diagnosis |
+| **REPAIR** (Iteration) | No repair, Guided repair |
 
 ### Ablation Configurations
 
@@ -274,8 +327,7 @@ The `holding_cost` probe detects this by:
 | A1 | Zero-shot | No | No | Baseline: single LLM call |
 | A2 | 5-step | No | No | Pipeline only |
 | A3 | 5-step | Yes | No | + Probe verification |
-| A4 | 5-step | No | Yes (blind) | + Blind repair |
-| A5 | 5-step | Yes | Yes (guided) | Full ReLoop |
+| A4 | 5-step | Yes | Yes | Full ReLoop |
 
 ### Research Questions
 
@@ -283,66 +335,11 @@ The `holding_cost` probe detects this by:
 |----|----------|----------|
 | RQ1 | Does step-by-step pipeline improve accuracy? | A1 vs A2 |
 | RQ2 | Do probes detect silent failures? | A2 vs A3 |
-| RQ3 | Does probe diagnosis improve repair? | A4 vs A5 |
-| RQ4 | What is the marginal value of each probe? | Per-probe ablation |
+| RQ3 | Does probe-guided repair improve accuracy? | A3 vs A4 |
 
 ---
 
-## 10. Scenario Families
-
-| Family | Name | Archetypes | Key Mechanisms |
-|--------|------|------------|----------------|
-| F1 | Operations | 4 | Inventory, demand, lost sales |
-| F2 | Assortment | 6 | Substitution, promotions |
-| F3 | Resources | 4 | Storage, production capacity |
-| F4 | Dynamics | 6 | Shelf-life, disruptions |
-| F5 | Feasibility | 4 | Stress tests, slack |
-| F6 | Logistics | 4 | MOQ, pack size, lead time |
-| F7 | Network | 6 | Transshipment, multi-echelon |
-| F8 | Omni-channel | 4 | Returns, labor, sustainability |
-
-**Total:** 38 archetypes × 5 variants = **190 instances**
-
----
-
-## 11. Directory Structure
-
-```
-reloop/
-├── solvers/
-│   └── universal_retail_solver.py     # Reference MILP (ground truth)
-│
-├── agents/
-│   ├── orchestrator_graph.py          # LangGraph state machine
-│   ├── schemas.py                     # Pydantic data models
-│   ├── step_prompts/                  # 8 prompt files
-│   └── tools/
-│       ├── semantic_probes.py         # 14 probes implementation
-│       ├── static_auditor.py          # Pattern checking (relaxed)
-│       ├── sanity_checker.py          # Logic validation
-│       └── script_runner.py           # Code execution
-│
-├── tools/
-│   ├── generate_prompts.py            # Prompt generator
-│   └── retail_benchmark_generator.py  # Instance generator
-│
-├── scenarios/
-│   ├── spec/
-│   │   ├── retail_spec.md             # This file
-│   │   ├── retail_prompts.md          # Prompt documentation
-│   │   └── archetypes.yaml            # 38 archetype definitions
-│   ├── data/                          # 190 JSON instances
-│   └── prompts/                       # Generated prompts
-│       ├── {id}.base.txt              # For ReLoop Agent
-│       └── {id}.scenario.txt          # For Zero-shot
-│
-└── eval/
-    └── run_benchmark.py               # Evaluation script
-```
-
----
-
-## 12. JSON Schema
+## 11. JSON Schema
 
 Each instance has this structure:
 
@@ -380,110 +377,39 @@ Each instance has this structure:
 }
 ```
 
----
+### Data Access Patterns
 
-## 13. Evaluation Pipeline
+```python
+# Network data is NESTED - use safe access
+sub_edges = data.get('network', {}).get('sub_edges', [])
+trans_edges = data.get('network', {}).get('trans_edges', [])
+# DO NOT use data['sub_edges'] directly - causes KeyError!
 
-### Step 1: Generate Prompts
+# demand_share is location-only (NOT nested by product)
+demand[p,l,t] = data['demand_curve'][p][t-1] * data['demand_share'][l]
 
-```bash
-python -m reloop.tools.generate_prompts
-```
-
-### Step 2: Run Zero-shot Baseline
-
-```bash
-# Set model
-export OPENAI_API_KEY="..."
-export OPENAI_MODEL="gpt-4o"
-
-# Run
-python -m reloop.eval.run_benchmark \
-  --mode zero-shot \
-  --out results/gpt4_zero_shot/
-```
-
-### Step 3: Run ReLoop Agent
-
-```bash
-# Set model (recommend Qwen-Max)
-export OPENAI_API_KEY="..."
-export OPENAI_MODEL="qwen-max"
-export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-# Run
-python -m reloop.agents.cli.run_benchmark \
-  --suite suite.txt \
-  --out results/reloop/
+# production_cap is 0-indexed list
+prod_cap = data['production_cap'][p][t-1]  # Access with [t-1]
 ```
 
 ---
 
-## 14. Universal Retail Solver Settings
+## 12. Solver Settings
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| TimeLimit | 60s | Prevent stalling |
-| MIPGap | 0.01 | 1% tolerance |
-| OutputFlag | 0 | Suppress logs |
+| TimeLimit | 60s | Prevent stalling on complex MIPs |
+| MIPGap | 1% | Tolerance for near-optimal solutions |
+| OutputFlag | 0 | Suppress solver logs |
+| Threads | 1 | Reproducibility |
+| Seed | 0 | Reproducibility |
 
 ### Status Mapping
 
 | Status | Meaning | Has Solution |
 |--------|---------|--------------|
 | OPTIMAL | Proven optimal | ✓ |
-| OPTIMAL (TL) | Time limit with solution | ✓ |
-| TIMEOUT | Time limit, no solution | ✗ |
+| TIME_LIMIT | Time limit with solution | ✓ (near-optimal) |
 | INFEASIBLE | No feasible solution | ✗ |
 
----
-
-## 15. Research Directions
-
-### Current Limitations
-
-| Limitation | Description |
-|------------|-------------|
-| Manual probe design | 14 probes hand-crafted by experts |
-| No coverage guarantee | May miss some error types |
-| Domain-specific | Probes designed for retail OR |
-
-### Future Work
-
-**Direction 1: Automatic Probe Generation**
-```
-Given constraint C(x) ≤ b, auto-generate test data that
-distinguishes correct from incorrect implementations
-Method: SMT solving / symbolic execution / LLM-in-the-loop
-```
-
-**Direction 2: Semantic Coverage Analysis**
-```
-Definition (Coverage):
-  Coverage(P) = |{c ∈ Constraints : ∃p ∈ P tests c}| / |Constraints|
-
-Challenge: Constraints interact - testing A may implicitly test B
-```
-
-**Direction 3: Formal Verification**
-```
-Definition (Probe Soundness):
-  Probe P is sound for constraint C ⟺
-    ∀ implementation M' missing C: P(M') = FAIL
-
-Open Problem:
-  Construct minimal sound and complete probe set
-```
-
----
-
-## 16. Citation
-
-```bibtex
-@misc{reloop2026,
-  author = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
-  title  = {ReLoop: Closing the Silent Failure Gap in LLM-based 
-            Optimization Modeling via Semantic Probes},
-  year   = {2026},
-}
 ```
