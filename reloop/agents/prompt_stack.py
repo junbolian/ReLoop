@@ -19,7 +19,8 @@ from .schemas import ConversationTurn, MessageEntry
 #   step2: Spec sheet (sets, decisions, constraints, objective)
 #   step3: Constraint templates (mathematical formulas)
 #   step4: Code generation (Python/Gurobi script)
-#   step5: Repair brief (diagnose and fix)
+#   step6: Repair after runtime errors
+#   step7: Repair after audit/probe failures
 #
 # ==============================================================================
 
@@ -28,7 +29,8 @@ STEP_PROMPT_MAP = {
     "step2": "02_step2_spec_sheet.txt",
     "step3": "03_step3_constraint_templates.txt",
     "step4": "04_step4_codegen.txt",
-    "step5": "07_step5_repair_brief.txt",
+    "step6": "06_repair_code.txt",
+    "step7": "07_repair_audit_probe.txt",
 }
 
 
@@ -39,10 +41,10 @@ class PromptStack:
         self.base_prompt = base_prompt
         self.step_prompts_dir = step_prompts_dir
         self.guardrails_exempt_steps = {"step1"}
-        self.base_prompt_system_exempt_steps = {"step1", "step3", "step4"}
+        self.base_prompt_system_exempt_steps = {"step1", "step3", "step4", "step6", "step7"}
         self.base_prompt_human_steps = {"step1"}
-        self.scenario_text_exempt_steps = {"step2", "step3", "step4"}
-        self.data_profile_exempt_steps = {"step3", "step4"}
+        self.scenario_text_exempt_steps = {"step2", "step3", "step4", "step6", "step7"}
+        self.data_profile_exempt_steps = {"step3", "step4", "step6", "step7"}
         
         # Load guardrails
         guardrails_path = step_prompts_dir / "00_global_guardrails.txt"
@@ -50,10 +52,18 @@ class PromptStack:
         
         # Load format repair prompts
         format_json_path = step_prompts_dir / "05_format_repair_json.txt"
-        format_code_path = step_prompts_dir / "06_format_repair_code.txt"
         
         self.format_repair_json = format_json_path.read_text(encoding="utf-8") if format_json_path.exists() else ""
-        self.format_repair_code = format_code_path.read_text(encoding="utf-8") if format_code_path.exists() else ""
+        self.repair_code_prompt = (
+            (step_prompts_dir / "06_repair_code.txt").read_text(encoding="utf-8")
+            if (step_prompts_dir / "06_repair_code.txt").exists()
+            else ""
+        )
+        self.repair_audit_probe_prompt = (
+            (step_prompts_dir / "07_repair_audit_probe.txt").read_text(encoding="utf-8")
+            if (step_prompts_dir / "07_repair_audit_probe.txt").exists()
+            else ""
+        )
 
     @property
     def base_prompt_hash(self) -> str:
@@ -129,8 +139,6 @@ class PromptStack:
         # 4. Format repair prompts (if needed)
         if repair_mode == "json":
             messages.append(SystemMessage(content=self.format_repair_json))
-        elif repair_mode == "code":
-            messages.append(SystemMessage(content=self.format_repair_code))
 
         # 5. Previous response (for repair context)
         if previous_response:

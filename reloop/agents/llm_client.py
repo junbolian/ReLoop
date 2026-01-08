@@ -33,7 +33,8 @@ class MockLLMClient(LLMClient):
     - step2: Constraint Templates (was step3)
     - step3: Sanity Check (was step4)
     - step4: Codegen (was step5)
-    - step5: Repair Brief (was step6)
+    - step6: Runtime repair
+    - step7: Audit/probe repair
     """
 
     def complete(self, messages: List[BaseMessage], **kwargs) -> LLMResponse:
@@ -50,7 +51,11 @@ class MockLLMClient(LLMClient):
                 step = "step3"
             elif "STEP 4" in text or "step4" in text.lower() or "CODEGEN" in text.upper():
                 step = "step4"
-            elif "STEP 5" in text or "step5" in text.lower() or "REPAIR" in text.upper():
+            elif "STEP 6" in text or "step6" in text.lower():
+                step = "step6"
+            elif "STEP 7" in text or "step7" in text.lower():
+                step = "step7"
+            elif "STEP 5" in text or "step5" in text.lower():
                 step = "step5"
         
         content = ""
@@ -199,29 +204,9 @@ class MockLLMClient(LLMClient):
             # Codegen (was step5)
             content = _mock_script()
         
-        elif step == "step5":
-            # Repair Brief (was step6)
-            content = json.dumps(
-                {
-                    "target": "CODEGEN",
-                    "diagnosis": {
-                        "category": "PROBE_FAILURE",
-                        "most_likely_causes": ["substitution constraint missing"],
-                        "evidence": ["demand_route_constraint probe failed"],
-                        "affected_constraint_prefixes": ["demand_route"],
-                        "failed_probes": ["demand_route_constraint"],
-                    },
-                    "repairs": [
-                        {
-                            "change_type": "ADD",
-                            "where": "codegen_instructions",
-                            "description": "Add S_out <= demand constraint",
-                            "acceptance_test": "demand_route_constraint probe passes",
-                        }
-                    ],
-                    "next_step_prompting": {"extra_instructions_to_inject": ["Ensure S_out <= demand is enforced"]},
-                }
-            )
+        elif step in {"step5", "step6", "step7"}:
+            # Repair or codegen fallback
+            content = _mock_script()
         
         else:
             # Fallback echo

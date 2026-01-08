@@ -125,7 +125,6 @@ Minimize total cost including:
 =============================================================================
 DO NOT
 =============================================================================
-- Write data = DATA_PLACEHOLDER(you can assume python dict "data" is already loaded).
 - Hard-code any numeric values
 - Use markdown or comments in output
 - Skip any constraints from Step 3
