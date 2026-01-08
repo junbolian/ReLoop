@@ -24,8 +24,10 @@ MODELING GUIDELINES
 - Output must be plain Python code. No prose, no markdown, no comments.
 
 [DATA FORMAT]
-- sub_edges: [[p_from, p_to], ...] defines substitution pairs
-- trans_edges: [[loc_from, loc_to], ...] defines transshipment pairs
+- Network data is NESTED - use safe access:
+  sub_edges = data.get('network', {}).get('sub_edges', [])
+  trans_edges = data.get('network', {}).get('trans_edges', [])
+- DO NOT use data['sub_edges'] directly - this will cause KeyError!
 - demand_share: {location: scalar}, NOT nested by product
 - demand[p,l,t] = demand_curve[p][t-1] * demand_share[l]
 - Time indexing: 1-based (t = 1, 2, ..., T)
@@ -39,6 +41,8 @@ MODELING GUIDELINES
 - L[p,l,t]: lost sales (slack variable for unmet demand)
 - S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
 - X[p,l_from,l_to,t]: transshipment flow (only if trans_edges nonempty)
+- z[p,l,t]: binary order indicator (only if moq > 0 or fixed_order > 0)
+- n[p,l,t]: integer pack count (only if pack_size > 1)
 
 =============================================================================
 OBJECTIVE FUNCTION (MINIMIZE TOTAL COST)

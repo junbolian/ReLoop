@@ -11,6 +11,16 @@ Translate the constraint templates from Step 3 into GurobiPy code.
 Read all parameters from `data` dict. No file I/O.
 
 =============================================================================
+DATA ACCESS (CRITICAL)
+=============================================================================
+
+Network data is NESTED - use safe access:
+  sub_edges = data.get('network', {}).get('sub_edges', [])
+  trans_edges = data.get('network', {}).get('trans_edges', [])
+
+DO NOT use data['sub_edges'] - this will cause KeyError!
+
+=============================================================================
 OUTPUT FORMAT
 =============================================================================
 
@@ -31,12 +41,31 @@ Use dictionary-style variables with tuple keys:
 - Q[p,l,t]: orders/production
 - L[p,l,t]: lost sales
 - S[p_from,p_to,l,t]: substitution flow (only if sub_edges nonempty)
+- X[p,src,dst,t]: transshipment (only if trans_edges nonempty)
+- z[p,l,t]: binary order indicator (only if moq > 0 or fixed_order > 0)
+- n[p,l,t]: integer pack count (only if pack_size > 1)
+
+=============================================================================
+OPTIONAL FEATURES (check data and implement if present)
+=============================================================================
+
+Check these fields and implement constraints ONLY if active:
+- moq = data.get('constraints',{}).get('moq',0) → if >0: Q >= moq*z, Q <= bigM*z
+- pack_size = data.get('constraints',{}).get('pack_size',1) → if >1: Q = pack_size*n
+- fixed_order = data['costs'].get('fixed_order',0) → if >0: add to objective
+- trans_edges → if nonempty: create X, include in inventory balance
+- budget = data.get('constraints',{}).get('budget_per_period') → if set: cost <= budget
+- labor_usage/labor_cap → if labor_usage > 0: labor constraint
+- return_rate → if > 0: add returns to fresh inflow
+- waste_limit_pct → if set: total waste <= limit * total_demand
 
 =============================================================================
 SUBSTITUTION IMPLEMENTATION
 =============================================================================
 
 sub_edges = [[p_from, p_to], ...] means p_from's demand served by p_to.
+
+If sub_edges is empty, do NOT create S variables or substitution constraints.
 
 Before creating constraints, build mappings to know:
 - For each product, which products can serve its demand (outgoing)
@@ -90,6 +119,8 @@ Minimize total cost including:
   CRITICAL: Holding cost = cost * (I[p,l,t,a] - y[p,l,t,a]), NOT cost * I[p,l,t,a]
 - Waste: read from costs["waste"]
 - Lost sales: read from costs["lost_sales"]
+- Fixed order: costs.get("fixed_order", 0) * z (if z exists)
+- Transshipment: costs.get("transshipment", 0) * X (if X exists)
 
 =============================================================================
 DO NOT
@@ -100,3 +131,4 @@ DO NOT
 - Skip any constraints from Step 3
 - Forget the initialization constraints at t=1
 - Access negative or zero time indices
+- Access data['sub_edges'] directly (use data.get('network', {}).get('sub_edges', []))
