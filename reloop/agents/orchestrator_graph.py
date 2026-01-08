@@ -4,10 +4,10 @@ import json
 import hashlib
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 import re
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from .llm_client import LLMClient
@@ -70,6 +70,7 @@ class AgentState(TypedDict, total=False):
     # Conversation
     conversation_log: list[ConversationTurn]
     turn_index: int
+    codegen_conversation: list[BaseMessage]
 
 
 def _validated_state(state: AgentState) -> AgentState:
@@ -261,16 +262,40 @@ class AgentOrchestrator:
             elif isinstance(dp, dict):
                 data_profile_dict = dp
 
-        messages = self.prompt_stack.assemble_messages(
-            step=step,
-            scenario_text=state.get("scenario_text", ""),
-            data_profile=data_profile_dict,
-            prior_outputs=prior_outputs,
-            runtime_extra=runtime_extra,
-            repair_mode=repair_mode,
-            previous_response=previous_response,
-            probe_diagnosis=probe_diagnosis,
-        )
+        use_codegen_chat = step == "step4"
+        messages: List[BaseMessage]
+        if use_codegen_chat and state.get("codegen_conversation"):
+            messages = list(state["codegen_conversation"])
+            update_blocks: list[str] = []
+            if runtime_extra:
+                update_blocks.append("\n".join(runtime_extra))
+            if prior_outputs:
+                update_blocks.append(
+                    "Previous outputs:\n" + json.dumps(prior_outputs, indent=2)
+                )
+            if probe_diagnosis:
+                update_blocks.append(f"Semantic Probe Diagnosis:\n{probe_diagnosis}")
+            if repair_mode == "json" and self.prompt_stack.format_repair_json:
+                update_blocks.append(self.prompt_stack.format_repair_json)
+            if repair_mode == "code" and self.prompt_stack.format_repair_code:
+                update_blocks.append(self.prompt_stack.format_repair_code)
+            if previous_response:
+                update_blocks.append(f"Previous response:\n{previous_response}")
+            if update_blocks:
+                messages.append(HumanMessage(content="\n\n".join(update_blocks)))
+        else:
+            messages = self.prompt_stack.assemble_messages(
+                step=step,
+                scenario_text=state.get("scenario_text", ""),
+                data_profile=data_profile_dict,
+                prior_outputs=prior_outputs,
+                runtime_extra=runtime_extra,
+                repair_mode=repair_mode,
+                previous_response=previous_response,
+                probe_diagnosis=probe_diagnosis,
+            )
+            if use_codegen_chat:
+                state["codegen_conversation"] = list(messages)
 
         response = self.llm.complete(messages)
         content = response.content
@@ -279,6 +304,11 @@ class AgentOrchestrator:
         turn = self.prompt_stack.log_turn(step, messages, response)
         state.setdefault("conversation_log", []).append(turn)
         self.persistence.persist_turn(state["run_id"], idx, step, messages=turn)
+
+        if use_codegen_chat:
+            state["codegen_conversation"] = list(messages) + [
+                AIMessage(content=content)
+            ]
 
         return content, idx
 
@@ -336,6 +366,7 @@ class AgentOrchestrator:
         payload, repair_idx = self._parse_json_with_repair(content, state, "step2", prior)
         spec = SpecSheet.model_validate(payload)
         state["step2_spec_sheet"] = spec
+        state.pop("codegen_conversation", None)
         self.persistence.persist_turn(
             state["run_id"], repair_idx or msg_idx, "step2", step_outputs=spec
         )
@@ -359,6 +390,7 @@ class AgentOrchestrator:
             templates = [ConstraintTemplate.model_validate(payload)]
         
         state["step3_templates"] = templates
+        state.pop("codegen_conversation", None)
         self.persistence.persist_turn(
             state["run_id"], repair_idx or msg_idx, "step3", step_outputs=templates
         )
@@ -393,30 +425,53 @@ class AgentOrchestrator:
     # ==========================================================================
     
     def _step4_codegen(self, state: AgentState) -> AgentState:
-        # Get probe diagnosis if available from previous iteration
-        probe_diagnosis = None
-        if state.get("semantic_probe_reports"):
-            last_probe = state["semantic_probe_reports"][-1]
-            if last_probe.failed > 0 or last_probe.crashed > 0:
-                probe_diagnosis = "\n".join([
-                    f"- {name}: {diag}" 
-                    for name, diag in last_probe.diagnoses.items()
-                ])
+        has_conversation = bool(state.get("codegen_conversation"))
+        prior = None
+        if not has_conversation:
+            prior = {
+                "spec_sheet": state["step2_spec_sheet"].model_dump(mode="json"),
+                "constraint_templates": [
+                    t.model_dump(mode="json") for t in state.get("step3_templates", [])
+                ],
+                "sanity": state.get("sanity_report").model_dump(mode="json", by_alias=True)
+                if state.get("sanity_report")
+                else None,
+            }
         
-        prior = {
-            "spec_sheet": state["step2_spec_sheet"].model_dump(mode="json"),
-            "constraint_templates": [
-                t.model_dump(mode="json") for t in state.get("step3_templates", [])
-            ],
-            "sanity": state.get("sanity_report").model_dump(mode="json", by_alias=True)
-            if state.get("sanity_report")
-            else None,
-        }
+        runtime_extra: Optional[List[str]] = None
+        if has_conversation:
+            updates: list[str] = []
+            if state.get("static_audit_reports"):
+                last_audit = state["static_audit_reports"][-1]
+                if not last_audit.passed:
+                    issues = "\n".join(last_audit.issues) if last_audit.issues else "unspecified"
+                    updates.append(f"Static audit failed:\n{issues}")
+            if state.get("semantic_probe_reports"):
+                last_probe = state["semantic_probe_reports"][-1]
+                if last_probe.failed > 0 or last_probe.crashed > 0:
+                    if last_probe.diagnoses:
+                        diag_lines = "\n".join(
+                            f"- {name}: {diag}" for name, diag in last_probe.diagnoses.items()
+                        )
+                    else:
+                        diag_lines = "\n".join(last_probe.failed_probes)
+                    updates.append(f"Semantic probe failures:\n{diag_lines}")
+            if state.get("solve_reports"):
+                last_solve = state["solve_reports"][-1]
+                if last_solve.status not in ("2", "GRB.OPTIMAL", "OPTIMAL"):
+                    solve_payload = last_solve.model_dump(mode="json", by_alias=True)
+                    updates.append(
+                        "Run failed:\n" + json.dumps(solve_payload, indent=2)
+                    )
+            if not updates:
+                updates.append("Update the previous code based on the latest checks.")
+            updates.append("Output only raw Python code. No markdown, no comments.")
+            runtime_extra = updates
         
         content, msg_idx = self._call_llm(
             state, "step4", 
             prior_outputs=prior,
-            probe_diagnosis=probe_diagnosis
+            runtime_extra=runtime_extra
         )
         
         # ===== FIXED: Strip markdown directly, no extra LLM call =====
@@ -527,43 +582,7 @@ class AgentOrchestrator:
         needs_repair = solve_report.status not in ("2", "GRB.OPTIMAL", "OPTIMAL")
         
         if needs_repair:
-            # Get probe diagnosis for repair
-            probe_diagnosis = None
-            if state.get("semantic_probe_reports"):
-                last_probe = state["semantic_probe_reports"][-1]
-                if last_probe.diagnoses:
-                    probe_diagnosis = "\n".join([
-                        f"- {name}: {diag}" 
-                        for name, diag in last_probe.diagnoses.items()
-                    ])
-            
-            prior = {
-                "spec_sheet": state.get("step2_spec_sheet").model_dump(mode="json")
-                if state.get("step2_spec_sheet")
-                else None,
-                "constraint_templates": [
-                    t.model_dump(mode="json") for t in state.get("step3_templates", [])
-                ],
-                "code": code_text,
-                "solve_report": solve_report.model_dump(mode="json", by_alias=True),
-                "probe_diagnosis": probe_diagnosis,
-            }
-            
-            content, msg_idx = self._call_llm(
-                state, "step5", prior_outputs=prior
-            )
-            brief_payload, repair_idx = self._parse_json_with_repair(
-                content, state, "step5", prior
-            )
-            brief = RepairBrief.model_validate(brief_payload)
-            state.setdefault("repair_briefs", []).append(brief)
-            state["repair_count"] = state.get("repair_count", 0) + 1
             state["last_error"] = "needs_repair"
-            
-            idx_for_brief = repair_idx or msg_idx
-            self.persistence.persist_turn(
-                state["run_id"], idx_for_brief, "step5_repair_brief", step_outputs=brief
-            )
         else:
             state["last_error"] = None
         

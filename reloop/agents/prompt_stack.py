@@ -38,6 +38,11 @@ class PromptStack:
     def __init__(self, base_prompt: str, step_prompts_dir: Path):
         self.base_prompt = base_prompt
         self.step_prompts_dir = step_prompts_dir
+        self.guardrails_exempt_steps = {"step1"}
+        self.base_prompt_system_exempt_steps = {"step1", "step3", "step4"}
+        self.base_prompt_human_steps = {"step1"}
+        self.scenario_text_exempt_steps = {"step2", "step3", "step4"}
+        self.data_profile_exempt_steps = {"step3", "step4"}
         
         # Load guardrails
         guardrails_path = step_prompts_dir / "00_global_guardrails.txt"
@@ -65,7 +70,7 @@ class PromptStack:
         prompt_text = path.read_text(encoding="utf-8")
         
         # Prepend base prompt to step prompt
-        if self.base_prompt:
+        if self.base_prompt and step not in self.base_prompt_system_exempt_steps:
             return f"{self.base_prompt.rstrip()}\n\n{prompt_text}"
         return prompt_text
 
@@ -85,7 +90,7 @@ class PromptStack:
         messages: List[HumanMessage | SystemMessage | AIMessage] = []
         
         # 1. Global guardrails (if exists)
-        if self.guardrails:
+        if self.guardrails and step not in self.guardrails_exempt_steps:
             messages.append(SystemMessage(content=self.guardrails))
         
         # 2. Step-specific prompt (with base prompt prepended)
@@ -94,10 +99,13 @@ class PromptStack:
         # 3. Runtime context
         runtime_blocks: List[str] = []
         
-        if scenario_text:
+        if step in self.base_prompt_human_steps:
+            if self.base_prompt:
+                runtime_blocks.append(f"Base prompt:\n{self.base_prompt}")
+        elif scenario_text and step not in self.scenario_text_exempt_steps:
             runtime_blocks.append(f"Scenario narrative:\n{scenario_text}")
         
-        if data_profile:
+        if data_profile and step not in self.data_profile_exempt_steps:
             runtime_blocks.append(
                 "data_profile (types/indexing only):\n"
                 + json.dumps(data_profile, indent=2)
