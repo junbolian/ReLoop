@@ -65,6 +65,8 @@ Thumbs.db
 artifacts/
 models/
 test/
+qwen3-max-result/
+claude-opus-4-result/
 
 # If you DO want to keep a small sample jsonl in repo, you can negate it like:
 # !data/sample.jsonl

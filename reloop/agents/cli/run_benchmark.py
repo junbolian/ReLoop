@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import uuid
 from pathlib import Path
@@ -55,6 +56,7 @@ def main():
     pre_codegen_path = Path(args.out) / "sft_pre_codegen.jsonl"
     codegen_path = Path(args.out) / "sft_codegen.jsonl"
     init_jsonl_paths(pre_codegen_path, codegen_path)
+    objective_rows = []
 
     for scenario_id in scenario_ids:
         data_path = Path("scenarios") / "data" / f"{scenario_id}.json"
@@ -113,7 +115,24 @@ def main():
             scenario_id=scenario_id,
             run_id=state["run_id"],
         )
+        obj_val = None
+        if final_state.get("solve_reports"):
+            last_solve = final_state["solve_reports"][-1]
+            if last_solve.status in ("2", "GRB.OPTIMAL", "OPTIMAL"):
+                obj_val = last_solve.obj_val
+        objective_rows.append(
+            {
+                "scenario_id": scenario_id,
+                "objective": "null" if obj_val is None else obj_val,
+            }
+        )
         print(f"{scenario_id}: completed -> {artifact_dir}")
+
+    csv_path = Path(args.out) / "benchmark_objectives.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["scenario_id", "objective"])
+        writer.writeheader()
+        writer.writerows(objective_rows)
 
 
 if __name__ == "__main__":
