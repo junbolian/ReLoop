@@ -3,6 +3,7 @@ Family: F6 (Logistics and Integer Procurement)
 Archetype: retail_f6_moq_binary
 Scenario ID: retail_f6_moq_binary_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer faces a minimum order quantity applied uniformly across the category. In any period, the buyer must either place no order for a product or place an order that is at least as large as the specified global minimum. It is never allowed to place a small positive order below that threshold. This creates an all-or-nothing structure in procurement decisions on top of the usual inventory and storage logic.
 

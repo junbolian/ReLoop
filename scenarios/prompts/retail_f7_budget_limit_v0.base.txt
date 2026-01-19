@@ -3,6 +3,7 @@ Family: F7 (Network and Multi Echelon)
 Archetype: retail_f7_budget_limit
 Scenario ID: retail_f7_budget_limit_v0
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer faces a per-period open-to-buy budget that limits total spending on inventory-related activities across the network. This budget must cover purchasing and possibly other variable costs, coupling decisions across locations in each period. Demand is local and exogenous, and unmet demand is lost and penalized.
 

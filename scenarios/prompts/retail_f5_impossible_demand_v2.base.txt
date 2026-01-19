@@ -3,6 +3,7 @@ Family: F5 (Feasibility and Model Repair)
 Archetype: retail_f5_impossible_demand
 Scenario ID: retail_f5_impossible_demand_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Demand is scaled so high that it is physically impossible to satisfy all of it given the production and storage capacities. Even with perfect planning, some demand must be sacrificed. This scenario is designed to test whether the model correctly accepts that full service is impossible and uses lost sales to remain feasible instead of implicitly assuming 100% service.
 

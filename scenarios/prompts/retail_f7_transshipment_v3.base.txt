@@ -3,6 +3,7 @@ Family: F7 (Network and Multi Echelon)
 Archetype: retail_f7_transshipment
 Scenario ID: retail_f7_transshipment_v3
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer operates a fully connected lateral transshipment network among all locations. Inventory can be moved between any pair of locations at a transshipment cost, allowing local surpluses to be reallocated to locations facing shortages. Demand remains local and exogenous at each site, and unsatisfied demand after considering local stock and inbound transshipments is lost and penalized.
 

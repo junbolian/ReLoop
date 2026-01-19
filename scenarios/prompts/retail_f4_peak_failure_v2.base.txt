@@ -3,6 +3,7 @@ Family: F4 (Dynamics and Disruptions)
 Archetype: retail_f4_peak_failure
 Scenario ID: retail_f4_peak_failure_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 An upstream supply failure occurs during a high-demand peak, such as a holiday season. Production capacity drops to zero only during the peak window, while demand for all products remains high. The retailer must build inventory before the peak, use it strategically during the failure, and accept some lost sales if necessary. Demand that cannot be served in the peak periods is lost and penalized.
 

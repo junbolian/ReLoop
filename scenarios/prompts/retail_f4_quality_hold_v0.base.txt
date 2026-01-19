@@ -3,6 +3,7 @@ Family: F4 (Dynamics and Disruptions)
 Archetype: retail_f4_quality_hold
 Scenario ID: retail_f4_quality_hold_v0
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 A quality issue forces the retailer to halt production of the basic product after a certain time. Existing units of that product can still be sold until they are exhausted or expire, but no new units can be produced during the hold window. Demand for other products is unaffected. Unserved demand for the basic product is lost and penalized, even if substitutes exist.
 

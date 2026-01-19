@@ -3,6 +3,7 @@ Family: F4 (Dynamics and Disruptions)
 Archetype: retail_f4_demand_surge
 Scenario ID: retail_f4_demand_surge_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer experiences a single-period viral demand spike where demand suddenly multiplies for all products. Production capacity and other structural elements remain unchanged; only the magnitude of demand in that period is much higher. The retailer must decide whether to build extra inventory in advance or accept lost sales during the surge.
 

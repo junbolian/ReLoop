@@ -3,6 +3,7 @@ Family: F8 (Omni channel and Store Operations)
 Archetype: retail_f8_reverse_logistics
 Scenario ID: retail_f8_reverse_logistics_v1
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 A fraction of units sold in each period are returned by customers in the next period and re-enter inventory as reverse flow. Returns are product-specific and location-specific, and can be used to satisfy future demand as long as they have not expired or violated storage limits. Demand is local and exogenous; unmet demand is lost and penalized.
 

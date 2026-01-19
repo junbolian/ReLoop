@@ -3,6 +3,7 @@ Family: F1 (Core Operations)
 Archetype: retail_f1_52_weeks
 Scenario ID: retail_f1_52_weeks_v1
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer plans inventory over a full year of weekly decisions, represented by fifty-two time periods. Exogenous seasonal demand, local inventories at each distribution center, and per-product production capacities work as in the core operations baseline. Customers are never backordered; unmet demand in a week is immediately lost and penalized. The main difference is the extended planning horizon, which tests the ability to manage long-run seasonality and accumulation effects.
 

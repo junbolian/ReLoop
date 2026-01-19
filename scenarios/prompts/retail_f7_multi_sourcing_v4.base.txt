@@ -3,6 +3,7 @@ Family: F7 (Network and Multi Echelon)
 Archetype: retail_f7_multi_sourcing
 Scenario ID: retail_f7_multi_sourcing_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Products differ in their effective sourcing regimes: some behave like slow but cheap supply, while others behave like fast but expensive supply. Lead times and holding costs vary across products, creating multi-speed inventory dynamics. Demand is local and exogenous at each location, and unmet demand is lost and penalized.
 
