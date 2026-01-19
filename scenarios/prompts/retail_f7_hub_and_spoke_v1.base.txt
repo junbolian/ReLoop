@@ -3,6 +3,7 @@ Family: F7 (Network and Multi Echelon)
 Archetype: retail_f7_hub_and_spoke
 Scenario ID: retail_f7_hub_and_spoke_v1
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The network has one high-capacity hub distribution center that ships to several low-capacity spokes. All lateral movements must pass through the hub; spokes cannot ship directly to each other or back to the hub. Demand occurs at spokes and is local. This captures a hub-and-spoke distribution strategy where stock is pooled at the hub and then pushed out to stores.
 

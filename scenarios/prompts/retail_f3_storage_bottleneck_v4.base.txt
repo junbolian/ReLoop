@@ -3,6 +3,7 @@ Family: F3 (Shared Resources and Capacity)
 Archetype: retail_f3_storage_bottleneck
 Scenario ID: retail_f3_storage_bottleneck_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 All locations share a tight storage resource that applies across all products, representing limited chilled, ambient, or dry space. Demand at each location is still exogenous and local, and inventory is not transferred between locations. The main operational challenge is that total stored volume at each site must fit within a strict capacity, so stocking one product reduces room for others.
 

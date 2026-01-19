@@ -345,35 +345,48 @@ Each instance has this structure:
 
 ```json
 {
-  "scenario_id": "retail_f1_52_weeks_v0",
-  "periods": 52,
+  "name": "retail_f1_base_v0",
+  "periods": 20,
   "products": ["SKU_Basic", "SKU_Premium", "SKU_ShortLife"],
-  "locations": ["DC1", "DC2", "DC3"],
-  
+  "locations": ["DC1", "DC2", "DC3", "DC4", "DC5"],
+
   "shelf_life": {"SKU_Basic": 10, "SKU_Premium": 8, "SKU_ShortLife": 4},
   "lead_time": {"SKU_Basic": 0, "SKU_Premium": 0, "SKU_ShortLife": 0},
-  
+
   "demand_curve": {
-    "SKU_Basic": [100, 120, ...],
-    "SKU_Premium": [50, 60, ...]
+    "SKU_Basic": [303, 311, 328, ...],
+    "SKU_Premium": [151, 155, 164, ...]
   },
-  "demand_share": {"DC1": 0.4, "DC2": 0.35, "DC3": 0.25},
-  
+  "demand_share": {"DC1": 0.25, "DC2": 0.2, "DC3": 0.2, "DC4": 0.2, "DC5": 0.15},
+
+  "production_cap": {"SKU_Basic": [800, 800, ...], ...},
+  "cold_capacity": {"DC1": 4000, "DC2": 3500, ...},
+  "cold_usage": {"SKU_Basic": 1.0, "SKU_Premium": 3.0, ...},
+
+  "labor_cap": {"DC1": [99999.0, ...], ...},
+  "labor_usage": {"SKU_Basic": 0.0, ...},
+  "return_rate": {"SKU_Basic": 0.0, ...},
+
+  "costs": {
+    "purchasing": {"SKU_Basic": 10.0, ...},
+    "inventory": {"SKU_Basic": 1.0, ...},
+    "waste": {"SKU_Basic": 2.0, ...},
+    "lost_sales": {"SKU_Basic": 50.0, ...},
+    "fixed_order": 0.0,
+    "transshipment": 0.5
+  },
+
+  "constraints": {
+    "moq": 0,
+    "pack_size": 1,
+    "budget_per_period": null,
+    "waste_limit_pct": null
+  },
+
   "network": {
     "sub_edges": [["SKU_Basic", "SKU_Premium"]],
     "trans_edges": []
-  },
-  
-  "costs": {
-    "inventory": {"SKU_Basic": 0.5, ...},
-    "waste": {"SKU_Basic": 2.0, ...},
-    "lost_sales": {"SKU_Basic": 10.0, ...},
-    "purchasing": {"SKU_Basic": 5.0, ...}
-  },
-  
-  "production_cap": {"SKU_Basic": [500, 500, ...], ...},
-  "cold_capacity": {"DC1": 5000, ...},
-  "cold_usage": {"SKU_Basic": 1.0, ...}
+  }
 }
 ```
 
@@ -390,6 +403,10 @@ demand[p,l,t] = data['demand_curve'][p][t-1] * data['demand_share'][l]
 
 # production_cap is 0-indexed list
 prod_cap = data['production_cap'][p][t-1]  # Access with [t-1]
+
+# Optional fields - use .get() with defaults
+moq = data.get('constraints', {}).get('moq', 0)
+fixed_order = data.get('costs', {}).get('fixed_order', 0)
 ```
 
 ---

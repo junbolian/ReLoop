@@ -3,6 +3,7 @@ Family: F6 (Logistics and Integer Procurement)
 Archetype: retail_f6_fixed_order_cost
 Scenario ID: retail_f6_fixed_order_cost_v1
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Placing an order in a period incurs a fixed cost regardless of how large the order is. This encourages batching orders into fewer, larger replenishments instead of many small ones. The retailer still faces local demand, storage limits, and lost sales for unmet demand, but now each decision to place any positive order carries an additional setup-like cost.
 

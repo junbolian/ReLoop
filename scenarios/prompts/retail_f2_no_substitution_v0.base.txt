@@ -3,6 +3,7 @@ Family: F2 (Assortment and Substitution)
 Archetype: retail_f2_no_substitution
 Scenario ID: retail_f2_no_substitution_v0
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer manages multiple products that do not substitute for each other. Customers either buy the specific product they requested or, if it is unavailable, do not purchase anything and generate a lost sale. Demand for each product at each location is exogenous and seasonal. Inventory is held locally with no transshipment and no backorders, and there is no cross-product switching under any circumstances.
 

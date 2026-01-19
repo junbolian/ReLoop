@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(du:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git restore:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nadd SFT training data for ReLoop agent\n\n- 14,125 training samples across 8 steps\n- 18 industries, 48 feature combinations\n- Step 1-4: main pipeline \\(contract, spec, templates, codegen\\)\n- Step 05-07: repair samples \\(JSON, runtime, probe\\)\n- Compatible with 14 semantic probes and sanity checker\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(ls:*)",
+      "Bash(for f in *.jsonl)",
+      "Bash(done)",
+      "Bash(python3 -m json.tool:*)"
+    ]
+  }
+}

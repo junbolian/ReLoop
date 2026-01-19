@@ -3,6 +3,7 @@ Family: F5 (Feasibility and Model Repair)
 Archetype: retail_f5_ultimate_stress
 Scenario ID: retail_f5_ultimate_stress_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 This is a composite stress test that combines three stressors: tight storage capacity, a mid-horizon production failure during a peak period, and the absence of any substitution between products. Demand is local and exogenous at each location. The scenario is designed as a boss-level test where the only viable strategy is to accept significant lost sales while respecting all physical constraints.
 
