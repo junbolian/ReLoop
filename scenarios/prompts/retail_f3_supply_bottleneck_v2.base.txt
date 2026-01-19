@@ -3,6 +3,7 @@ Family: F3 (Shared Resources and Capacity)
 Archetype: retail_f3_supply_bottleneck
 Scenario ID: retail_f3_supply_bottleneck_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Storage space is abundant but upstream production capacity is tight. The main bottleneck is how many units can be produced or procured each period, not how many can be stored. Demand is still exogenous, local to each location, and there are no backorders or transshipment.
 

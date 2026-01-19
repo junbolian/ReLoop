@@ -3,6 +3,7 @@ Family: F5 (Feasibility and Model Repair)
 Archetype: retail_f5_strict_service_trap
 Scenario ID: retail_f5_strict_service_trap_v3
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Storage capacity is reduced to the point where any attempt to maintain very high service levels conflicts with the physical constraints. The scenario is intended as a trap for models that implicitly assume near-perfect service without allowing lost sales: the only consistent solution is to accept that some demand will not be filled.
 

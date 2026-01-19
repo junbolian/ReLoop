@@ -3,6 +3,7 @@ Family: F2 (Assortment and Substitution)
 Archetype: retail_f2_promo_budget
 Scenario ID: retail_f2_promo_budget_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 In the final periods of the horizon the retailer runs strong promotions on the basic and short-life products, causing their demand to spike. At the same time, an open-to-buy style budget limits how much can be spent in each period on inventory-related activities. The retailer must allocate inventory and spending over time so that promotion-induced demand is supported as well as possible without violating the budget caps.
 

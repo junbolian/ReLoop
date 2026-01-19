@@ -3,6 +3,7 @@ Family: F6 (Logistics and Integer Procurement)
 Archetype: retail_f6_lead_time
 Scenario ID: retail_f6_lead_time_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Orders for each product take several periods to arrive. When the retailer places an order, the goods travel in a pipeline and only become available to serve demand after a deterministic lead time that is specific to each product. Demand is local and exogenous; customers are never backordered, so demand that cannot be met by on-hand inventory in a period is lost and penalized.
 

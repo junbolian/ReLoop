@@ -3,6 +3,7 @@ Family: F4 (Dynamics and Disruptions)
 Archetype: retail_f4_supply_risk
 Scenario ID: retail_f4_supply_risk_v0
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer faces persistent but moderate supply risk in the middle of the season. Production capacity is reduced over a mid-horizon band of periods, and waste becomes more expensive. Demand remains exogenous and local, with no backorders and no transshipment. The retailer must decide how much to build inventory before the risk window, balancing the danger of stockouts against the risk of obsolescence and waste.
 

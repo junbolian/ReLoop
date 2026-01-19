@@ -3,6 +3,7 @@ Family: F2 (Assortment and Substitution)
 Archetype: retail_f2_ultra_fresh
 Scenario ID: retail_f2_ultra_fresh_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 This scenario represents extremely short shelf-life products such as daily bakery items or ready-to-eat meals. All products must be sold very soon after arrival; otherwise they must be discarded as waste. Demand for each product at each location is seasonal and exogenous. Customers may switch between products according to the substitution graph, but only non-expired inventory can be used to satisfy demand. There are no backorders and no transshipment.
 

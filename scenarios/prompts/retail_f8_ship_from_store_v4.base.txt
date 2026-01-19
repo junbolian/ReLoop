@@ -3,6 +3,7 @@ Family: F8 (Omni channel and Store Operations)
 Archetype: retail_f8_ship_from_store
 Scenario ID: retail_f8_ship_from_store_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Stores fulfill both walk-in traffic and online orders, effectively acting as small fulfillment centers that ship from store. Storage capacity and labor capacity at stores are scaled up, but labor usage per unit is higher when stores serve both channels. Demand from walk-in and online customers is aggregated into a single local demand stream per product and location, and unmet demand is lost and penalized.
 

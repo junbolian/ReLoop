@@ -3,6 +3,7 @@ Family: F8 (Omni channel and Store Operations)
 Archetype: retail_f8_labor_constraint
 Scenario ID: retail_f8_labor_constraint_v3
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Store and warehouse labor capacity directly limits how much inventory can be handled in each period. Labor is required for activities such as receiving, picking, and replenishment, and total labor usage per period at a location cannot exceed a location-specific cap. Demand is local and exogenous; unmet demand is lost and penalized.
 

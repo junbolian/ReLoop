@@ -3,6 +3,7 @@ Family: F1 (Core Operations)
 Archetype: retail_f1_jit_logic
 Scenario ID: retail_f1_jit_logic_v1
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 This scenario represents a just-in-time regime where holding inventory is very expensive. The retailer still faces exogenous seasonal demand at each location, cannot backorder customers, and has limited per-product production capacity per period. Because holding costs are high, the retailer is incentivized to keep inventories as lean as possible while still avoiding excessive lost sales.
 

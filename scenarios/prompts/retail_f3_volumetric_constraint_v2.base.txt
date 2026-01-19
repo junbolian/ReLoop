@@ -3,6 +3,7 @@ Family: F3 (Shared Resources and Capacity)
 Archetype: retail_f3_volumetric_constraint
 Scenario ID: retail_f3_volumetric_constraint_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 One product—typically a bulky premium item—uses much more storage volume per unit than the others. Storage capacity at each location becomes tight primarily because of this product, forcing the retailer to choose between stocking bulky high-margin units and smaller items. All demand remains local and exogenous, with no transshipment or backorders.
 

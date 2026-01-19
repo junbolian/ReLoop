@@ -3,6 +3,7 @@ Family: F1 (Core Operations)
 Archetype: retail_f1_high_waste
 Scenario ID: retail_f1_high_waste_v3
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 This scenario keeps the same basic single-echelon structure as the core operations baseline but represents categories where waste is extremely expensive, such as highly perishable or sensitive products. The retailer still serves exogenous seasonal demand from local inventories at distribution centers with no transshipment and no backorders. Any units that must be discarded because they are no longer usable incur a much higher penalty than in the baseline, creating strong pressure to avoid overstocking.
 

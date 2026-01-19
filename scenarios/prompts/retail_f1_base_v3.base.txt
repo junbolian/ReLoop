@@ -3,6 +3,7 @@ Family: F1 (Core Operations)
 Archetype: retail_f1_base
 Scenario ID: retail_f1_base_v3
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer manages weekly inventory for several products across multiple distribution centers that directly serve final customer demand. Demand for each product at each location is seasonal and exogenous. Products are replenished each period up to a per-product production or procurement capacity, and any demand that is not served immediately in the period is permanently lost and penalized. Customers are never backlogged or promised future delivery. Inventory is held locally at each distribution center, and there is no movement of stock between locations in this archetype.
 

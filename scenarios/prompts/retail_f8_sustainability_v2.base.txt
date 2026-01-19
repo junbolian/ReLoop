@@ -3,6 +3,7 @@ Family: F8 (Omni channel and Store Operations)
 Archetype: retail_f8_sustainability
 Scenario ID: retail_f8_sustainability_v2
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 The retailer operates under a sustainability or regulatory constraint that limits total waste. Over the entire planning horizon, the total quantity discarded as waste must not exceed a fixed fraction of total demand. Demand is local and exogenous; unmet demand is lost and penalized. The retailer must balance serving demand, avoiding stockouts, and limiting waste.
 

@@ -3,6 +3,7 @@ Family: F6 (Logistics and Integer Procurement)
 Archetype: retail_f6_pack_size_integer
 Scenario ID: retail_f6_pack_size_integer_v4
 
+[BUSINESS DESCRIPTION]
 Business narrative:
 Orders must be placed in whole packs or pallets of a fixed size. The retailer can only buy an integer number of packs; partial packs cannot be ordered. Demand and storage remain as before, and demand that cannot be served from on-hand inventory is lost and penalized.
 
