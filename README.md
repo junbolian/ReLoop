@@ -167,57 +167,122 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 
 ---
 
-## Agent Pipeline
+## ReLoop Pipeline
+
+### Complete Flow
 
 ```
-profile_data → step1 → step2 → step3 → sanity → step4 → audit → probe → run
-               contract spec   templates        codegen        verify
-                                                    ↑            │
-                                                    └── repair ──┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         ReLoop Pipeline                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Input                                                     │  │
+│  │ ├── Business Narrative (scenario description)             │  │
+│  │ ├── Data Schema (JSON structure)                          │  │
+│  │ └── Full Data (for execution)                             │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                              ▼                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Step 0: Data Profile (automatic)                          │  │
+│  │ → Extract parameter roles for verification                │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                              ▼                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Step 1: Problem Understanding (LLM)                       │  │
+│  │ Input: Narrative + Schema                                 │  │
+│  │ Output: Objective, decisions, constraints (JSON)          │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                              ▼                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Step 2: Mathematical Specification (LLM)                  │  │
+│  │ Input: Step1 output + Schema                              │  │
+│  │ Output: Sets, variables, objective, constraint formulas   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                              ▼                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Step 3: Code Generation (LLM)                             │  │
+│  │ Input: Step2 output + Schema                              │  │
+│  │ Output: GurobiPy code                                     │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                              ▼                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Step 4: Sensitivity Verification (automatic)              │  │
+│  │ Input: Code + Full data + Parameter roles                 │  │
+│  │ Output: Verification report (parameter anomalies)         │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│                    ┌─────────┴─────────┐                       │
+│                    ▼                   ▼                       │
+│               [All Pass]          [Anomaly]                    │
+│                    │                   │                       │
+│                    ▼                   ▼                       │
+│               Output code    ┌─────────────────────┐           │
+│                              │ Step 5: Repair (LLM)│           │
+│                              │ Input: Code + Report │           │
+│                              │ Output: Fixed code   │           │
+│                              └──────────┬──────────┘           │
+│                                         │                      │
+│                                         └───▶ Back to Step 4   │
+│                                              (max N retries)   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Steps:
-1. **Step 1**: Lock task contract (optimize, controls, constraints)
-2. **Step 2**: Build spec sheet (sets, decisions, objective)
-3. **Step 3**: Map to constraint templates (math formulas)
-4. **Step 4**: Generate Gurobi code (no template given)
-5. **Probe**: Run 8 semantic probes
-6. **Repair**: If probes fail, diagnose and retry (up to 5x)
+### Pipeline Steps
 
----
+| Step | Type | Input | Output |
+|------|------|-------|--------|
+| 0 | Auto | JSON data | Parameter roles |
+| 1 | LLM | Narrative + Schema | Problem understanding (JSON) |
+| 2 | LLM | Step 1 + Schema | Math specification (JSON) |
+| 3 | LLM | Step 2 + Schema | GurobiPy code |
+| 4 | Auto | Code + Data | Verification report |
+| 5 | LLM | Code + Report | Repaired code |
 
-## Research Directions
-
-### Current Limitations
-
-1. **Manual probe design**: 8 probes are hand-crafted by domain experts
-2. **No coverage guarantee**: Unknown if probes cover all constraint types
-3. **No formal framework**: Probe correctness is empirical, not proven
-
-### Future Work
-
-| Direction | Research Question | Potential Venue |
-|-----------|-------------------|-----------------|
-| **Automatic Probe Generation** | Given constraint C, auto-generate test data that distinguishes correct/incorrect implementations | ICML/NeurIPS |
-| **Semantic Coverage** | How to measure and ensure probes cover all critical constraints? | AAAI/IJCAI |
-| **Formal Verification** | Can we prove probe soundness (no false negatives)? | POPL/CAV |
-| **Cross-Domain Generalization** | Do probe design principles transfer to other OR domains? | CPAIOR |
-
-### Formalization Sketch
+### Data Usage Principle
 
 ```
-Definition (Silent Failure):
-  Model M has silent failure on data d ⟺ 
-    M.solve(d).status = OPTIMAL ∧ M.solve(d).obj ≠ ground_truth(d)
-
-Definition (Probe Soundness):
-  Probe P is sound for constraint C ⟺ 
-    ∀ implementation M missing C: P(M) = FAIL
-
-Open Problem:
-  Given optimization model spec S, construct minimal probe set {P₁...Pₖ} 
-  that is sound and complete for all single-constraint errors.
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  What LLM sees: Data Schema (structure only)                    │
+│  ═══════════════════════════════════════════                    │
+│  - Field names, types, meanings                                 │
+│  - Indexing conventions (0-indexed, etc.)                       │
+│  - Access patterns                                              │
+│                                                                 │
+│  What LLM does NOT see: Full Data                               │
+│  ════════════════════════════════════                           │
+│  - Actual demand values                                         │
+│  - Actual cost values                                           │
+│  - Complete 52-week arrays                                      │
+│                                                                 │
+│  Full data is ONLY used for: Code execution + Verification      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+### Data Flow by Step
+
+| Step | LLM Sees | Full Data Used For |
+|------|----------|-------------------|
+| 1-3 (Modeling) | Narrative + Schema | - |
+| 4 (Verification) | - | Execute code, sensitivity tests |
+| 5 (Repair) | Code + "demand anomaly" | - |
+
+**Key insight**: LLM never sees actual data values. It only knows the structure. Verification uses full data to test code behavior, but only reports *which parameter* failed, not the values.
+
+### Key Design Principles
+
+1. **Minimal prompt**: Only give business narrative + data schema, let LLM decide modeling
+2. **Grounded verification**: Test actual code behavior, not LLM-generated explanations
+3. **Targeted repair**: Diagnosis guides specific fixes instead of full regeneration
+4. **Data isolation**: LLM sees structure, verification uses values, repair sees diagnostics
 
 ---
 
@@ -225,7 +290,7 @@ Open Problem:
 
 ```bibtex
 @misc{reloop2026,
-  author = {Junbo Jacob Lian and Yujun Sam Sun and Diego Klabjan},
+  author = {Junbo Jacob Lian and Yujun Sam Sun and Huiling Chen and Chaoyu Zhang and Chung-Piaw Teo},
   title  = {ReLoop: Closing the Silent Failure Gap in LLM-based 
             Optimization Modeling via Semantic Probes},
   year   = {2026},

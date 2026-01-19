@@ -24,15 +24,21 @@ RetailOpt-190 uses **two prompt formats** for different evaluation modes:
 ```
 ┌─────────────────────────────────────────┐
 │ [SCENARIO]                              │
-│ Family, archetype, business narrative   │
+│ Family, archetype, scenario ID          │
+│                                         │
+│ [BUSINESS DESCRIPTION]                  │
+│ Business narrative + structure cues     │
 │                                         │
 │ [DATA SCHEMA]                           │
 │ JSON structure (types only, not data)   │
 │                                         │
+│ [DATA ACCESS]                           │
+│ How to read from `data` variable        │
+│                                         │
 │ [OUTPUT FORMAT]                         │
 │ GurobiPy, print status and objective    │
 │                                         │
-│ [INSTRUCTION]                           │
+│ [TASK]                                  │
 │ Write GurobiPy script...                │
 └─────────────────────────────────────────┘
          ↓
@@ -45,7 +51,7 @@ RetailOpt-190 uses **two prompt formats** for different evaluation modes:
       Results
 ```
 
-**For:** GPT-4o, Claude, Qwen2.5-Coder, SIRL, ORLM, OptiMUS, OptiChat
+**For:** GPT-4o, Claude, Qwen, DeepSeek, SIRL, ORLM, OptiMUS, OptiChat
 
 ### Mode 2: ReLoop Agent (Multi-step Pipeline)
 
@@ -58,15 +64,14 @@ RetailOpt-190 uses **two prompt formats** for different evaluation modes:
 │ (NO guardrails - injected separately)   │
 └─────────────────────────────────────────┘
          ↓
-   Step 0: Global Guardrails
-   Step 1: Task Contract
-   Step 2: Model Specification
-   Step 3: Constraint Templates
-   Step 4: Code Generation
+   Step 0: Data Profile
+   Step 1: Problem Understanding
+   Step 2: Math Specification
+   Step 3: Code Generation
          ↓
   [Semantic Probes]
          ↓
-   Step 5: Repair (if probes fail)
+   Step 4-5: Repair (if probes fail)
          ↓
       Results
 ```
@@ -146,38 +151,74 @@ The baseline prompt (`{scenario_id}.scenario.txt`) contains **minimal specificat
 }
 ```
 
+### Data Access Section
+
+```
+- The variable `data` is pre-loaded. Do NOT use file I/O.
+- Network data is nested: use data.get('network', {}).get('sub_edges', [])
+- Lists are 0-indexed
+```
+
 ### Output Format Section
 
 ```
-- Output ONLY Python code, no markdown, no explanations
-- Use GurobiPy (import gurobipy as gp)
-- Set Gurobi params: OutputFlag=0, Threads=1, Seed=0
-- Print results:
-  print(f"status: {m.Status}")
-  if m.Status == 2:  # GRB.OPTIMAL
-      print(f"objective: {m.ObjVal}")
+- Output ONLY Python code
+- Use GurobiPy
+- Print status and objective
 ```
 
 ---
 
-## 4. ReLoop Agent Pipeline
+## 4. Data Usage Principle
 
-### Pipeline Overview (8 Prompt Modules)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  What LLM sees: Data Schema (structure only)                    │
+│  ═══════════════════════════════════════════                    │
+│  - Field names, types, meanings                                 │
+│  - Indexing conventions (0-indexed, etc.)                       │
+│  - Access patterns                                              │
+│                                                                 │
+│  What LLM does NOT see: Full Data                               │
+│  ════════════════════════════════════                           │
+│  - Actual demand values                                         │
+│  - Actual cost values                                           │
+│  - Complete 52-week arrays                                      │
+│                                                                 │
+│  Full data is ONLY used for: Code execution + Verification      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-| File | Step | Purpose |
-|------|------|---------|
-| 00 | Global Guardrails | Core rules, data format, variable naming, substitution semantics |
-| 01 | Task Contract | Lock optimization goal, controls, hard/soft constraints |
-| 02 | Model Spec Sheet | Define sets, decisions, objective terms, constraint families |
-| 03 | Constraint Templates | Derive mathematical LHS/RHS formulas |
-| 04 | Code Generation | Translate templates to GurobiPy code |
-| 05 | Format Repair (JSON) | Fix malformed JSON output |
-| 06 | Format Repair (Code) | Fix code that has markdown or syntax issues |
-| 07 | Repair Brief | Diagnose errors and suggest fixes based on probe results |
+### Data Flow by Step
+
+| Step | LLM Sees | Full Data Used For |
+|------|----------|-------------------|
+| 1-3 (Modeling) | Narrative + Schema | - |
+| 4 (Verification) | - | Execute code, sensitivity tests |
+| 5 (Repair) | Code + "demand anomaly" | - |
+
+**Key insight**: LLM never sees actual data values. It only knows the structure. Verification uses full data to test code behavior, but only reports *which parameter* failed, not the values.
 
 ---
 
-## 5. Semantic Probe Verification
+## 5. ReLoop Agent Pipeline
+
+### Pipeline Overview
+
+| Step | Type | Input | Output |
+|------|------|-------|--------|
+| 0 | Auto | JSON data | Parameter roles |
+| 1 | LLM | Narrative + Schema | Problem understanding (JSON) |
+| 2 | LLM | Step 1 + Schema | Math specification (JSON) |
+| 3 | LLM | Step 2 + Schema | GurobiPy code |
+| 4 | Auto | Code + Data | Verification report |
+| 5 | LLM | Code + Report | Repaired code |
+
+---
+
+## 6. Semantic Probe Verification
 
 ### How Probes Work (Code Execution, NOT Prompting)
 
@@ -210,7 +251,7 @@ Probes verify constraints via **actual code execution**:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 14 Probes (8 Core + 6 Extended)
+### 8 Core Probes
 
 | # | Probe | Mechanism | Detection Method |
 |---|-------|-----------|------------------|
@@ -222,12 +263,6 @@ Probes verify constraints via **actual code execution**:
 | 6 | `aging_dynamics` | Shelf-life | Waste cost verification |
 | 7 | `lost_sales_slack` | L variable | INFEASIBLE detection |
 | 8 | `inventory_nonnegativity` | I ≥ 0 | Negative inventory check |
-| 9 | `initialization` | t=1 init (I=0 for a<SL) | Objective = 0 detection |
-| 10 | `lead_time` | Lead time handling | Delivery timing |
-| 11 | `moq` | Minimum order quantity | MOQ enforcement |
-| 12 | `transshipment` | Network flows | Trans constraint |
-| 13 | `labor_capacity` | Labor constraints | Capacity check |
-| 14 | `holding_cost` | (I-y) vs I | Objective range check |
 
 ### Key Insight
 
@@ -235,7 +270,7 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 
 ---
 
-## 6. Evaluation Metrics
+## 7. Evaluation Metrics
 
 | Metric | Definition | Formula |
 |--------|------------|---------|
@@ -251,13 +286,13 @@ An instance is **correct** if:
 
 ---
 
-## 7. Key Differences: Baseline vs ReLoop
+## 8. Key Differences: Baseline vs ReLoop
 
 | Aspect | Baseline (Zero-shot) | ReLoop (Multi-step) |
 |--------|---------------------|---------------------|
-| Prompt count | 1 minimal prompt | 8 modular prompts |
-| Guidance level | Data schema only | Full modeling guidance |
+| Prompt count | 1 minimal prompt | Multi-step prompts |
+| Guidance level | Data schema only | Step-by-step modeling |
 | Interaction | Single LLM call | Multi-step pipeline |
 | Error handling | Full regeneration | Targeted repair based on probes |
-| Intermediate artifacts | None | Contract → Spec → Templates → Code |
+| Intermediate artifacts | None | Understanding → Spec → Code |
 | Verification | Post-hoc probes only | Probes integrated in loop |
