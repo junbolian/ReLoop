@@ -467,6 +467,8 @@ DATA ACCESS:
 - demand[p,l,t] = data['demand_curve'][p][t-1] * data['demand_share'][l]
 - production_cap[p,t] = data['production_cap'][p][t-1]
 - Network: data.get('network', {{}}).get('sub_edges', [])
+- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
+  Convert to tuples for Gurobi indexing: [tuple(e) for e in edges]
 """
 
 MAMO_SCHEMA_TEMPLATE = """

@@ -88,9 +88,13 @@ DATA_ACCESS = """
 """.strip()
 
 OUTPUT_FORMAT = """
-- Output ONLY Python code
-- Use GurobiPy
-- Print status and objective
+- Import: import gurobipy as gp; from gurobipy import GRB
+- Set Gurobi params: m.Params.OutputFlag = 0; m.Params.Threads = 1; m.Params.Seed = 0
+- Print at end:
+  print(f"status: {{m.Status}}")
+  if m.Status == 2:
+      print(f"objective: {{m.ObjVal}}")
+- Output ONLY executable Python code. No markdown, no explanations.
 """.strip()
 
 
