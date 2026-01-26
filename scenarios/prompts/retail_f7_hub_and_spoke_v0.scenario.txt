@@ -8,7 +8,7 @@ Business narrative:
 The network has one high-capacity hub distribution center that ships to several low-capacity spokes. All lateral movements must pass through the hub; spokes cannot ship directly to each other or back to the hub. Demand occurs at spokes and is local. This captures a hub-and-spoke distribution strategy where stock is pooled at the hub and then pushed out to stores.
 
 Structure cues:
-- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
 - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. DC1 (hub) has capacity 50000, while other locations (spokes) have capacity 500 each.
 - The transshipment network consists only of directed edges from DC1 (hub) to each spoke [DC2, DC3, DC4, DC5]. Inventory can move from the hub to the spokes but not directly between spokes and not from spokes back to the hub.
 - For each product, location, and period, inventory evolves based on local production (if any), inbound shipments, outbound shipments, sales (at spokes), and waste, and must remain non-negative.
@@ -61,10 +61,11 @@ Structure cues:
 
 [DATA ACCESS]
 - The variable `data` is pre-loaded. Do NOT use file I/O.
-- Network data is nested: use data.get('network', {}).get('sub_edges', [])
-- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
-  Convert to tuples for Gurobi indexing: [tuple(e) for e in edges]
-- Lists are 0-indexed
+- Lists are 0-indexed (period t in model uses index [t-1] in data arrays)
+
+CRITICAL - Network edges require tuple conversion for Gurobi:
+  sub_edges = [tuple(e) for e in data.get('network', {}).get('sub_edges', [])]
+  trans_edges = [tuple(e) for e in data.get('network', {}).get('trans_edges', [])]
 
 [OUTPUT FORMAT]
 - Import: import gurobipy as gp; from gurobipy import GRB

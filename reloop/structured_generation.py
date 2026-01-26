@@ -89,7 +89,8 @@ class StructuredGenerator:
         """Run complete 3-step generation."""
         understanding = self._step1(problem, schema)
         math_spec = self._step2(understanding, schema)
-        code = self._step3(math_spec, schema, history)
+        # Pass original problem to Step 3 to preserve key equations
+        code = self._step3(math_spec, schema, history, problem)
         return code
 
     def generate_baseline(self, problem: str, schema: str) -> str:
@@ -115,7 +116,8 @@ class StructuredGenerator:
         prompt = PromptGenerator.step2(understanding, schema)
         return self._extract_json(self.llm.generate(prompt))
 
-    def _step3(self, math_spec: str, data_access: str, history: List[str] = None) -> str:
+    def _step3(self, math_spec: str, data_access: str, history: List[str] = None,
+                original_problem: str = None) -> str:
         """
         Step 3: Code Generation
 
@@ -126,7 +128,12 @@ class StructuredGenerator:
         if history:
             history_section = "\n\n## Previous Failures (FIX THESE)\n" + "\n".join(f"- {h}" for h in history)
 
-        prompt = PromptGenerator.step3(math_spec, data_access + history_section)
+        # Include original problem for key equations (e.g., shelf_life FIFO)
+        problem_context = ""
+        if original_problem:
+            problem_context = "\n\n## Original Problem Context (Reference for Key Equations)\n" + original_problem
+
+        prompt = PromptGenerator.step3(math_spec, data_access + problem_context + history_section)
         return self._extract_code(self.llm.generate(prompt))
 
     def _extract_code(self, response: str) -> str:

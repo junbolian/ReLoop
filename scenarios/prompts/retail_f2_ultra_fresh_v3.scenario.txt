@@ -60,10 +60,11 @@ Structure cues:
 
 [DATA ACCESS]
 - The variable `data` is pre-loaded. Do NOT use file I/O.
-- Network data is nested: use data.get('network', {}).get('sub_edges', [])
-- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
-  Convert to tuples for Gurobi indexing: [tuple(e) for e in edges]
-- Lists are 0-indexed
+- Lists are 0-indexed (period t in model uses index [t-1] in data arrays)
+
+CRITICAL - Network edges require tuple conversion for Gurobi:
+  sub_edges = [tuple(e) for e in data.get('network', {}).get('sub_edges', [])]
+  trans_edges = [tuple(e) for e in data.get('network', {}).get('trans_edges', [])]
 
 [OUTPUT FORMAT]
 - Import: import gurobipy as gp; from gurobipy import GRB

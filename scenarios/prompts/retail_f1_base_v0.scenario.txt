@@ -10,7 +10,7 @@ The retailer manages weekly inventory for several products across multiple distr
 Structure cues:
 - Time is a discrete sequence of periods defined in the JSON. Decisions about how much to produce or procure and how much to ship to each location are made at the beginning of each period; demand is realized and served within that same period.
 - Inventory evolves by carrying over what remains from the previous period, adding any new production assigned to the location, and subtracting units that are sold or intentionally discarded as waste. On-hand stock is never allowed to become negative.
-- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be sold or held for shelf_life[p] periods; after that they expire and must be discarded as waste. The model must use age-indexed inventory I[p,l,t,a] where a is age 1..shelf_life[p], with FIFO sales (oldest first) and automatic expiry when age exceeds shelf life.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
 - Any demand that cannot be met from available local inventory in the period is treated as lost sales and incurs the lost sales penalty. There is no concept of backorders, reservations, or delayed fulfillment.
 - Production for each product in each period cannot exceed the given production capacity. Production is available without delay in this archetype because lead times are effectively zero.
 - Storage capacity at each location and period limits the total volume of on-hand inventory using product-specific storage usage coefficients and location capacities from the JSON: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected even in periods where they do not bind.
@@ -64,10 +64,11 @@ Structure cues:
 
 [DATA ACCESS]
 - The variable `data` is pre-loaded. Do NOT use file I/O.
-- Network data is nested: use data.get('network', {}).get('sub_edges', [])
-- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
-  Convert to tuples for Gurobi indexing: [tuple(e) for e in edges]
-- Lists are 0-indexed
+- Lists are 0-indexed (period t in model uses index [t-1] in data arrays)
+
+CRITICAL - Network edges require tuple conversion for Gurobi:
+  sub_edges = [tuple(e) for e in data.get('network', {}).get('sub_edges', [])]
+  trans_edges = [tuple(e) for e in data.get('network', {}).get('trans_edges', [])]
 
 [OUTPUT FORMAT]
 - Import: import gurobipy as gp; from gurobipy import GRB

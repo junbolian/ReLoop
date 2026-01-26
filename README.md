@@ -10,7 +10,7 @@
 **ReLoop** is a framework for improving the reliability of LLM-generated optimization code through:
 
 1. **Structured Generation**: Multi-step prompting that simulates expert engineer reasoning
-2. **Behavioral Verification**: 6-layer sensitivity-based testing to detect silent failures
+2. **Behavioral Verification**: 7-layer sensitivity-based testing to detect silent failures
 3. **Guided Repair**: Diagnosis-driven code correction loop
 
 ### The Problem We Solve
@@ -98,27 +98,32 @@ If `demand ↑ 20%` but `cost ↓`, something is wrong with the demand constrain
 │                                                                 │
 │  ═══════════════════════════════════════════════════════════   │
 │                                                                 │
-│  BEHAVIORAL VERIFICATION (6-layer system)                      │
+│  BEHAVIORAL VERIFICATION (7-layer system)                      │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Layer 1: Execution                                      │   │
-│  │   └── Does code run without errors?                     │   │
+│  │ ══════════ BASIC (L1-L2) ══════════                     │   │
+│  │ Layer 1: Execution [MANDATORY]                          │   │
+│  │   └── Code must run without errors                      │   │
+│  │ Layer 2: Feasibility [LENIENT]                          │   │
+│  │   └── OPTIMAL? TIME_LIMIT with obj OK                   │   │
 │  │                                                         │   │
-│  │ Layer 2: Feasibility                                    │   │
-│  │   └── OPTIMAL? INFEASIBLE? UNBOUNDED?                   │   │
+│  │ ══════════ STRUCTURE (L3) ══════════                    │   │
+│  │ Layer 3: Code Structure (AST) [UNIVERSAL, fast]         │   │
+│  │   └── Objective? Variables? Constraints? Boundaries?    │   │
+│  │   └── Sales availability? (sales <= I)                  │   │
 │  │                                                         │   │
-│  │ Layer 3: Monotonicity (Universal - No Domain Knowledge) │   │
+│  │ ══════════ SEMANTIC (L4-L6) ══════════                  │   │
+│  │ Layer 4: Monotonicity (Universal - No Domain Knowledge) │   │
 │  │   └── Does each parameter affect objective?             │   │
-│  │   └── "No effect" = constraint likely MISSING           │   │
-│  │                                                         │   │
-│  │ Layer 4: Sensitivity (Role-Based)                       │   │
+│  │ Layer 5: Sensitivity (Role-Based)                       │   │
 │  │   └── demand↑ → cost↑? capacity↓ → cost↑?               │   │
-│  │                                                         │   │
-│  │ Layer 5: Boundary                                       │   │
+│  │ Layer 6: Boundary                                       │   │
 │  │   └── param=0 behavior? param=∞ behavior?               │   │
 │  │                                                         │   │
-│  │ Layer 6: Domain Probes (optional, for RetailOpt)        │   │
-│  │   └── init, holding cost, lost sales, substitution      │   │
+│  │ ══════════ DOMAIN (L7) ══════════                       │   │
+│  │ Layer 7: Domain Probes [OPTIONAL, Retail-specific]      │   │
+│  │   └── Enable: enable_layer7=True                        │   │
 │  └─────────────────────────────────────────────────────────┘   │
+│  Note: Always reports objective value regardless of layer      │
 │                                                                 │
 │  ═══════════════════════════════════════════════════════════   │
 │                                                                 │
@@ -142,11 +147,64 @@ If `demand ↑ 20%` but `cost ↓`, something is wrong with the demand constrain
 
 ---
 
-## 6-Layer Verification System
+## 3-Step Structured Generation
 
-### Layer 1: Execution Verification
+ReLoop uses a 3-step structured generation process that preserves problem context throughout:
+
+```
+STEP 1: Problem Understanding
+┌─────────────────────────────────────────────────────────────────┐
+│ Input:  Business narrative + Data schema                        │
+│ Output: JSON with objective, decisions, constraints             │
+│                                                                 │
+│ Extracts key components from natural language:                  │
+│ - Objective (minimize/maximize what?)                           │
+│ - Decision variables (what are we deciding?)                    │
+│ - Constraints (what limits the decisions?)                      │
+│ - Key relationships (how do components interact?)               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+STEP 2: Mathematical Specification
+┌─────────────────────────────────────────────────────────────────┐
+│ Input:  Step 1 output + Data schema                             │
+│ Output: JSON with sets, parameters, variables, formulas         │
+│                                                                 │
+│ Converts understanding to formal math:                          │
+│ - Define index sets (T, P, L, etc.)                             │
+│ - Define parameters (demand, capacity, costs)                   │
+│ - Define variables (I, Q, S, W, L, etc.)                        │
+│ - Write constraint formulas with proper indexing                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+STEP 3: Code Generation
+┌─────────────────────────────────────────────────────────────────┐
+│ Input:  Step 2 output + Data access + ORIGINAL PROBLEM CONTEXT  │
+│ Output: Executable GurobiPy code                                │
+│                                                                 │
+│ CRITICAL: Step 3 receives the original problem context to       │
+│ ensure key equations (especially indexing) are preserved.       │
+│                                                                 │
+│ Common indexing errors this prevents:                           │
+│ - sales[p,l,t,r] vs sales[p,l,t,r+1] in aging constraints       │
+│ - I[p,l,t] vs I[p,l,t-1] in balance constraints                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design: Step 3 preserves original context**
+
+The original business narrative (with exact equations) is passed to Step 3 as reference.
+This prevents information loss through the pipeline and ensures critical equations are
+implemented exactly as specified.
+
+---
+
+## 7-Layer Verification System
+
+### Layer 1: Execution Verification [MANDATORY]
 
 **Question:** Does the code run without errors?
+
+**Status:** Must pass - code execution is fundamental.
 
 ```python
 # What we check:
@@ -160,16 +218,20 @@ If `demand ↑ 20%` but `cost ↓`, something is wrong with the demand constrain
 × Missing imports
 × Wrong variable names
 × Data access errors (KeyError, IndexError)
+× Network edges not converted to tuples
 × Gurobi license issues
 ```
 
-### Layer 2: Feasibility Verification
+### Layer 2: Feasibility Verification [LENIENT]
 
 **Question:** Does the model have a valid solution?
+
+**Status:** Lenient - TIME_LIMIT with objective is acceptable.
 
 ```python
 # Status checks:
 Status = 2 (OPTIMAL)     → ✓ Good
+Status = 9 (TIME_LIMIT)  → ✓ OK if objective obtained
 Status = 3 (INFEASIBLE)  → ✗ Constraints contradictory
 Status = 5 (UNBOUNDED)   → ✗ Missing constraints
 Status = 12 (NUMERIC)    → ✗ Coefficient scaling issues
@@ -179,12 +241,87 @@ Status = 12 (NUMERIC)    → ✗ Coefficient scaling issues
 ⚠ Very large gap → MIP not solved well
 ```
 
+**Note:** TIME_LIMIT (status=9) is accepted if the solver found a feasible solution. This allows complex models to proceed even without optimal solution.
+
 **Common fixes:**
 - INFEASIBLE → Add slack/lost sales variable
 - UNBOUNDED → Check objective direction, add bounds
+- TIME_LIMIT with no objective → Simplify model or increase time limit
 - NUMERIC → Scale coefficients to similar magnitude
 
-### Layer 3: Monotonicity Verification (Universal)
+### Verification Progression (L3-L7 Run Independently)
+
+```
+IMPORTANT: Layers 3-7 run INDEPENDENTLY of each other.
+═══════════════════════════════════════════════════════════════════
+
+Execution Flow:
+  L1 (Execution)    → MUST PASS → stops if fails
+  L2 (Feasibility)  → MUST PASS → stops if fails
+  L3 (Code AST)     → Runs first (fast static analysis, no data leakage)
+  L4 (Monotonicity) → Runs regardless
+  L5 (Sensitivity)  → Runs regardless (even if L4 has failures)
+  L6 (Boundary)     → Runs regardless (even if L4/L5 have failures)
+  L7 (Domain)       → Runs if enabled (even if L3-L6 have failures)
+
+Why this design:
+  - L3 (AST) is fast static analysis - run before expensive runtime tests
+  - L4 failure may indicate SLACK constraints, not missing constraints
+  - L5/L6/L7 provide different diagnostic information
+  - All layers contribute to understanding model behavior
+  - Objective value is ALWAYS reported if available
+
+Layer Pass Definition:
+  - L3 passes: ALL code structure checks pass
+  - L4 passes: ALL monotonicity tests pass (no "no effect" detected)
+  - L5 passes: ALL direction tests match expectation
+  - L6 passes: ALL boundary tests behave correctly
+  - L7 passes: ALL domain probes pass
+
+Note: Layer failures do NOT always indicate wrong models:
+  - Slack constraints: L4 may fail but model is correct
+  - Alternative formulations: Different but equivalent models
+  - Final correctness: Compare objective to ground truth (< 1% gap)
+```
+
+### Layer 3: Code Structure Verification (AST-based, Universal)
+
+**Question:** Does the code have proper structure?
+
+```
+═══════════════════════════════════════════════════════════════════
+🔑 FAST STATIC ANALYSIS - RUN BEFORE EXPENSIVE RUNTIME TESTS
+═══════════════════════════════════════════════════════════════════
+
+Principle:
+  Analyze code structure WITHOUT running it.
+  Does NOT leak data - only examines variable names, patterns, formulas.
+
+Checks:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Check                        │ What it detects              │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Objective function exists    │ Missing m.setObjective()     │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Holding cost pattern         │ I vs I-y formula errors      │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Loop index boundaries        │ t-1 at t=1 boundary issues   │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Variable declarations        │ Missing m.addVar() calls     │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Constraint additions         │ Missing m.addConstr() calls  │
+  ├──────────────────────────────┼──────────────────────────────┤
+  │ Sales availability           │ Missing sales <= I constraint│
+  └─────────────────────────────────────────────────────────────┘
+
+Why this is universal:
+  - Pure code structure analysis
+  - No data values examined
+  - No execution required
+  - Catches common LLM errors early
+```
+
+### Layer 4: Monotonicity Verification (Universal)
 
 **Question:** Does each parameter affect the objective?
 
@@ -230,7 +367,7 @@ Why this works universally:
   - Simple principle: used parameters must have effect
 ```
 
-### Layer 4: Sensitivity Verification (Role-Based)
+### Layer 5: Sensitivity Verification (Role-Based)
 
 **Question:** Does the model behave correctly based on parameter semantics?
 
@@ -280,51 +417,113 @@ Parameter Role Taxonomy:
 Role inference:
   1. Match parameter name against keywords
   2. If no match and LLM available, ask LLM to classify
-  3. If still unknown, skip role-based test (Layer 3 still runs)
+  3. If still unknown, skip role-based test (Layer 4 still runs)
 ```
 
-### Layer 5: Boundary Verification
+### Layer 6: Boundary Verification (Enhanced)
 
-**Question:** Does the model handle extreme values correctly?
+**Question:** Does the model handle extreme values and structural boundaries correctly?
 
 ```
-Boundary Tests:
+═══════════════════════════════════════════════════════════════════
+Layer 6 now includes THREE types of tests (all UNIVERSAL):
 ═══════════════════════════════════════════════════════════════════
 
+6.1: CAPACITY = 0 BOUNDARY (existing)
 ┌────────────────────┬────────────────────────────────────────────┐
 │ TEST               │ EXPECTED BEHAVIOR                          │
 ├────────────────────┼────────────────────────────────────────────┤
 │ capacity = 0       │ INFEASIBLE or very high objective          │
 │                    │ (If objective stays low → constraint       │
 │                    │  is not enforced!)                         │
-├────────────────────┼────────────────────────────────────────────┤
-│ capacity = 10^9    │ Should NOT hurt (relaxes constraint)       │
-│                    │ Objective should be ≤ baseline             │
-├────────────────────┼────────────────────────────────────────────┤
-│ demand = 0         │ Objective should drop significantly        │
-│                    │ (Nothing to satisfy)                       │
-├────────────────────┼────────────────────────────────────────────┤
-│ demand = 10^9      │ INFEASIBLE or huge lost sales cost         │
-│                    │ (Cannot satisfy all)                       │
 └────────────────────┴────────────────────────────────────────────┘
 
-Why boundary tests matter:
-  - Expose edge cases that normal perturbation misses
-  - Zero values often reveal missing constraints
-  - Large values test numerical stability
+6.2: STRUCTURAL BOUNDARY - periods=1 (NEW)
+┌────────────────────────────────────────────────────────────────┐
+│ KEY INSIGHT: Multi-period models should degrade gracefully     │
+│ to single period. If code crashes → t-1 or t+1 indexing bug.   │
+│                                                                │
+│ TEST: Set periods = 1                                          │
+│ EXPECTED: Code runs without error (OPTIMAL or INFEASIBLE OK)   │
+│ FAILURE: Code crashes → Check boundary conditions like:        │
+│   • I[t-1] when t=1 (no previous period)                       │
+│   • I[t+1] when t=T (no next period)                           │
+│   • for t in range(T-1) when T=1 (empty range OK)              │
+└────────────────────────────────────────────────────────────────┘
+
+6.3: DIFFERENTIAL VERIFICATION (NEW)
+┌────────────────────────────────────────────────────────────────┐
+│ KEY INSIGHT: capacity↓ and requirement↑ should BOTH make the   │
+│ problem harder (increase cost for minimize, decrease for max). │
+│                                                                │
+│ TEST: Compare effects of:                                      │
+│   • capacity × 0.8  (tighten supply)                           │
+│   • requirement × 1.2  (increase demand)                       │
+│                                                                │
+│ EXPECTED (minimize): Both should increase objective            │
+│ FAILURE: Effects go opposite directions → constraint logic bug │
+│                                                                │
+│ WHY UNIVERSAL: Uses same role inference as L5 (capacity,       │
+│ requirement keywords), no domain-specific knowledge needed.    │
+└────────────────────────────────────────────────────────────────┘
+
+Why these boundary tests matter:
+  - 6.1: Zero values reveal missing constraints
+  - 6.2: Single-period tests expose indexing errors at boundaries
+  - 6.3: Differential tests catch constraint direction errors
 ```
 
-### Layer 6: Domain-Specific Probes (RetailOpt)
+### Layer 7: Domain-Specific Probes [OPTIONAL, Retail-specific]
 
 **Question:** Are retail-specific patterns implemented correctly?
 
+**Status:** Optional - Enable with `enable_layer7=True` in verifier.
+
 ```
 ═══════════════════════════════════════════════════════════════════
-NOTE: These probes ONLY activate for RetailOpt-190 dataset.
-      Layers 1-5 are sufficient for MAMO, NL4OPT, generic problems.
+IMPORTANT: Layer 7 is OPTIONAL and RETAIL-SPECIFIC.
+  - Enable:  verifier.verify(..., enable_layer7=True)
+  - Default: Disabled (enable_layer7=False)
+  - Purpose: Additional retail-specific constraint checks
+  - Scope:   Only for RetailOpt-190 dataset
+
+Layers 1-6 are UNIVERSAL and sufficient for MAMO, NL4OPT, etc.
 ═══════════════════════════════════════════════════════════════════
 
-PROBE 1: Initialization (t=1)
+PROBE 1: Lost Sales Variable (implemented)
+┌─────────────────────────────────────────────────────────────────┐
+│ Problem:                                                        │
+│   Missing L[p,l,t] variable as slack in demand constraint       │
+│                                                                 │
+│ Test: Set demand >> production_cap (10x)                        │
+│ Expected: Model stays OPTIMAL (lost sales absorb excess demand) │
+│ Failure: INFEASIBLE → missing lost sales slack variable         │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 2: Shelf Life Structure (implemented, NEW)
+┌─────────────────────────────────────────────────────────────────┐
+│ KEY INSIGHT: With shelf_life=1, cost should INCREASE            │
+│ (all inventory expires after 1 period → more waste)             │
+│                                                                 │
+│ Test: Set all shelf_life = 1                                    │
+│ Expected: Objective ≥ baseline (harder problem)                 │
+│ Failure: Objective drops → aging constraint likely wrong        │
+│                                                                 │
+│ WHY THIS WORKS: Shorter shelf life = more waste = higher cost   │
+│ If cost DECREASES, the aging logic is probably broken.          │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 3: Substitution Structure (implemented, NEW)
+┌─────────────────────────────────────────────────────────────────┐
+│ KEY INSIGHT: If sub_edge [A,B] exists and A capacity=0,         │
+│ model should still be feasible (B can substitute for A)         │
+│                                                                 │
+│ Test: Set production_cap[A] = 0 for first substitution edge     │
+│ Expected: OPTIMAL (B satisfies A's demand via substitution)     │
+│ Failure: INFEASIBLE → substitution not implemented              │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 4 (future): Initialization (t=1)
 ┌─────────────────────────────────────────────────────────────────┐
 │ Problem:                                                        │
 │   Without I[p,l,1,a] = 0 for a < shelf_life[p], the model can  │
@@ -335,7 +534,7 @@ PROBE 1: Initialization (t=1)
 │ Fix: Add I[p,l,1,a] == 0 for all a < shelf_life[p]              │
 └─────────────────────────────────────────────────────────────────┘
 
-PROBE 2: Holding Cost Formula
+PROBE 5 (future): Holding Cost Formula
 ┌─────────────────────────────────────────────────────────────────┐
 │ Problem:                                                        │
 │   Using I[p,l,t,a] for holding cost instead of                 │
@@ -347,7 +546,7 @@ PROBE 2: Holding Cost Formula
 │ Fix: Change holding cost to (I[p,l,t,a] - y[p,l,t,a])          │
 └─────────────────────────────────────────────────────────────────┘
 
-PROBE 3: Lost Sales Variable
+PROBE 6 (future): Lost Sales Variable
 ┌─────────────────────────────────────────────────────────────────┐
 │ Problem:                                                        │
 │   Missing L[p,l,t] variable as slack in demand constraint       │
@@ -373,7 +572,7 @@ PROBE 4: Substitution
 
 ## Supported Datasets
 
-| Dataset | Description | Type | Layers 1-5 | Layer 6 |
+| Dataset | Description | Type | Layers 1-6 | Layer 7 |
 |---------|-------------|------|------------|---------|
 | **RetailOpt-190** | Industrial retail inventory | MILP | ✅ | ✅ RetailProbes |
 | **MAMO-Easy** | Mathematical modeling (easy) | LP/MILP | ✅ | ❌ N/A |
@@ -480,13 +679,13 @@ report = verifier.verify(
     code=my_code,
     data=my_data,
     obj_sense="minimize",
-    enable_layer6=True,  # Enable domain-specific probes
+    enable_layer7=True,  # Enable domain-specific probes
     verbose=True
 )
 
 # Detailed analysis
 print(report)  # Full verification report
-print(f"Layers passed: {report.count_layers_passed()}/6")
+print(f"Layers passed: {report.count_layers_passed()}/7")
 if not report.passed:
     print(f"Failed at layer {report.failed_layer}: {report.diagnosis}")
 ```
@@ -507,8 +706,8 @@ result = pipeline.run_baseline(
 # Compare with full ReLoop
 result_full = pipeline.run(problem, schema, data)
 
-print(f"Baseline: {result.best_layers_passed}/6 layers")
-print(f"ReLoop:   {result_full.best_layers_passed}/6 layers")
+print(f"Baseline: {result.best_layers_passed}/7 layers")
+print(f"ReLoop:   {result_full.best_layers_passed}/7 layers")
 ```
 
 ### 5. Command Line
@@ -591,7 +790,7 @@ reloop/
 ├── __init__.py                       # Package exports (30+ public APIs)
 ├── reloop.py                         # Main pipeline orchestrator
 ├── structured_generation.py          # Module 1: 3-step generation
-├── behavioral_verification.py        # Module 2: 6-layer verification (Core)
+├── behavioral_verification.py        # Module 2: 7-layer verification (Core)
 ├── diagnosis_repair.py               # Module 3: Diagnosis-guided repair
 ├── prompts.py                        # Comprehensive prompt templates
 ├── param_utils.py                    # Parameter utilities for sensitivity
@@ -662,6 +861,42 @@ does NOT improve results for weak models (e.g., gpt-4o ping-pongs
 between errors). Early stop is recommended for production use.
 ```
 
+### Smart Repair Strategy
+```
+═══════════════════════════════════════════════════════════════════
+KEY INSIGHT: Not all L3+ failures are "informational only"
+═══════════════════════════════════════════════════════════════════
+
+Problem: Original strategy stopped repair after L1/L2 passed, treating
+all L3+ failures as "possibly slack constraints". But this misses:
+  - L3 failures: Code structure issues (missing constraints)
+  - L4 "NO EFFECT" failures: Parameter not used = constraint MISSING
+
+New Strategy:
+┌─────────────────────────────────────────────────────────────────┐
+│ Failure Type          │ Action                                 │
+├───────────────────────┼────────────────────────────────────────┤
+│ L1/L2 failure         │ REPAIR (execution/feasibility bugs)    │
+├───────────────────────┼────────────────────────────────────────┤
+│ L3 failure            │ REPAIR (code structure issues)         │
+├───────────────────────┼────────────────────────────────────────┤
+│ L4 "NO EFFECT"        │ REPAIR (constraint missing, not slack) │
+├───────────────────────┼────────────────────────────────────────┤
+│ L4 direction mismatch │ SKIP (may be slack constraint)         │
+├───────────────────────┼────────────────────────────────────────┤
+│ L5/L6/L7 failures     │ SKIP (informational, not critical)     │
+└─────────────────────────────────────────────────────────────────┘
+
+Why "NO EFFECT" means constraint is missing (not slack):
+  - Slack constraint: param change → small effect (objective changes)
+  - Missing constraint: param change → NO effect (objective unchanged)
+
+Example:
+  cold_capacity ±20% → objective unchanged
+  → Storage constraint is NOT in the model!
+  → Trigger repair with diagnosis: "cold_capacity has NO EFFECT"
+```
+
 ### Preservation Rules
 ```
 When repair is triggered at Layer N, the following are PROTECTED:
@@ -730,7 +965,7 @@ COMPARISON RESULTS
 ============================================================
 Metric                           Baseline          ReLoop      Delta
 ------------------------------------------------------------
-Layers Passed                           2/6               2/6         +0
+Layers Passed                           2/7               2/7         +0
 LLM Turns                               1               5         +4
 Duration (s)                        25.52           96.98     +71.46
 

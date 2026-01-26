@@ -29,7 +29,13 @@ You are an expert operations research analyst. Analyze this optimization problem
 {data_schema}
 
 ## Task
-Extract the problem structure. Output a JSON object with:
+Extract the ESSENTIAL problem structure. Focus on what is NECESSARY for a correct model.
+Do NOT over-engineer - include only constraints that are explicitly required.
+
+CRITICAL: Check the Data Schema's "costs" section carefully.
+ALL cost parameters in the schema MUST appear in the objective function.
+
+Output a JSON object with:
 
 {{
   "problem_type": "LP/IP/MILP/NLP",
@@ -37,7 +43,7 @@ Extract the problem structure. Output a JSON object with:
   "objective": {{
     "sense": "minimize" or "maximize",
     "description": "what we are optimizing in plain language",
-    "components": ["list each cost/revenue/penalty term that appears in objective"]
+    "components": ["MUST list EVERY cost/revenue/penalty term from data['costs']"]
   }},
 
   "decisions": [
@@ -88,7 +94,16 @@ Based on the problem understanding, create a formal mathematical specification.
 {data_schema}
 
 ## Task
-Create precise mathematical formulation. Output a JSON object with:
+Create a MINIMAL but correct mathematical formulation.
+Focus on ESSENTIAL variables and constraints - do NOT add unnecessary complexity.
+A simpler model that works is better than a complex model.
+
+## CRITICAL: Objective Function Completeness
+Check the Data Schema for ALL cost parameters (usually in data['costs']).
+The objective function MUST include ALL cost terms from the data schema.
+Do NOT omit any cost terms - each cost in the schema affects the optimal solution.
+
+Output a JSON object with:
 
 {{
   "sets": {{
@@ -150,19 +165,79 @@ Generate executable GurobiPy code from the mathematical specification.
 ## Mathematical Specification (from Step 2)
 {step2_output}
 
-## Data Access Patterns
+## Data Access Patterns and Problem Context
 {data_access}
 
-## Critical Implementation Notes
+## CRITICAL: Follow Original Equations EXACTLY
+
+If the original problem context above contains specific equations, you MUST implement them EXACTLY as written.
+Pay careful attention to INDEX SUBSCRIPTS in equations - a common error is using wrong indices.
+
+Example: If the equation says "sales[p,l,t,r+1]", do NOT use "sales[p,l,t,r]".
+
+## CRITICAL: Objective Function Completeness Check
+
+BEFORE writing the objective function, examine the Original Problem Context and data['costs'] to identify ALL cost terms:
+1. Check data['costs'] dictionary - it lists ALL available cost parameters
+2. The objective function MUST include ALL relevant costs from data['costs']
+3. Common cost terms to verify:
+   - purchasing/ordering cost (cost per unit produced/ordered)
+   - inventory/holding cost (cost per unit held per period)
+   - waste/spoilage cost (cost per unit expired)
+   - lost_sales/stockout cost (penalty per unit of unmet demand)
+   - fixed_order cost (fixed cost per order placed)
+   - transshipment cost (cost per unit transferred)
+
+If the Mathematical Specification from Step 2 is MISSING any cost terms that exist in data['costs'],
+you MUST ADD them to the objective function. The Step 2 spec may be incomplete.
+
+## Gurobi API Patterns (Universal)
+
+When implementing the mathematical model in Gurobi, follow these API patterns:
+
+1. VARIABLES WITH VARYING INDEX RANGES:
+   If different items have different index ranges (e.g., different products have different shelf_life),
+   do NOT use a single addVars with max value. Instead use dict comprehension:
+   ```python
+   # WRONG: Creates same range for all products
+   I = m.addVars(products, locations, periods, max(shelf_life.values()), ...)
+
+   # CORRECT: Creates product-specific ranges
+   I = {{(p, l, t, r): m.addVar(...)
+        for p in products for l in locations for t in periods
+        for r in range(1, shelf_life[p] + 1)}}
+   ```
+
+2. SLACK VARIABLES FOR DEFICITS:
+   For quantities that represent deficits (unmet demand, shortage, etc.), use explicit slack variables:
+   ```python
+   # WRONG: Can become negative if sales > demand
+   lost_sales[p,l,t] = demand[p,l,t] - sales[p,l,t]  # May be negative!
+
+   # CORRECT: Use explicit non-negative slack variable
+   unmet = m.addVars(..., lb=0, name="unmet")  # Always >= 0
+   m.addConstr(sales[p,l,t] + unmet[p,l,t] == demand[p,l,t])
+   # Objective: += cost * unmet[p,l,t]
+   ```
+
+3. CONSTRAINT BOUNDS FOR SLACK:
+   When adding balance constraints with slack, ensure the slack variable captures the deficit:
+   ```python
+   # For demand satisfaction with lost sales penalty:
+   m.addConstr(sales[p,l,t] + lost[p,l,t] == demand[p,l,t])  # lost >= 0 by lb
+   ```
+
+## Implementation Notes
 
 1. DATA ACCESS:
    - The variable `data` is pre-loaded as a Python dict
    - Use data.get() for optional/nested fields to avoid KeyError
-   - Lists in data are typically 0-indexed
+   - Lists in data are 0-indexed (period t in model uses index [t-1] in data)
 
-2. INDEXING:
+2. INDEXING ALIGNMENT:
    - Model indices may be 1-based (periods 1..T) while data arrays are 0-based
-   - For period t in model, access data with index [t-1]
+   - CRITICAL: In constraint equations, preserve the exact index relationships from the problem
+   - If equation has I[p,l,t+1,r] on LHS and I[p,l,t,r+1] on RHS, implement this EXACTLY
 
 3. BOUNDARY CONDITIONS:
    - Handle first period initialization carefully (no "previous" period)
@@ -177,6 +252,14 @@ Generate executable GurobiPy code from the mathematical specification.
    - Check if optional features exist before implementing
    - Use data.get(key, default) for optional data fields
 
+6. NETWORK EDGES:
+   - sub_edges and trans_edges are lists of lists [[a,b], ...]
+   - MUST convert to tuples: sub_edges = [tuple(e) for e in data.get('network', {{}}).get('sub_edges', [])]
+
+7. SOLVER SETTINGS:
+   - Set time limit to avoid timeout: m.Params.TimeLimit = 120
+   - Keep model simple - avoid unnecessary complexity
+
 ## Code Structure
 ```python
 import gurobipy as gp
@@ -190,8 +273,9 @@ m = gp.Model()
 m.Params.OutputFlag = 0
 m.Params.Threads = 1
 m.Params.Seed = 0
+m.Params.TimeLimit = 120  # Avoid timeout
 
-# Decision variables
+# Decision variables (keep simple)
 # ...
 
 # Objective function
@@ -210,7 +294,8 @@ if m.Status == 2:
 ```
 
 ## Task
-Generate complete, executable code. Handle all boundary conditions and edge cases.
+Generate complete, executable code. Keep the model SIMPLE and efficient.
+Avoid overcomplicating with unnecessary variables or constraints.
 
 Output ONLY Python code. No markdown, no explanations.
 """
@@ -238,27 +323,45 @@ The generated code has verification failures. Fix the issues based on the diagno
 
 ## Common Fix Patterns
 
-1. INFEASIBLE Model:
+1. TIMEOUT (CODE_9) or Slow Solving:
+   - SIMPLIFY the model - reduce unnecessary variables/constraints
+   - Add time limit: m.Params.TimeLimit = 120
+   - Use fewer age cohorts if shelf_life is large
+   - Aggregate similar constraints where possible
+
+2. INFEASIBLE Model:
    - Add slack/penalty variables for constraints that may be too tight
    - Check if demand can exceed supply without a slack variable
 
-2. No Effect on Objective (Monotonicity Failure):
+3. No Effect on Objective (Monotonicity Failure):
    - The parameter is not being used in a constraint
    - Check if the constraint was actually added to the model
    - Verify the parameter appears in the constraint formula
 
-3. Wrong Direction (Sensitivity Failure):
+4. Wrong Direction (Sensitivity Failure):
    - Check constraint inequality direction (≤ vs ≥)
    - Verify parameter appears on correct side of constraint
 
-4. Objective Near Zero or Unexpected Value:
+5. Objective Near Zero or Unexpected Value:
    - Check initialization/boundary conditions at first period
    - Verify all cost/revenue terms are included in objective
    - Check for "free" resources from missing constraints
 
-5. Boundary Test Failure:
+6. Boundary Test Failure:
    - Check handling of zero values
    - Verify extreme value handling doesn't cause errors
+
+7. KeyError or IndexError:
+   - Network edges must be tuples: [tuple(e) for e in edges]
+   - Check if indices match variable dimensions
+   - Variable index ranges must match how they are accessed in constraints
+   - For varying ranges (e.g., shelf_life differs by product), use dict comprehension:
+     {{(p,l,t,r): m.addVar(...) for p in products ... for r in range(1, shelf_life[p]+1)}}
+
+8. Negative Objective in Minimization:
+   - Check if deficit terms can become negative (e.g., demand - sales when sales > demand)
+   - Use explicit slack variables with lb=0 for deficits:
+     unmet = m.addVars(..., lb=0); m.addConstr(sales + unmet == demand)
 
 ## Task
 Fix the code to pass verification. Make minimal, targeted changes focused on the diagnosed issues.

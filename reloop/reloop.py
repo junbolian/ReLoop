@@ -33,7 +33,7 @@ class ReLoopResult:
         return (
             f"ReLoopResult: {status}\n"
             f"  Iterations: {self.iterations}\n"
-            f"  Best layers passed: {self.best_layers_passed}/6\n"
+            f"  Best layers passed: {self.best_layers_passed}/7\n"
             f"  Time: {self.total_time:.2f}s\n"
             f"  Diagnoses: {len(self.diagnosis_history)}"
         )
@@ -46,7 +46,7 @@ class ReLoopConfig:
     delta: float = 0.2
     epsilon: float = 1e-4
     timeout: int = 60
-    enable_layer6: bool = False
+    enable_layer7: bool = False
     verbose: bool = False
 
 
@@ -117,7 +117,7 @@ class ReLoop:
             # Module 2: Behavioral Verification
             report = self.verifier.verify(
                 current_code, data, obj_sense,
-                enable_layer6=self.config.enable_layer6,
+                enable_layer7=self.config.enable_layer7,
                 verbose=self.config.verbose
             )
 
@@ -128,7 +128,7 @@ class ReLoop:
                 best_code, best_layers, best_report = current_code, layers_passed, report
                 no_progress_count = 0  # Reset counter on improvement
                 if self.config.verbose:
-                    print(f"  [Best] New best: {best_layers}/6 layers")
+                    print(f"  [Best] New best: {best_layers}/7 layers")
             else:
                 no_progress_count += 1
                 if self.config.verbose:
@@ -139,7 +139,7 @@ class ReLoop:
                 return ReLoopResult(
                     code=current_code, verified=True, iterations=k + 1,
                     diagnosis_history=history, final_report=report,
-                    total_time=time.time() - start_time, best_layers_passed=6
+                    total_time=time.time() - start_time, best_layers_passed=7
                 )
 
             # Early stopping: no progress for 2 consecutive iterations
@@ -164,7 +164,7 @@ class ReLoop:
         start_time = time.time()
         code = self.generator.generate_baseline(problem, schema)
         report = self.verifier.verify(code, data, obj_sense,
-                                       enable_layer6=self.config.enable_layer6)
+                                       enable_layer7=self.config.enable_layer7)
         return ReLoopResult(
             code=code, verified=report.passed, iterations=1,
             diagnosis_history=[report.diagnosis] if report.diagnosis else [],
