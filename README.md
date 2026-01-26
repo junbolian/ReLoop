@@ -678,10 +678,66 @@ This guides LLM to add the SPECIFIC missing constraint.
 ### Error Pattern Matching
 ```
 L1 errors are matched to specific repair hints:
-  - TypeError + "unhashable" → Convert lists to tuples for Gurobi
-  - KeyError → Use data.get('key', default) for optional fields
-  - IndexError → Check array bounds (t-1 for 0-indexed)
+
+TypeError patterns:
+  - "unhashable type: list" → Convert lists to tuples for Gurobi addVars()
+  - "unsupported operand type(s) for *: float and GenExprMax"
+    → gp.max_() returns expression, use auxiliary variable instead
+  - "'>' not supported between Var and int"
+    → Use indicator constraints or Big-M, not direct comparison
+  - "Var object has no attribute"
+    → Don't access .X during model building, use variable directly
+
+KeyError patterns:
+  - Use data.get('key', default) for optional fields
+  - Check if key exists before accessing
+
+IndexError patterns:
+  - Check array bounds (t-1 for 0-indexed)
+  - Verify loop ranges match data dimensions
 ```
+
+---
+
+## Conversation Logging
+
+ReLoop supports detailed conversation logging for analysis and debugging.
+
+### Running with Logs
+```bash
+# Run test with conversation logging
+python run_test_with_log.py --scenario retail_f1_base_v4 --model gpt-4o --max-iter 5
+
+# Output: logs/retail_f1_base_v4_gpt-4o_20260126_124304.json
+```
+
+### Log Structure
+```json
+{
+  "scenario_id": "retail_f1_base_v4",
+  "model": "gpt-4o",
+  "start_time": "2026-01-26T12:43:04",
+  "total_duration_s": 34.41,
+  "iterations": 3,
+  "final_status": "NOT_VERIFIED",
+  "layers_passed": 0,
+  "turns": [
+    {"turn_id": 1, "role": "generation", "step": "step1", "prompt": "...", "response": "..."},
+    {"turn_id": 2, "role": "generation", "step": "step2", "prompt": "...", "response": "..."},
+    {"turn_id": 3, "role": "generation", "step": "step3", "prompt": "...", "response": "..."},
+    {"turn_id": 4, "role": "repair", "step": "layer1_repair", "prompt": "...", "response": "..."}
+  ],
+  "verification_reports": [
+    {"iteration": 1, "passed": false, "layers_passed": 0, "failed_layer": 1, "diagnosis": "..."}
+  ],
+  "final_code": "..."
+}
+```
+
+This enables:
+- Analyzing which module contributes most to success/failure
+- Debugging specific error patterns
+- Comparing performance across models
 
 ---
 
