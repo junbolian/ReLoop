@@ -9,9 +9,10 @@ A fraction of units sold in each period are returned by customers in the next pe
 
 Structure cues:
 - The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
-- The JSON specifies a return rate for each product. For each product and location, a fixed fraction of units sold in one period re-enters as usable inventory at the same location in the next period, subject to shelf-life and storage constraints.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry. Returned units re-enter as age-1 inventory.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits apply to all inventory including returns.
+- The JSON specifies return rates: SKU_Basic=20%, SKU_Premium=10%, SKU_ShortLife=5%. For each product and location, this fraction of units sold in one period re-enters as usable inventory at the same location in the next period.
 - Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
-- Storage capacity and shelf-life limitations apply to returned units in the same way as to new units.
 - There is no transshipment in this archetype, and lead times for production are zero.
 - The objective is to minimize total cost including holding, waste, lost sales, and any indirect effect of handling returns as captured in the cost parameters.
 

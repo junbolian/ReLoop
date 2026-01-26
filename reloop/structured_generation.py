@@ -48,6 +48,29 @@ class OpenAIClient(LLMClient):
         return response.choices[0].message.content
 
 
+class AnthropicClient(LLMClient):
+    """Anthropic API client for Claude models"""
+
+    def __init__(self, model: str = "claude-sonnet-4-5-20250929", base_url: str = None, api_key: str = None):
+        import anthropic
+        # Use custom base_url if provided (strip /v1 suffix if present)
+        if base_url:
+            base_url = base_url.rstrip('/')
+            if base_url.endswith('/v1'):
+                base_url = base_url[:-3]
+        self.client = anthropic.Anthropic(base_url=base_url, api_key=api_key)
+        self.model = model
+
+    def generate(self, prompt: str, temperature: float = 0) -> str:
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature
+        )
+        return response.content[0].text
+
+
 class StructuredGenerator:
     """
     Module 1: Structured Generation (3-step process)

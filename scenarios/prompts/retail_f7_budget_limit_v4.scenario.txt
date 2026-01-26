@@ -9,7 +9,9 @@ The retailer faces a per-period open-to-buy budget that limits total spending on
 
 Structure cues:
 - The underlying network is the same single-echelon structure with potential transshipment and storage capacity as in the base network for this family.
-- The JSON specifies a spending budget for each period. For that period, the total purchasing spend (order quantity times purchasing cost) plus any fixed ordering costs if enabled must not exceed the given budget.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
+- The JSON specifies budget_per_period=10000. For each period, the total purchasing spend (order quantity times purchasing cost) plus any fixed ordering costs if enabled must not exceed this budget.
 - Inventory balance for each product, location, and period follows the standard pattern with production or inbound shipments, outbound shipments, sales, and waste, and inventory must remain non-negative.
 - The budget constraint must be encoded so that spending above the budget is not allowed in any period.
 - The transshipment network and lead times match the base network archetype for this family.

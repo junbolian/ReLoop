@@ -8,11 +8,12 @@ Business narrative:
 The network is an explicit three-echelon chain consisting of a plant, distribution centers, and retail stores. Demand occurs only at stores; the plant and distribution centers act purely as upstream nodes that hold and move inventory. Customers are never backordered: store demand that cannot be met from store inventory is lost and penalized.
 
 Structure cues:
-- Locations in the JSON include one plant, two distribution centers, and three stores. The transshipment network defines directed edges from the plant to each distribution center and from distribution centers to stores.
-- Inventory is allowed to flow only along these directed edges. There is no direct shipment between stores, between distribution centers, or from stores back upstream.
-- Demand occurs only at store nodes according to the demand parameters in the JSON. Upstream nodes do not face direct customer demand.
+- Locations: Plant (upstream), DC1/DC2 (distribution centers), Store1/Store2/Store3 (retail). The transshipment network defines directed edges: Plant→DC1, Plant→DC2, DC1→Store1, DC1→Store2, DC2→Store2, DC2→Store3.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Capacities differ by echelon: Plant=8000, DC1/DC2=4000, Stores=600.
+- Inventory is allowed to flow only along the directed edges. There is no direct shipment between stores, between distribution centers, or from stores back upstream.
+- Demand occurs only at store nodes according to demand_share (Store1=30%, Store2=40%, Store3=30%). Upstream nodes (Plant, DCs) do not face direct customer demand.
 - For each product, location, and period, inventory reflects previous stock, production or inbound shipments, outbound shipments, sales at stores, and waste, and must remain non-negative.
-- Storage and labor capacities differ by node type and must be enforced at each location and period.
 - Lost sales occur only at store nodes when local demand cannot be served from available inventory, even after receiving shipments from upstream.
 - The objective is to minimize total cost including holding at all echelons, transshipment, waste, and lost sales, subject to the three-echelon topology.
 

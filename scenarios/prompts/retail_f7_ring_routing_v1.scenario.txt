@@ -8,9 +8,10 @@ Business narrative:
 Locations are connected in a directed ring, mimicking a truck route that visits each location in a fixed cycle. Inventory can only move along the ring edges, and storage capacities are tightened so that the chosen routing structure affects feasibility and cost. Demand is local and exogenous at each node, and unmet demand is lost and penalized.
 
 Structure cues:
-- The transshipment network in the JSON forms a directed cycle that connects each location to exactly one successor. Inventory can be shipped only along these ring edges.
+- The transshipment network in the JSON forms a directed cycle: DC1→DC2→DC3→DC4→DC5→DC1. Inventory can be shipped only along these ring edges.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Capacities are scaled to 80% of normal values.
 - For each product, location, and period, inventory reflects previous stock, local production, inbound ring shipments, outbound ring shipments, sales, and waste, and must remain non-negative.
-- Storage capacities at each location are reduced in the JSON so that capacity constraints are more likely to bind. These capacity limits must be enforced.
 - Demand at each location is met from local inventory and inbound ring shipments; there are no shortcuts across the ring.
 - Inventory that moves further along the route must pass through intermediate locations in sequence.
 - Lead times for ring shipments are effectively zero in this archetype, and substitution behavior is as encoded.

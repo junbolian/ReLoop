@@ -1,6 +1,4 @@
-# ReLoop: Reliable LLM-based Optimization Modeling
-
-## via Sensitivity-Based Behavioral Verification
+# ReLoop: Reliable LLM-based Optimization Modeling via Sensitivity-Based Behavioral Verification
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-green.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
@@ -655,6 +653,13 @@ docs/
 ```
 If no improvement for 2 consecutive iterations → STOP
 This prevents wasting compute on unfixable errors.
+
+To disable early stopping (for research/debugging):
+  python run_test_with_log.py --no-early-stop --max-iter 10
+
+Note: Experiments show that increasing iterations without early stop
+does NOT improve results for weak models (e.g., gpt-4o ping-pongs
+between errors). Early stop is recommended for production use.
 ```
 
 ### Preservation Rules
@@ -705,10 +710,32 @@ ReLoop supports detailed conversation logging for analysis and debugging.
 
 ### Running with Logs
 ```bash
-# Run test with conversation logging
+# Run ReLoop with conversation logging
 python run_test_with_log.py --scenario retail_f1_base_v4 --model gpt-4o --max-iter 5
 
-# Output: logs/retail_f1_base_v4_gpt-4o_20260126_124304.json
+# Run baseline (direct generation, no 3-step or repair)
+python run_test_with_log.py --baseline --scenario retail_f1_base_v4 --model gpt-4o
+
+# Compare ReLoop vs Baseline side-by-side
+python run_test_with_log.py --compare --scenario retail_f1_base_v4 --model gpt-4o
+
+# Output: logs/retail_f1_base_v4_gpt-4o_reloop_20260126_124304.json
+#         logs/retail_f1_base_v4_gpt-4o_baseline_20260126_124304.json
+```
+
+### Comparison Mode Output
+```
+============================================================
+COMPARISON RESULTS
+============================================================
+Metric                           Baseline          ReLoop      Delta
+------------------------------------------------------------
+Layers Passed                           2/6               2/6         +0
+LLM Turns                               1               5         +4
+Duration (s)                        25.52           96.98     +71.46
+
+------------------------------------------------------------
+CONCLUSION: No difference in layers passed
 ```
 
 ### Log Structure
@@ -738,6 +765,66 @@ This enables:
 - Analyzing which module contributes most to success/failure
 - Debugging specific error patterns
 - Comparing performance across models
+
+---
+
+## Prompt Design Lessons
+
+### L3 Failures and Prompt Clarity
+
+When L3 (Monotonicity) reports "No effect detected" for a parameter, check:
+
+1. **Is the constraint described in the prompt?**
+   - Example: `shelf_life` was missing from `retail_f1_base` description
+   - Fix: Added explicit constraint semantics to `archetypes.yaml`
+
+2. **Is the constraint semantics clear enough?**
+   - Bad: "shelf_life: shelf life in periods per product" (what does this mean?)
+   - Good: "Units produced in period t can only be held for shelf_life[p] periods; after that they expire"
+
+3. **Is the constraint formula specified?**
+   - For complex constraints, provide the formula:
+   - `sum over products of (cold_usage[p] * inventory[p,l,t]) <= cold_capacity[l]`
+
+### Key Parameters That Require Clear Semantics
+
+| Parameter | Required Semantics |
+|-----------|-------------------|
+| `shelf_life` | Age-indexed inventory I[p,l,t,a], FIFO sales, automatic expiry when age > shelf_life[p] |
+| `cold_capacity/cold_usage` | Formula: `sum(cold_usage[p] * inventory[p,l,t]) <= cold_capacity[l]` |
+| `lead_time` | Orders placed in period t arrive in period t + lead_time[p]; distinguish in-transit vs on-hand |
+| `return_rate` | Fraction of sales returned next period; specify re-entry as age-1 inventory |
+| `labor_cap/labor_usage` | Formula: `sum(labor_usage[p] * units_handled[p,l,t]) <= labor_cap[l,t]` |
+| `waste_limit_pct` | Global constraint: `sum(waste) <= waste_limit_pct * sum(demand)` |
+| `moq` | All-or-nothing: order quantity must be 0 or >= moq |
+| `pack_size` | Order quantity must be integer multiple of pack_size |
+
+### Scenario Descriptions (archetypes.yaml)
+
+Each scenario family (F1-F8) in `archetypes.yaml` now includes:
+- **Business narrative**: High-level description of the scenario
+- **Structure cues**: Explicit constraint semantics with formulas
+
+Example from `retail_f1_base`:
+```yaml
+- Shelf life: Each product has a shelf life in periods. Inventory must be
+  tracked by age (cohorts). Units produced in period t can only be sold or
+  held for shelf_life[p] periods; after that they expire and must be
+  discarded as waste. The model must use age-indexed inventory I[p,l,t,a]
+  where a is age 1..shelf_life[p], with FIFO sales (oldest first) and
+  automatic expiry when age exceeds shelf life.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t])
+  <= cold_capacity[l]. These limits must be respected.
+```
+
+### Regenerating Prompts
+
+After updating `scenarios/spec/archetypes.yaml`:
+```bash
+python tools/generate_prompts.py
+```
+
+This regenerates all `.base.txt` and `.scenario.txt` files in `scenarios/prompts/` (190 scenarios total).
 
 ---
 

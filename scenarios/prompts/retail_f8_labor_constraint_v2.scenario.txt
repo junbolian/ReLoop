@@ -9,10 +9,12 @@ Store and warehouse labor capacity directly limits how much inventory can be han
 
 Structure cues:
 - The inventory system is single-echelon with production, storage capacity, and lost sales.
-- The JSON provides a labor capacity per location and period and a per-unit labor usage for each product. Total labor consumed by the relevant activities at a location in a period must not exceed this capacity.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
+- Labor capacity: The JSON provides labor_cap=200 per location per period, and labor_usage per product (SKU_Basic=0.1, SKU_Premium=0.2, SKU_ShortLife=0.1). Total labor consumed at a location in a period must not exceed this capacity: sum over products of (labor_usage[p] * units_handled[p,l,t]) <= labor_cap[l,t].
 - A simple representation is to treat labor usage as proportional to the volume of units handled, such as the sum of units received, picked, or moved for that product and period.
 - Inventory balance follows the usual pattern: previous stock plus arrivals minus sales and waste, with non-negative inventory and lost sales for unmet demand.
-- Storage capacity constraints remain in effect and there is no transshipment in this archetype.
+- There is no transshipment in this archetype.
 - The objective is to minimize total cost while respecting labor capacity constraints, which may bind in busy periods.
 
 [DATA SCHEMA]

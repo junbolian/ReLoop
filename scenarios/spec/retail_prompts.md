@@ -151,6 +151,21 @@ The baseline prompt (`{scenario_id}.scenario.txt`) contains **minimal specificat
 }
 ```
 
+### Key Parameter Constraint Semantics
+
+The following parameters require explicit constraint modeling. The business description in `archetypes.yaml` provides detailed semantics:
+
+| Parameter | Constraint Semantics |
+|-----------|---------------------|
+| `shelf_life` | Inventory must be tracked by age (cohorts). Use age-indexed inventory `I[p,l,t,a]` where `a` is age 1..shelf_life[p]. Units expire and become waste when age exceeds shelf life. FIFO sales (oldest first). |
+| `cold_capacity/cold_usage` | Volume-weighted storage: `sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]` |
+| `lead_time` | Orders placed in period t arrive in period t + lead_time[p]. Track in-transit vs on-hand inventory. |
+| `labor_cap/labor_usage` | Labor constraint: `sum over products of (labor_usage[p] * units_handled[p,l,t]) <= labor_cap[l,t]` |
+| `return_rate` | Reverse logistics: `return_rate[p] * sales[p,l,t]` units re-enter inventory at location l in period t+1 |
+| `waste_limit_pct` | Global waste cap: `sum(waste) <= waste_limit_pct * sum(demand)` over entire horizon |
+| `sub_edges` | Edge [A, B] means A's demand can be served by B's inventory. S[A,B] = units of A's demand fulfilled by B. |
+| `trans_edges` | Edge [L1, L2] means inventory can move from L1 to L2 at transshipment cost. |
+
 ### Data Access Section
 
 ```

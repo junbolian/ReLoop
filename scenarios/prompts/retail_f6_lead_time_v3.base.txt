@@ -9,8 +9,10 @@ Orders for each product take several periods to arrive. When the retailer places
 
 Structure cues:
 - The inventory system is single-echelon with ordering decisions, storage capacity, and lost sales.
-- The JSON provides a non-zero lead time in periods for each product. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
+- The JSON provides non-zero lead times: SKU_Basic=3, SKU_Premium=4, SKU_ShortLife=2 periods. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
 - Inventory must distinguish between on-hand units and units that are still in transit. Only on-hand units can be used to satisfy demand in a given period; in-transit units become on-hand when their lead time completes.
 - For each product and location, on-hand stock in a period is determined by previous on-hand stock plus arrivals of past orders whose lead time has completed, minus sales and waste. Stock levels must remain non-negative.
-- Storage capacity, lost sales treatment, absence of transshipment, substitution behavior, and generous labor capacity remain consistent with other families.
+- Substitution behavior, absence of transshipment, and generous labor capacity remain consistent with other families.
 - The objective is to minimize total cost while explicitly capturing the effect of deterministic lead times on inventory decisions.

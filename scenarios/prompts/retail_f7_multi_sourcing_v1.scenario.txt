@@ -9,10 +9,11 @@ Products differ in their effective sourcing regimes: some behave like slow but c
 
 Structure cues:
 - The inventory structure is single-echelon with product-specific lead times, similar to retail_f6_lead_time, together with storage capacity and lost sales.
-- The JSON sets different lead times and holding costs for different products. Orders for each product become available only after that product's lead time, and inventory carried over incurs its corresponding holding cost.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
+- The JSON sets different lead times (SKU_Basic=5, SKU_Premium=0, SKU_ShortLife=1) and holding costs (SKU_Basic=0.5, SKU_Premium=10.0). Orders for each product become available only after that product's lead time, and inventory carried over incurs its corresponding holding cost.
 - For each product, location, and period, on-hand stock is determined by previous on-hand stock, arrivals of past orders whose lead time completes in that period, sales, and waste, and must remain non-negative.
-- Storage capacity, lost sales treatment, and any transshipment options are as in the base network for this family.
-- The scenario does not explicitly encode multiple suppliers, but heterogeneous lead times and cost profiles mimic slow and fast sourcing channels at the product level.
+- The scenario mimics slow/cheap (Basic) and fast/expensive (Premium) sourcing channels at the product level through heterogeneous lead times and cost profiles.
 - The objective is to minimize total cost while correctly handling the different lead times and holding-cost profiles.
 
 [DATA SCHEMA]

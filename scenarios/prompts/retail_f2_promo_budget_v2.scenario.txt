@@ -9,10 +9,12 @@ In the final periods of the horizon the retailer runs strong promotions on the b
 
 Structure cues:
 - The inventory and substitution structure is the usual single-echelon system with shared storage, production capacity, and a substitution graph, together with lost sales for unmet demand.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
 - In the last few periods, the JSON scales up demand for the basic and short-life products to represent promotion-induced lifts; these are treated as ordinary exogenous demands with larger magnitudes.
 - The JSON also provides a per-period budget for inventory-related spending. For each period, the total purchasing spend (order quantity times purchasing cost) plus any fixed ordering costs if enabled must not exceed this budget.
 - Inventory remains non-negative, and any demand that cannot be satisfied within the budget and capacity limits becomes lost sales.
-- Storage capacity, substitution behavior, zero lead times, and generous labor capacity remain active as in other Family 2 archetypes.
+- Substitution behavior, zero lead times, and generous labor capacity remain active as in other Family 2 archetypes.
 - The objective is to minimize total cost subject to the per-period budget, making the trade-off between promotion support and resource limits explicit.
 
 [DATA SCHEMA]

@@ -9,6 +9,8 @@ The retailer operates a category with a value-oriented basic product and a premi
 
 Structure cues:
 - The physical and inventory structure follows the same pattern as in retail_f1_base: single-echelon, local demand, local inventory, shared storage, and no transshipment.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
 - The substitution graph contains a single directed edge [Basic, Premium]. This means: when Basic inventory is insufficient, Premium inventory can serve Basic's demand. S[Basic, Premium] represents units of Basic's demand fulfilled by Premium.
 - Lost sales penalties and purchasing or production costs in the JSON make premium more valuable to protect and basic cheaper but more elastic. This asymmetry is expressed through cost parameters, not through any special-case constraints.
 - Inventory remains non-negative; any demand that cannot be satisfied even after allowing the basic-to-premium substitution is recorded as lost sales.

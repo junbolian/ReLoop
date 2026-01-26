@@ -9,7 +9,9 @@ Placing an order in a period incurs a fixed cost regardless of how large the ord
 
 Structure cues:
 - The structure is single-echelon with ordering decisions, storage capacity, and lost sales.
-- The JSON includes a global fixed order cost parameter `fixed_order` in the "costs" object. Whenever a strictly positive order is placed for a product at a location in a period, this fixed cost must be charged once for that product-location-period in addition to variable purchasing costs.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
+- The JSON includes fixed_order=5000 in the "costs" object. Whenever a strictly positive order is placed for a product at a location in a period, this fixed cost must be charged once for that product-location-period in addition to variable purchasing costs.
 - The model must ensure that the fixed cost is applied if and only if the total order quantity for a product at a location in a period is positive; it should not be possible to evade the fixed cost with arbitrarily small orders.
 - Inventory balance under zero lead time is standard: on-hand stock is updated from previous stock and current orders, minus sales and waste, and cannot drop below zero.
 - There is no transshipment, lead times are zero, and substitution behavior is unchanged.
