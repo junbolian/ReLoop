@@ -164,9 +164,14 @@ def run_baseline_with_logging(
     base_url: str,
     api_key: str,
     ground_truth: Optional[float] = None,
+    baseline_prompt: Optional[str] = None,
     verbose: bool = True
 ) -> ConversationLog:
-    """Run baseline (direct generation, no structured steps or repair) with logging"""
+    """Run baseline (direct generation, no structured steps or repair) with logging
+
+    If baseline_prompt is provided (from .scenario.txt), use it directly.
+    Otherwise, generate prompt using the template (legacy behavior).
+    """
 
     # Initialize log
     log = ConversationLog(
@@ -187,7 +192,6 @@ def run_baseline_with_logging(
     generator = LoggingStructuredGenerator(logging_client)
     verifier = BehavioralVerifier(delta=0.2, epsilon=1e-4, timeout=60)
 
-    schema = RETAIL_SCHEMA
     obj_sense = "minimize"
 
     start_time = time.time()
@@ -199,7 +203,13 @@ def run_baseline_with_logging(
 
     # Generate code directly (single prompt, no 3-step)
     logging_client.set_context("baseline", "single_shot")
-    code = generator.generate_baseline(problem, schema)
+
+    # Use pre-loaded baseline_prompt from .scenario.txt if available
+    if baseline_prompt:
+        code = generator._extract_code(logging_client.generate(baseline_prompt))
+    else:
+        # Legacy: generate prompt from template
+        code = generator.generate_baseline(problem, RETAIL_SCHEMA)
 
     if verbose:
         print("  [Generate] Single-shot direct generation...")
@@ -360,17 +370,30 @@ def run_reloop_with_logging(
 
 
 def load_scenario(scenario_id: str) -> tuple:
-    """Load scenario data and prompt"""
+    """Load scenario data and prompts
+
+    Returns:
+        data: dict - scenario data from JSON
+        problem: str - base prompt for ReLoop agent (.base.txt)
+        baseline_prompt: str - full prompt for baseline (.scenario.txt)
+    """
     data_path = f"scenarios/data/{scenario_id}.json"
-    prompt_path = f"scenarios/prompts/{scenario_id}.base.txt"
+    base_prompt_path = f"scenarios/prompts/{scenario_id}.base.txt"
+    scenario_prompt_path = f"scenarios/prompts/{scenario_id}.scenario.txt"
 
     with open(data_path, 'r') as f:
         data = json.load(f)
 
-    with open(prompt_path, 'r') as f:
+    with open(base_prompt_path, 'r') as f:
         problem = f.read()
 
-    return data, problem
+    # Load scenario prompt for baseline (includes schema and guardrails)
+    baseline_prompt = None
+    if os.path.exists(scenario_prompt_path):
+        with open(scenario_prompt_path, 'r') as f:
+            baseline_prompt = f.read()
+
+    return data, problem, baseline_prompt
 
 
 def get_ground_truth(scenario_id: str, data: Dict) -> Optional[float]:
@@ -418,7 +441,7 @@ if __name__ == "__main__":
     print(f"Scenario: {args.scenario}")
 
     # Load scenario
-    data, problem = load_scenario(args.scenario)
+    data, problem, baseline_prompt = load_scenario(args.scenario)
     print(f"Loaded: {data.get('name', args.scenario)}")
     print(f"  - Periods: {data.get('periods')}")
     print(f"  - Products: {len(data.get('products', []))}")
@@ -471,6 +494,7 @@ if __name__ == "__main__":
             base_url=base_url,
             api_key=api_key,
             ground_truth=ground_truth,
+            baseline_prompt=baseline_prompt,
             verbose=True
         )
         print_summary(baseline_log, "BASELINE SUMMARY")
@@ -525,6 +549,7 @@ if __name__ == "__main__":
             base_url=base_url,
             api_key=api_key,
             ground_truth=ground_truth,
+            baseline_prompt=baseline_prompt,
             verbose=True
         )
         print_summary(log, "BASELINE SUMMARY")
