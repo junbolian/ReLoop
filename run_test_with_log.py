@@ -181,9 +181,14 @@ def run_baseline_with_logging(
         ground_truth=ground_truth
     )
 
-    # Create base LLM client
-    from reloop.structured_generation import OpenAIClient
-    base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
+    # Create base LLM client (detect Claude vs OpenAI models)
+    if 'claude' in model.lower():
+        from reloop.structured_generation import AnthropicClient
+        anthropic_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
+        base_client = AnthropicClient(model=model, base_url=base_url, api_key=anthropic_key)
+    else:
+        from reloop.structured_generation import OpenAIClient
+        base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
 
     # Wrap with logging
     logging_client = LoggingLLMClient(base_client, log)
@@ -216,10 +221,10 @@ def run_baseline_with_logging(
 
     # Verify
     if verbose:
-        print("  [Verify] 6-layer behavioral verification...")
+        print("  [Verify] 7-layer behavioral verification...")
     report = verifier.verify(
         code, data, obj_sense,
-        enable_layer6=True,
+        enable_layer7=True,
         verbose=verbose
     )
 
@@ -227,7 +232,7 @@ def run_baseline_with_logging(
     layers_passed = report.count_layers_passed()
 
     if verbose:
-        print(f"  [Result] {layers_passed}/6 layers passed")
+        print(f"  [Result] {layers_passed}/7 layers passed")
 
     # Finalize log
     log.end_time = datetime.now().isoformat()
@@ -235,8 +240,9 @@ def run_baseline_with_logging(
     log.iterations = 1
     log.final_status = "VERIFIED" if report.passed else "NOT_VERIFIED"
     log.layers_passed = layers_passed
-    log.objective_value = None
-    if log.verification_reports:
+    # Get objective from report directly, or from verification details
+    log.objective_value = report.objective
+    if log.objective_value is None and log.verification_reports:
         for vr in reversed(log.verification_reports):
             if vr.get("objective") is not None:
                 log.objective_value = vr["objective"]
@@ -255,7 +261,7 @@ def run_reloop_with_logging(
     api_key: str,
     ground_truth: Optional[float] = None,
     max_iterations: int = 5,
-    enable_layer6: bool = True,
+    enable_layer7: bool = True,
     early_stop: bool = True,
     verbose: bool = True
 ) -> ConversationLog:
@@ -269,9 +275,14 @@ def run_reloop_with_logging(
         ground_truth=ground_truth
     )
 
-    # Create base LLM client (all models use OpenAI-compatible API)
-    from reloop.structured_generation import OpenAIClient
-    base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
+    # Create base LLM client (detect Claude vs OpenAI models)
+    if 'claude' in model.lower():
+        from reloop.structured_generation import AnthropicClient
+        anthropic_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
+        base_client = AnthropicClient(model=model, base_url=base_url, api_key=anthropic_key)
+    else:
+        from reloop.structured_generation import OpenAIClient
+        base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
 
     # Wrap with logging
     logging_client = LoggingLLMClient(base_client, log)
@@ -314,10 +325,10 @@ def run_reloop_with_logging(
 
         # Verify
         if verbose:
-            print("  [Verify] 6-layer behavioral verification...")
+            print("  [Verify] 7-layer behavioral verification...")
         report = verifier.verify(
             current_code, data, obj_sense,
-            enable_layer6=enable_layer6,
+            enable_layer7=enable_layer7,
             verbose=verbose
         )
 
@@ -329,7 +340,7 @@ def run_reloop_with_logging(
             best_code, best_layers, best_report = current_code, layers_passed, report
             no_progress_count = 0
             if verbose:
-                print(f"  [Best] New best: {best_layers}/6 layers")
+                print(f"  [Best] New best: {best_layers}/7 layers")
         else:
             no_progress_count += 1
             if verbose:
@@ -341,13 +352,33 @@ def run_reloop_with_logging(
                 print(f"\n  [SUCCESS] All layers passed!")
             break
 
+        # Smart repair: distinguish between slack constraints and missing constraints
+        # - L3 failures: Always repair (code structure issues)
+        # - L4 "NO EFFECT" failures: Repair (parameter not used = constraint missing)
+        # - L4 "direction" failures: May be slack, skip repair
+        # - L5/L6/L7 failures: Usually not critical, skip repair
+        if report.failed_layer is not None and report.failed_layer > 2:
+            # Check if L4 has "NO EFFECT" failures (clear bug, not slack)
+            has_no_effect_failure = report.diagnosis and "NO EFFECT" in report.diagnosis
+            has_l3_failure = report.failed_layer == 3
+
+            if has_no_effect_failure or has_l3_failure:
+                if verbose:
+                    print(f"  [L{report.failed_layer} Critical] Parameter has NO EFFECT = constraint missing. Repairing...")
+                # Continue to repair - don't break
+            else:
+                if verbose:
+                    print(f"  [L1/L2 OK] Code runs and is feasible. L{report.failed_layer} warnings are informational only.")
+                    print(f"  [Stop] Not repairing - may be slack constraints, not bugs.")
+                break
+
         # Early stop (can be disabled with --no-early-stop)
         if early_stop and no_progress_count >= 2 and k >= 2:
             if verbose:
                 print(f"  [Early Stop] No progress for {no_progress_count} iterations")
             break
 
-        # Record diagnosis
+        # Record diagnosis for repair (L1/L2 failures or L3/L4 NO EFFECT failures)
         if report.diagnosis:
             history.append(report.diagnosis)
 
@@ -357,9 +388,9 @@ def run_reloop_with_logging(
     log.iterations = k + 1
     log.final_status = "VERIFIED" if best_report and best_report.passed else "NOT_VERIFIED"
     log.layers_passed = best_layers
-    # Extract objective from verification reports
-    log.objective_value = None
-    if log.verification_reports:
+    # Get objective from best report directly, or from verification details
+    log.objective_value = best_report.objective if best_report else None
+    if log.objective_value is None and log.verification_reports:
         for vr in reversed(log.verification_reports):
             if vr.get("objective") is not None:
                 log.objective_value = vr["objective"]
@@ -399,9 +430,11 @@ def load_scenario(scenario_id: str) -> tuple:
 def get_ground_truth(scenario_id: str, data: Dict) -> Optional[float]:
     """Get ground truth using universal solver"""
     try:
-        from solvers.universal_retail_solver import solve_retail_milp
-        result = solve_retail_milp(data, verbose=False)
-        return result.get('objective')
+        from solvers.universal_retail_solver import solve_scenario
+        model = solve_scenario(data, summarize=False)
+        if model.SolCount > 0:
+            return model.ObjVal
+        return None
     except Exception as e:
         print(f"Warning: Could not get ground truth: {e}")
         return None
@@ -428,13 +461,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Get API config from environment
-    api_key = os.environ.get('OPENAI_API_KEY')
-    base_url = os.environ.get('OPENAI_BASE_URL')
     model = args.model or os.environ.get('OPENAI_MODEL', 'gpt-4o')
 
-    if not api_key:
-        print("Error: OPENAI_API_KEY not set")
-        sys.exit(1)
+    # Detect if model is Claude and use appropriate API key
+    if 'claude' in model.lower():
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        base_url = os.environ.get('ANTHROPIC_BASE_URL')
+        if not api_key:
+            print("Error: ANTHROPIC_API_KEY not set (required for Claude models)")
+            sys.exit(1)
+    else:
+        api_key = os.environ.get('OPENAI_API_KEY')
+        base_url = os.environ.get('OPENAI_BASE_URL')
+        if not api_key:
+            print("Error: OPENAI_API_KEY not set")
+            sys.exit(1)
 
     print(f"Model: {model}")
     print(f"Base URL: {base_url}")
@@ -458,7 +499,7 @@ if __name__ == "__main__":
         print(title)
         print("="*60)
         print(f"Status: {log.final_status}")
-        print(f"Layers Passed: {log.layers_passed}/6")
+        print(f"Layers Passed: {log.layers_passed}/7")
         print(f"Iterations: {log.iterations}")
         print(f"Duration: {log.total_duration_s:.2f}s")
         print(f"LLM Turns: {len(log.turns)}")
@@ -510,7 +551,7 @@ if __name__ == "__main__":
             api_key=api_key,
             ground_truth=ground_truth,
             max_iterations=args.max_iter,
-            enable_layer6=True,
+            enable_layer7=True,
             early_stop=not args.no_early_stop,
             verbose=True
         )
@@ -523,7 +564,7 @@ if __name__ == "__main__":
         print("="*60)
         print(f"{'Metric':<25} {'Baseline':>15} {'ReLoop':>15} {'Delta':>10}")
         print("-"*60)
-        print(f"{'Layers Passed':<25} {baseline_log.layers_passed:>15}/6 {reloop_log.layers_passed:>15}/6 {reloop_log.layers_passed - baseline_log.layers_passed:>+10}")
+        print(f"{'Layers Passed':<25} {baseline_log.layers_passed:>15}/7 {reloop_log.layers_passed:>15}/7 {reloop_log.layers_passed - baseline_log.layers_passed:>+10}")
         print(f"{'LLM Turns':<25} {len(baseline_log.turns):>15} {len(reloop_log.turns):>15} {len(reloop_log.turns) - len(baseline_log.turns):>+10}")
         print(f"{'Duration (s)':<25} {baseline_log.total_duration_s:>15.2f} {reloop_log.total_duration_s:>15.2f} {reloop_log.total_duration_s - baseline_log.total_duration_s:>+10.2f}")
 
@@ -573,7 +614,7 @@ if __name__ == "__main__":
             api_key=api_key,
             ground_truth=ground_truth,
             max_iterations=args.max_iter,
-            enable_layer6=True,
+            enable_layer7=True,
             early_stop=not args.no_early_stop,
             verbose=True
         )

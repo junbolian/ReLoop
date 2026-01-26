@@ -33,7 +33,7 @@ retail_f1_base:
     Structure cues:
     - Time is a discrete sequence of periods defined in the JSON. Decisions about how much to produce or procure and how much to ship to each location are made at the beginning of each period; demand is realized and served within that same period.
     - Inventory evolves by carrying over what remains from the previous period, adding any new production assigned to the location, and subtracting units that are sold or intentionally discarded as waste. On-hand stock is never allowed to become negative.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be sold or held for shelf_life[p] periods; after that they expire and must be discarded as waste. The model must use age-indexed inventory I[p,l,t,a] where a is age 1..shelf_life[p], with FIFO sales (oldest first) and automatic expiry when age exceeds shelf life.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Any demand that cannot be met from available local inventory in the period is treated as lost sales and incurs the lost sales penalty. There is no concept of backorders, reservations, or delayed fulfillment.
     - Production for each product in each period cannot exceed the given production capacity. Production is available without delay in this archetype because lead times are effectively zero.
     - Storage capacity at each location and period limits the total volume of on-hand inventory using product-specific storage usage coefficients and location capacities from the JSON: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected even in periods where they do not bind.
@@ -52,7 +52,7 @@ retail_f1_high_waste:
     Structure cues:
     - The network is the same as in retail_f1_base: multiple products, multiple locations that directly serve final demand, and per-product production capacities in each period.
     - Inventory is held at each location, evolves from period to period by adding local production and subtracting sales and waste, and is never allowed to go negative. Unserved demand is treated as lost sales and penalized as in the baseline.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The substitution pattern (Basic's demand served by Premium), absence of transshipment, zero lead times, and effectively non-binding labor capacities are the same as in the baseline scenario.
     - The only intended structural change is in the cost weights: waste costs in the JSON are much larger, so discarding inventory is heavily discouraged, but the constraint system itself is not altered.
@@ -68,7 +68,7 @@ retail_f1_jit_logic:
     Structure cues:
     - The physical network and decision timing are the same as in retail_f1_base: single-echelon, multi-product, multi-location, with local demand and local inventory.
     - Inventory at each location carries over from the previous period, is increased by local production that arrives without delay, and is reduced by sales and any intentional waste. Stock levels must remain non-negative, and any demand in excess of available stock is treated as lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - Substitution behavior (Basic's demand served by Premium), absence of transshipment, and zero lead times all match the baseline archetype.
     - Holding cost coefficients in the JSON are scaled up substantially compared with retail_f1_base, making on-hand inventory much more expensive relative to lost sales. The underlying constraint structure is unchanged.
@@ -85,7 +85,7 @@ retail_f1_52_weeks:
     - The inventory system is the same as in retail_f1_base, with multiple products, multiple locations, and capacity-limited production for each product and period.
     - The time index now runs for fifty-two periods. The same inventory evolution and demand fulfillment logic is applied in every period of the year.
     - At each location and for each product, stock at the end of a week depends on what was carried over, what was produced for that location during the week, and what was sold or discarded. Inventory cannot go below zero; any unmet demand in a week is lost and penalized.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - Substitution (edge [Basic, Premium] means Basic's demand can be served by Premium), the absence of transshipment, and zero lead times all remain as in the baseline case.
     - Labor capacity remains high enough that it does not materially bind, though it can be represented consistently with the JSON.
@@ -101,7 +101,7 @@ retail_f2_no_substitution:
     Structure cues:
     - The physical setup matches retail_f1_base: single-echelon, multi-product, multi-location, with inventory held only at the locations that serve final demand.
     - Inventory at each location and period starts from the previous period's ending stock, is increased by local production or procurement, and is decreased by sales and waste. Stock cannot become negative.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In this archetype, the substitution graph in the JSON is empty (sub_edges = []). The model must not allow demand for one product to be satisfied by any other product; each product's demand can only be met by its own on-hand inventory at that location.
     - There is no transshipment of inventory between locations, lead times are effectively zero, and labor capacity is large relative to demand.
@@ -117,7 +117,7 @@ retail_f2_circular_sub:
     Structure cues:
     - The overall structure is still single-echelon inventory with per-product production capacities, local storage, and lost sales when demand is not met.
     - Inventory at each location evolves from carried-over stock, new production, sales to customers who originally requested that product, and sales to customers diverted from other products along the substitution ring, minus any discarded units. Inventory must remain non-negative.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The substitution graph in the JSON defines a directed ring among the products. Each edge [A, B] means A's demand can be served by B's inventory. When demand for product A cannot be fully served from A's own stock, the model may serve part of that demand using B's inventory if edge [A, B] exists.
     - Any remaining unmet demand after using all allowed substitutions becomes lost sales with a penalty cost. Customers are not backordered.
@@ -133,7 +133,7 @@ retail_f2_cannibalization:
 
     Structure cues:
     - The underlying inventory and substitution structure is the same as in retail_f2_circular_sub, with a single-echelon system, shared storage at each location, and a directed substitution graph defined in the JSON.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. The JSON reduces storage capacity, making space more scarce.
     - The JSON increases demand for the basic product and reduces its lost sales penalty while keeping higher margins on other items.
     - Tight shared storage capacity means that choosing to stock more of the basic product can crowd out premium and short-life items in the warehouse, purely through the capacity and cost parameters.
@@ -164,7 +164,7 @@ retail_f2_price_band_tight:
 
     Structure cues:
     - The physical and inventory structure follows the same pattern as in retail_f1_base: single-echelon, local demand, local inventory, shared storage, and no transshipment.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The substitution graph contains a single directed edge [Basic, Premium]. This means: when Basic inventory is insufficient, Premium inventory can serve Basic's demand. S[Basic, Premium] represents units of Basic's demand fulfilled by Premium.
     - Lost sales penalties and purchasing or production costs in the JSON make premium more valuable to protect and basic cheaper but more elastic. This asymmetry is expressed through cost parameters, not through any special-case constraints.
@@ -181,7 +181,7 @@ retail_f2_promo_budget:
 
     Structure cues:
     - The inventory and substitution structure is the usual single-echelon system with shared storage, production capacity, and a substitution graph, together with lost sales for unmet demand.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the last few periods, the JSON scales up demand for the basic and short-life products to represent promotion-induced lifts; these are treated as ordinary exogenous demands with larger magnitudes.
     - The JSON also provides a per-period budget for inventory-related spending. For each period, the total purchasing spend (order quantity times purchasing cost) plus any fixed ordering costs if enabled must not exceed this budget.
@@ -198,7 +198,7 @@ retail_f3_storage_bottleneck:
 
     Structure cues:
     - The inventory, production, and lost sales logic is the same as in retail_f1_base: single-echelon, multiple products and locations, local demand, and no backorders or transshipment.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. This constraint is designed to be binding and central to the trade-offs.
     - Inventory levels at each location are kept non-negative and evolve from carried-over stock and new production, minus sales and waste.
     - Substitution edges, if any, are taken from the JSON and follow the standard semantics: edge [A, B] means A's demand can be served by B.
@@ -214,7 +214,7 @@ retail_f3_volumetric_constraint:
 
     Structure cues:
     - The overall structure and shared storage framework match retail_f3_storage_bottleneck.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Product-specific storage usage parameters in the JSON are much larger for the premium product than for other SKUs.
     - Inventory cannot be negative and is updated based on previous stock, local production, sales, and waste.
     - There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph with standard semantics.
@@ -229,7 +229,7 @@ retail_f3_supply_bottleneck:
 
     Structure cues:
     - The inventory and lost sales logic is the same as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Storage capacities in the JSON are set very high so that storage constraints are effectively non-binding.
     - Per-product production capacities are significantly reduced. These caps must be enforced and become the main source of unmet demand.
     - Inventory at each location and period stays non-negative and changes according to local production, sales, and waste.
@@ -245,7 +245,7 @@ retail_f3_unbalanced_network:
 
     Structure cues:
     - The inventory system remains single-echelon with local demand at each location and no transshipment.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. The JSON concentrates storage capacity at one hub location and gives very small capacities to the satellites.
     - Inventory for each product and location evolves from previous stock and local production, minus sales and waste, without ever going below zero.
     - Production capacities, zero lead times, and substitution behavior are as in the base scenario.
@@ -260,7 +260,7 @@ retail_f4_early_stockout:
 
     Structure cues:
     - The inventory, storage, and lost sales framework matches the base scenario: single-echelon, local inventories, and no transshipment.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, production capacity for all products is set to zero in early periods. The model must respect this by not assigning any new production in those periods.
     - Inventory remains non-negative and changes from period to period based on previous stock, any allowed production (zero during the disruption), sales, and waste.
@@ -277,7 +277,7 @@ retail_f4_peak_failure:
 
     Structure cues:
     - The inventory, storage, and lost sales structure is the same as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, production capacities are set to zero only during a mid-horizon block of periods that coincide with the demand peak. No new production can occur in those periods.
     - Inventory at each location remains non-negative and is updated from period to period based on earlier production, sales, and waste.
@@ -293,7 +293,7 @@ retail_f4_demand_surge:
 
     Structure cues:
     - The inventory and production structure is the same as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, one mid-horizon period has demand for each product scaled up by a large factor, representing the surge. This period is treated as having much higher exogenous demand.
     - Inventory stays non-negative and is updated using previous stock, current production, sales, and waste.
@@ -309,7 +309,7 @@ retail_f4_quality_hold:
 
     Structure cues:
     - The inventory and production logic is the same as in the base scenario: single-echelon, local demand, local production, and no transshipment.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, the production capacity for the basic product is set to zero after a specified time index, while other products retain their production capacities.
     - Inventory for each product and location evolves from period to period based on previous stock, production (which is zero for the basic product during the hold), sales, and waste, and must remain non-negative.
@@ -326,7 +326,7 @@ retail_f4_robust_variance:
 
     Structure cues:
     - The inventory, storage, and production structure is the same single-echelon system as in the base scenario, with per-product production capacities and local inventories at each location.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, demand curves oscillate across periods, creating repeated high-demand and low-demand phases; lost sales penalties are increased for all products so that stockouts are very costly.
     - Inventory at each product, location, and period remains non-negative and evolves from previous stock and current production, minus sales and waste.
@@ -342,7 +342,7 @@ retail_f4_supply_risk:
 
     Structure cues:
     - The inventory, storage, and lost sales framework is the same single-echelon structure as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, per-product production capacities are reduced over a specified mid-horizon band of periods, but not set to zero. Outside this band, capacities are higher and should be used to build inventory when beneficial.
     - Waste cost parameters are increased for all products so that discarding inventory is more expensive, making overbuilding before the risk window more costly.
@@ -359,7 +359,7 @@ retail_f5_impossible_demand:
 
     Structure cues:
     - The inventory, production, storage, and lost sales framework is the same as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - In the JSON, all demand curves are multiplied by 5x so that total demand over the horizon far exceeds what can be produced or stored. The model should not attempt to enforce full demand satisfaction; lost sales must be used where necessary.
     - Inventory at each location and period is kept non-negative and reflects previous stock, local production, sales, and waste.
@@ -376,7 +376,7 @@ retail_f5_strict_service_trap:
 
     Structure cues:
     - The inventory structure with production and storage capacity constraints is the same as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Storage capacities are scaled to 10% of normal values, making these constraints very tight.
     - Inventory at each product, location, and period remains non-negative and is updated from previous stock, production, sales, and waste.
     - Unmet demand is treated as lost sales with penalties; backorders are not allowed, and there is no hard requirement that all demand be served.
@@ -392,7 +392,7 @@ retail_f5_storage_overflow:
 
     Structure cues:
     - The inventory and production framework is the same single-echelon system with storage constraints.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. In the JSON, cold_capacity is set to 0.5 at all locations, making this constraint extremely tight.
     - Inventory must stay non-negative and is adjusted through production, sales, and waste. In most periods, on-hand inventory must be kept very low to satisfy capacity.
     - Unmet demand becomes lost sales, and discarding inventory becomes an important decision despite its cost.
@@ -408,7 +408,7 @@ retail_f5_ultimate_stress:
 
     Structure cues:
     - The archetype combines the storage bottleneck of retail_f3_storage_bottleneck (30% capacity), the peak supply failure of retail_f4_peak_failure (production=0 for periods 8-11), and the no-substitution structure of retail_f2_no_substitution (sub_edges=[]).
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Storage capacities are scaled to 30% of normal values and must be enforced as binding constraints.
     - Production capacities are set to zero during a mid-horizon peak window (periods 8-11), so no new units can be produced in those periods.
     - The substitution graph is empty (sub_edges = []), so each product's demand can only be served by its own inventory at the location.
@@ -425,7 +425,7 @@ retail_f6_lead_time:
 
     Structure cues:
     - The inventory system is single-echelon with ordering decisions, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON provides non-zero lead times: SKU_Basic=3, SKU_Premium=4, SKU_ShortLife=2 periods. Orders placed now will only enter on-hand inventory after the corresponding lead time has elapsed.
     - Inventory must distinguish between on-hand units and units that are still in transit. Only on-hand units can be used to satisfy demand in a given period; in-transit units become on-hand when their lead time completes.
@@ -442,7 +442,7 @@ retail_f6_moq_binary:
 
     Structure cues:
     - The system is single-echelon with ordering decisions, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON specifies moq=300 in the "constraints" object. For each product, location, and period, the order quantity must either be zero or at least 300; intermediate positive quantities below moq are forbidden.
     - This all-or-nothing pattern must be enforced consistently across products, locations, and periods so that the model does not exploit fractional orders below the global minimum.
@@ -459,7 +459,7 @@ retail_f6_fixed_order_cost:
 
     Structure cues:
     - The structure is single-echelon with ordering decisions, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON includes fixed_order=5000 in the "costs" object. Whenever a strictly positive order is placed for a product at a location in a period, this fixed cost must be charged once for that product-location-period in addition to variable purchasing costs.
     - The model must ensure that the fixed cost is applied if and only if the total order quantity for a product at a location in a period is positive; it should not be possible to evade the fixed cost with arbitrarily small orders.
@@ -476,7 +476,7 @@ retail_f6_pack_size_integer:
 
     Structure cues:
     - The system is single-echelon with ordering decisions, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON specifies pack_size=100 in the "constraints" object. In every period, the order quantity for each product at each location must be a whole number of packs (multiples of 100).
     - This pack-size rule introduces integrality into order quantities and must be enforced consistently for all products and periods using the same pack size.
@@ -493,7 +493,7 @@ retail_f7_transshipment:
 
     Structure cues:
     - This archetype extends the single-echelon inventory model by allowing transshipment flows along directed edges given in the JSON; in this case, all ordered pairs of distinct locations are connected (full network).
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected at each location.
     - For each product and period, inventory at a location changes according to incoming production, incoming transshipments, outgoing transshipments, sales, and waste, and must remain non-negative.
     - Transshipment flows from a location in a period cannot exceed that location's available inventory for the product. All such moves incur transshipment costs as specified in the JSON.
@@ -509,7 +509,7 @@ retail_f7_hub_and_spoke:
     The network has one high-capacity hub distribution center that ships to several low-capacity spokes. All lateral movements must pass through the hub; spokes cannot ship directly to each other or back to the hub. Demand occurs at spokes and is local. This captures a hub-and-spoke distribution strategy where stock is pooled at the hub and then pushed out to stores.
 
     Structure cues:
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. DC1 (hub) has capacity 50000, while other locations (spokes) have capacity 500 each.
     - The transshipment network consists only of directed edges from DC1 (hub) to each spoke [DC2, DC3, DC4, DC5]. Inventory can move from the hub to the spokes but not directly between spokes and not from spokes back to the hub.
     - For each product, location, and period, inventory evolves based on local production (if any), inbound shipments, outbound shipments, sales (at spokes), and waste, and must remain non-negative.
@@ -526,7 +526,7 @@ retail_f7_budget_limit:
 
     Structure cues:
     - The underlying network is the same single-echelon structure with potential transshipment and storage capacity as in the base network for this family.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON specifies budget_per_period=10000. For each period, the total purchasing spend (order quantity times purchasing cost) plus any fixed ordering costs if enabled must not exceed this budget.
     - Inventory balance for each product, location, and period follows the standard pattern with production or inbound shipments, outbound shipments, sales, and waste, and inventory must remain non-negative.
@@ -543,7 +543,7 @@ retail_f7_multi_sourcing:
 
     Structure cues:
     - The inventory structure is single-echelon with product-specific lead times, similar to retail_f6_lead_time, together with storage capacity and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON sets different lead times (SKU_Basic=5, SKU_Premium=0, SKU_ShortLife=1) and holding costs (SKU_Basic=0.5, SKU_Premium=10.0). Orders for each product become available only after that product's lead time, and inventory carried over incurs its corresponding holding cost.
     - For each product, location, and period, on-hand stock is determined by previous on-hand stock, arrivals of past orders whose lead time completes in that period, sales, and waste, and must remain non-negative.
@@ -559,7 +559,7 @@ retail_f7_multiechelon_chain:
 
     Structure cues:
     - Locations: Plant (upstream), DC1/DC2 (distribution centers), Store1/Store2/Store3 (retail). The transshipment network defines directed edges: Plant→DC1, Plant→DC2, DC1→Store1, DC1→Store2, DC2→Store2, DC2→Store3.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Capacities differ by echelon: Plant=8000, DC1/DC2=4000, Stores=600.
     - Inventory is allowed to flow only along the directed edges. There is no direct shipment between stores, between distribution centers, or from stores back upstream.
     - Demand occurs only at store nodes according to demand_share (Store1=30%, Store2=40%, Store3=30%). Upstream nodes (Plant, DCs) do not face direct customer demand.
@@ -576,7 +576,7 @@ retail_f7_ring_routing:
 
     Structure cues:
     - The transshipment network in the JSON forms a directed cycle: DC1→DC2→DC3→DC4→DC5→DC1. Inventory can be shipped only along these ring edges.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Capacities are scaled to 80% of normal values.
     - For each product, location, and period, inventory reflects previous stock, local production, inbound ring shipments, outbound ring shipments, sales, and waste, and must remain non-negative.
     - Demand at each location is met from local inventory and inbound ring shipments; there are no shortcuts across the ring.
@@ -593,7 +593,7 @@ retail_f8_reverse_logistics:
 
     Structure cues:
     - The system is single-echelon with production, storage, and lost sales, extended to include reverse flows from returns.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry. Returned units re-enter as age-1 inventory.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r]. Returned units re-enter as age-1 inventory.
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits apply to all inventory including returns.
     - The JSON specifies return rates: SKU_Basic=20%, SKU_Premium=10%, SKU_ShortLife=5%. For each product and location, this fraction of units sold in one period re-enters as usable inventory at the same location in the next period.
     - Inventory at each period includes previous stock, current production, and returns from prior sales, minus current-period sales and waste, and must remain non-negative.
@@ -609,7 +609,7 @@ retail_f8_labor_constraint:
 
     Structure cues:
     - The inventory system is single-echelon with production, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - Labor capacity: The JSON provides labor_cap=200 per location per period, and labor_usage per product (SKU_Basic=0.1, SKU_Premium=0.2, SKU_ShortLife=0.1). Total labor consumed at a location in a period must not exceed this capacity: sum over products of (labor_usage[p] * units_handled[p,l,t]) <= labor_cap[l,t].
     - A simple representation is to treat labor usage as proportional to the volume of units handled, such as the sum of units received, picked, or moved for that product and period.
@@ -626,7 +626,7 @@ retail_f8_ship_from_store:
 
     Structure cues:
     - The inventory structure is single-echelon with local demand at each location, storage capacity, and lost sales.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Storage capacities are scaled to 5x normal values to accommodate dual-channel operations.
     - Labor capacity: The JSON provides labor_cap=500 per location per period, with higher labor_usage per product (SKU_Basic=0.5, SKU_Premium=0.8, SKU_ShortLife=0.6) reflecting the additional work from online fulfillment.
     - Stores conceptually serve two demand streams, but the model treats them as a single aggregated demand per product and location.
@@ -643,7 +643,7 @@ retail_f8_sustainability:
 
     Structure cues:
     - The inventory and production structure is the same single-echelon system with storage capacity and lost sales as in the base scenario.
-    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+    - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
     - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
     - The JSON specifies waste_limit_pct=0.02 (2%). Over the horizon, the total waste across all products, locations, and periods must not exceed 2% of total demand: sum(waste) <= 0.02 * sum(demand).
     - Inventory is updated from previous stock and production, minus sales and waste, and remains non-negative.

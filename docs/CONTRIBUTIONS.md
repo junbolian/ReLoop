@@ -26,54 +26,136 @@ We identify and quantify a critical failure mode in LLM-generated optimization c
 
 ---
 
-### Contribution 2: 6-Layer Behavioral Verification (Method)
+### Contribution 2: 7-Layer Behavioral Verification (Method)
 
 **What:**
-A universal verification framework using sensitivity-based testing to detect constraint semantic errors by comparing model behavior against expected outcomes, **without parsing generated code**.
+A universal verification framework using sensitivity-based testing to detect constraint semantic errors by comparing model behavior against expected outcomes, **without parsing generated code** for behavioral tests, plus AST-based structural analysis.
 
-**6-Layer Verification System:**
+**7-Layer Verification System:**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 1: Execution Verification                        │
-│    └── Does code run without errors?                    │
+│  ══════════ BASIC (L1-L2) ══════════                    │
+│  Layer 1: Execution Verification [MANDATORY]            │
+│    └── Code must run without errors                     │
+│    └── Status: FAIL → stop, no objective possible       │
 │                                                         │
-│  Layer 2: Feasibility Verification                      │
+│  Layer 2: Feasibility Verification [LENIENT]            │
 │    └── OPTIMAL? INFEASIBLE? UNBOUNDED?                  │
+│    └── TIME_LIMIT with objective → OK                   │
 │                                                         │
-│  Layer 3: Monotonicity Verification (Universal - Core)  │
+│  ══════════ STRUCTURE (L3) ══════════                   │
+│  Layer 3: Code Structure (AST) [UNIVERSAL, fast]        │
+│    └── 3.1 Objective exists? m.setObjective() call      │
+│    └── 3.2 Variables declared? m.addVar() calls         │
+│    └── 3.3 Constraints added? m.addConstr() calls       │
+│    └── 3.4 Index boundaries? t-1/t+1 handling           │
+│    └── 3.5 Sales availability? sales <= I constraint    │
+│    └── Static analysis - no data leakage                │
+│                                                         │
+│  ══════════ SEMANTIC (L4-L6) ══════════                 │
+│  Layer 4: Monotonicity Verification (Universal - Core)  │
 │    └── Does each parameter affect objective?            │
 │    └── "No effect" = constraint likely MISSING          │
 │                                                         │
-│  Layer 4: Sensitivity Verification (Role-Based)         │
+│  Layer 5: Sensitivity Verification (Role-Based)         │
 │    └── demand↑ → cost↑? capacity↓ → cost↑?              │
 │                                                         │
-│  Layer 5: Boundary Verification                         │
+│  Layer 6: Boundary Verification                         │
 │    └── param=0 behavior? param=∞ behavior?              │
 │                                                         │
-│  Layer 6: Domain Probes (optional, for RetailOpt)       │
-│    └── init, holding cost, lost sales, substitution     │
+│  ══════════ DOMAIN (L7) ══════════                      │
+│  Layer 7: Domain Probes [OPTIONAL, Retail-specific]     │
+│    └── Enable with enable_layer7=True                   │
+│    └── Tests: init, holding cost, lost sales, subst.    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Design Principles:**
-1. **Universal (No Domain Knowledge)** - Layer 3 works for ANY optimization problem
-2. **Parameter Perturbation** - Sensitivity analysis via ±20% perturbation
-3. **Observable Outcomes** - Judge by objective/status only, no code parsing
-4. **No Ground Truth Required** - Tests relative behavior, not absolute correctness
+**Verification Progression:**
+- **L1-L2 (Basic)** - Must pass, stops if fails
+- **L3 (Structure)** - Fast AST analysis runs first
+- **L4-L6 (Semantic)** - Runtime behavioral tests, run independently
+- **L7 (Domain)** - Optional, enable with `enable_layer7=True`
+- **Always report objective** - Regardless of which layer passes
 
-**Key Insight (Layer 3 - Monotonicity):**
+**Execution Flow:**
+```
+┌─ BASIC ──────────────────────────────────────────┐
+│ L1 (Execution)    → MUST PASS → stops if fails   │
+│ L2 (Feasibility)  → MUST PASS → stops if fails   │
+├─ STRUCTURE ──────────────────────────────────────┤
+│ L3 (Code AST)     → Fast static analysis first   │
+├─ SEMANTIC ───────────────────────────────────────┤
+│ L4 (Monotonicity) → Runtime: parameter perturb   │
+│ L5 (Sensitivity)  → Runtime: direction check     │
+│ L6 (Boundary)     → Runtime: edge cases          │
+├─ DOMAIN ─────────────────────────────────────────┤
+│ L7 (Domain)       → Optional: retail probes      │
+└──────────────────────────────────────────────────┘
+```
+
+**Design Principles:**
+1. **Universal (No Domain Knowledge)** - Layers 1-6 work for ANY optimization problem
+2. **Fast First** - L3 (AST) is static analysis, runs before expensive runtime tests
+3. **Parameter Perturbation** - Sensitivity analysis via ±20% perturbation
+4. **Observable Outcomes** - Judge by objective/status only, no code parsing
+5. **No Ground Truth Required** - Tests relative behavior, not absolute correctness
+6. **Objective Always Reported** - Even partial passes report objective value
+
+**Key Insight (Layer 4 - Monotonicity):**
 > If a parameter appears in a constraint, perturbing it should affect the objective.
 > "No effect" indicates the constraint is likely MISSING from the model.
+
+**Important: Layer Failure ≠ Wrong Result**
+
+Layer failures do not always indicate incorrect modeling. Common legitimate scenarios:
+
+| Scenario | Layer Result | Objective | Explanation |
+|----------|--------------|-----------|-------------|
+| Slack constraint | L4 FAIL | ✅ Correct | Constraint exists but has slack (e.g., cold_capacity=3500, usage=2000) |
+| Simplified model | L4-L6 partial | ≈ Correct | Model captures key dynamics, minor features skipped |
+| Alternative formulation | L4 FAIL | ✅ Correct | Different but mathematically equivalent approach |
+
+**Final Evaluation Criteria:**
+- Layer count is a diagnostic tool, not the final metric
+- **Ground truth comparison** (< 1% gap) determines correctness
+- A model with 2/6 layers but 1% gap is BETTER than 6/6 layers with 50% gap
 
 **Smart Parameter Filtering:**
 - Skip zero-value parameters (e.g., `lead_time=0`, `return_rate=0`)
 - Skip Big-M values (e.g., `labor_cap=99999`) that won't bind
 - Only test parameters that should reasonably affect the objective
 
+**Why L1-L6 are Universal (No Domain Knowledge):**
+
+| Layer | What it tests | Universal mechanism |
+|-------|---------------|---------------------|
+| L1 | Code execution | Syntax/runtime errors - applies to ANY code |
+| L2 | Solver feasibility | Gurobi status codes - applies to ANY Gurobi model |
+| L3 | Code Structure (AST) | Static analysis of code patterns: |
+|     | 3.1 Objective exists | Check for m.setObjective() call |
+|     | 3.2 Variables declared | Check for m.addVar() calls |
+|     | 3.3 Constraints added | Check for m.addConstr() calls |
+|     | 3.4 Index boundaries | Check for t-1/t+1 boundary handling |
+|     | 3.5 Sales availability | Check for sales <= I constraint (inventory problems) |
+| L4 | Monotonicity | Parameter perturbation - if param used, perturbing it affects objective |
+| L5 | Sensitivity direction | Role-based keywords (demand, capacity, cost) are universal |
+| L6 | Boundary behavior (Enhanced) | Three universal tests: |
+|     | 6.1 Capacity=0 | Setting capacity=0 tests constraint enforcement |
+|     | 6.2 Structural boundary | periods=1 tests indexing at time boundaries |
+|     | 6.3 Differential | capacity↓ vs requirement↑ should both increase cost |
+
+**L6 Enhancement - Key Insight:**
+> Multi-period models should degrade gracefully to single period.
+> If code crashes with periods=1, there's an indexing bug (t-1 or t+1 boundary).
+
+L7 (Domain Probes) is the ONLY domain-specific layer:
+- RetailOpt: Lost sales, shelf_life=1 structure, substitution probes
+- Extensible: Add custom probes for other domains
+
 **Supported Datasets:**
 
-| Dataset | Layers 1-5 | Layer 6 |
+| Dataset | Layers 1-6 | Layer 7 |
 |---------|------------|---------|
 | RetailOpt-190 | ✅ | ✅ RetailProbes |
 | MAMO | ✅ | ❌ N/A |
@@ -202,14 +284,14 @@ Definition (Probe Set Completeness):
 | Mode | Pipeline | Verification | Repair |
 |------|----------|--------------|--------|
 | Baseline | Single LLM call | Post-hoc only | No |
-| ReLoop | 3-step generation | 6-layer verification | Yes (up to 5x) |
+| ReLoop | 3-step generation | 7-layer verification | Yes (up to 5x) |
 
 ### Metrics
 
 | Metric | Definition |
 |--------|------------|
 | Execution Rate | % of scripts that run without error |
-| Layers Passed | Number of verification layers passed (0-6) |
+| Layers Passed | Number of verification layers passed (0-7) |
 | Objective Accuracy | % within 1% of ground truth |
 | Silent Failure Rate | Execution OK but objective wrong |
 
@@ -265,7 +347,7 @@ Definition (Probe Set Completeness):
 | Claim | Required Evidence |
 |-------|-------------------|
 | Silent failures are prevalent | Table: Failure rates on RetailOpt-190 |
-| 6-layer verification detects most silent failures | Precision/recall analysis |
+| 7-layer verification detects most silent failures | Precision/recall analysis |
 | Sensitivity analysis (L3) is universally effective | Results on MAMO, NL4OPT without domain probes |
 | Diagnosis-guided repair improves accuracy | Comparison with/without diagnosis |
 | Framework generalizes across models | Results on GPT-4o, Claude, SIRL, ORLM |
