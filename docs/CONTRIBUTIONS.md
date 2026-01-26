@@ -2,7 +2,7 @@
 
 ## Paper Information
 
-**Title:** ReLoop: Closing the Silent Failure Gap in LLM-based Optimization Modeling via Semantic Probes
+**Title:** ReLoop: Reliable LLM-based Optimization Modeling via Sensitivity-Based Behavioral Verification
 
 **Target:** NeurIPS 2025 / AAAI 2026
 
@@ -26,60 +26,61 @@ We identify and quantify a critical failure mode in LLM-generated optimization c
 
 ---
 
-### Contribution 2: Semantic Probe Verification (Method)
+### Contribution 2: 6-Layer Behavioral Verification (Method)
 
 **What:**
-A framework of 8 boundary test cases that detect constraint semantic errors by comparing model behavior against expected outcomes, **without parsing generated code**.
+A universal verification framework using sensitivity-based testing to detect constraint semantic errors by comparing model behavior against expected outcomes, **without parsing generated code**.
 
-**How It Works (Code Execution, NOT Prompting):**
+**6-Layer Verification System:**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Step 1: Construct boundary test data                   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ data = {                                         │   │
-│  │   "demand": {"Basic": 100, "Premium": 0},       │   │
-│  │   "production_cap": {"Basic": 0, "Premium": 80} │   │
-│  │ }                                                │   │
-│  └─────────────────────────────────────────────────┘   │
-│                         ↓                               │
-│  Step 2: Execute LLM code with subprocess               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ result = subprocess.run(                         │   │
-│  │   [python, llm_generated_code],                 │   │
-│  │   input=data                                     │   │
-│  │ )                                                │   │
-│  └─────────────────────────────────────────────────┘   │
-│                         ↓                               │
-│  Step 3: Check observable outcomes                      │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ if status == UNBOUNDED → missing constraint     │   │
-│  │ if objective < expected → wrong implementation  │   │
-│  │ if objective in range → PASS                    │   │
-│  └─────────────────────────────────────────────────┘   │
+│  Layer 1: Execution Verification                        │
+│    └── Does code run without errors?                    │
+│                                                         │
+│  Layer 2: Feasibility Verification                      │
+│    └── OPTIMAL? INFEASIBLE? UNBOUNDED?                  │
+│                                                         │
+│  Layer 3: Monotonicity Verification (Universal - Core)  │
+│    └── Does each parameter affect objective?            │
+│    └── "No effect" = constraint likely MISSING          │
+│                                                         │
+│  Layer 4: Sensitivity Verification (Role-Based)         │
+│    └── demand↑ → cost↑? capacity↓ → cost↑?              │
+│                                                         │
+│  Layer 5: Boundary Verification                         │
+│    └── param=0 behavior? param=∞ behavior?              │
+│                                                         │
+│  Layer 6: Domain Probes (optional, for RetailOpt)       │
+│    └── init, holding cost, lost sales, substitution     │
 └─────────────────────────────────────────────────────────┘
 ```
 
 **Design Principles:**
-1. **Single Mechanism Isolation** - Each probe tests ONE constraint type
-2. **Boundary Conditions** - Extreme values amplify behavioral differences
+1. **Universal (No Domain Knowledge)** - Layer 3 works for ANY optimization problem
+2. **Parameter Perturbation** - Sensitivity analysis via ±20% perturbation
 3. **Observable Outcomes** - Judge by objective/status only, no code parsing
 4. **No Ground Truth Required** - Tests relative behavior, not absolute correctness
 
-**8 Probes:**
+**Key Insight (Layer 3 - Monotonicity):**
+> If a parameter appears in a constraint, perturbing it should affect the objective.
+> "No effect" indicates the constraint is likely MISSING from the model.
 
-| Probe | Mechanism | Detection Method |
-|-------|-----------|------------------|
-| substitution_basic | Substitution | Obj range check |
-| demand_route | S_out ≤ demand | UNBOUNDED detection |
-| no_substitution | Empty edges | Spurious benefit |
-| production_capacity | Prod cap | Obj lower bound |
-| storage_capacity | Storage cap | INFEASIBLE detection |
-| aging_dynamics | Shelf-life | Waste cost missing |
-| lost_sales_slack | L variable | INFEASIBLE detection |
-| nonnegativity | I ≥ 0 | Negative inventory |
+**Smart Parameter Filtering:**
+- Skip zero-value parameters (e.g., `lead_time=0`, `return_rate=0`)
+- Skip Big-M values (e.g., `labor_cap=99999`) that won't bind
+- Only test parameters that should reasonably affect the objective
 
-**Novelty:** First automated semantic verification for LLM-generated optimization code via code execution (not LLM self-checking).
+**Supported Datasets:**
+
+| Dataset | Layers 1-5 | Layer 6 |
+|---------|------------|---------|
+| RetailOpt-190 | ✅ | ✅ RetailProbes |
+| MAMO | ✅ | ❌ N/A |
+| NL4OPT | ✅ | ❌ N/A |
+| Any LP/MILP | ✅ | Extensible |
+
+**Novelty:** First universal behavioral verification for LLM-generated optimization code via sensitivity analysis (not LLM self-checking).
 
 ---
 
@@ -190,25 +191,26 @@ Definition (Probe Set Completeness):
 
 | Model | Type | Why Selected |
 |-------|------|--------------|
-| **Qwen-Max** | General | Primary: strong reasoning + code |
-| Qwen2.5-Coder-32B | Code | Ablation: code-specialized |
-| GPT-4o | General | Baseline: strongest closed-source |
-| DeepSeek-V3 | General | Baseline: cost-effective |
+| **GPT-4o** | Closed-source | SOTA general LLM |
+| **Claude Opus 4.5** | Closed-source | SOTA general LLM |
+| **Qwen3-Max** | Closed-source | Strong reasoning + code |
+| SIRL-7B | Open-source | Training-time RL method |
+| ORLM-8B | Open-source | Training-time SFT method |
 
 ### Evaluation Modes
 
-| Mode | Pipeline | Probes | Repair |
-|------|----------|--------|--------|
-| Zero-shot | Single LLM call | Post-hoc only | No |
-| ReLoop Agent | 5-step pipeline | Integrated | Yes (5x) |
+| Mode | Pipeline | Verification | Repair |
+|------|----------|--------------|--------|
+| Baseline | Single LLM call | Post-hoc only | No |
+| ReLoop | 3-step generation | 6-layer verification | Yes (up to 5x) |
 
 ### Metrics
 
 | Metric | Definition |
 |--------|------------|
 | Execution Rate | % of scripts that run without error |
-| Probe Pass Rate | % of probes passed |
-| Objective Match | % within 1% of ground truth |
+| Layers Passed | Number of verification layers passed (0-6) |
+| Objective Accuracy | % within 1% of ground truth |
 | Silent Failure Rate | Execution OK but objective wrong |
 
 ---
@@ -263,9 +265,10 @@ Definition (Probe Set Completeness):
 | Claim | Required Evidence |
 |-------|-------------------|
 | Silent failures are prevalent | Table: Failure rates on RetailOpt-190 |
-| Probes detect most silent failures | Precision/recall analysis |
-| Probe diagnosis improves repair | Comparison with/without diagnosis |
-| Framework generalizes | Results on NL4OPT, MAMO |
+| 6-layer verification detects most silent failures | Precision/recall analysis |
+| Sensitivity analysis (L3) is universally effective | Results on MAMO, NL4OPT without domain probes |
+| Diagnosis-guided repair improves accuracy | Comparison with/without diagnosis |
+| Framework generalizes across models | Results on GPT-4o, Claude, SIRL, ORLM |
 
 ---
 

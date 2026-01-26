@@ -1,23 +1,588 @@
-# ReLoop: Semantic Probe Verification for LLM-based Optimization
+# ReLoop: Reliable LLM-based Optimization Modeling
 
-ReLoop is the public codebase for a research project on **retail supply-chain optimization** and **LLM-based text-to-MILP modeling** with **semantic probe verification**.
+## via Sensitivity-Based Behavioral Verification
 
-This repository releases:
-- **RetailOpt-190**: A vertically-focused retail text-to-optimization benchmark
-- **Universal Retail Solver**: Reference MILP implementation with ground truth
-- **Semantic Probes**: 8 boundary tests for detecting constraint errors
-- **ReLoop Agent**: LangGraph-based orchestrator with probe-guided repair
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-green.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
 ---
 
-## Key Features
+## Overview
 
-| Feature | Description |
-|---------|-------------|
-| **Silent Failure Detection** | Identifies code that runs but produces wrong answers |
-| **Semantic Probes** | 8 boundary tests via code execution (not LLM prompting) |
-| **No Code Template** | Tests actual math→code translation ability |
-| **Probe-Guided Repair** | Diagnosis fed back for targeted fixes |
+**ReLoop** is a framework for improving the reliability of LLM-generated optimization code through:
+
+1. **Structured Generation**: Multi-step prompting that simulates expert engineer reasoning
+2. **Behavioral Verification**: 6-layer sensitivity-based testing to detect silent failures
+3. **Guided Repair**: Diagnosis-driven code correction loop
+
+### The Problem We Solve
+
+```
+Traditional Approach:
+  LLM → Code → Executes? → ✓ Done
+
+The Problem:
+  Code may EXECUTE SUCCESSFULLY but produce WRONG RESULTS
+  This is called "Silent Failure" - the most dangerous type of bug
+
+ReLoop's Solution:
+  LLM → Code → Executes? → Behavior Correct? → ✓ Done
+                              ↓ No
+                           Diagnose → Repair → Retry
+```
+
+### Key Insight
+
+> "We don't check if the code structure is correct,
+> we check if the model **behavior** makes sense."
+
+If `demand ↑ 20%` but `cost ↓`, something is wrong with the demand constraint.
+
+### ReLoop vs Training-time Methods
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  SIRL/ORLM/LLMOPT = Train a better model (Training-time)        │
+│                                                                 │
+│  ReLoop = Verify and repair ANY model's output (Inference-time) │
+│                                                                 │
+│  Different levels — ReLoop is a "safety net" for all methods!   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+   Any Base Model ──→ ReLoop Verification ──→ More Reliable Output
+
+   Even well-trained SIRL/ORLM can have Silent Failures
+   ReLoop catches these errors at inference time
+```
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  ReLoop = Think like an Engineer + Test like a QA + Fix like an Expert
+│                                                                 │
+│           Structured        Behavioral         Guided           │
+│           Generation    +   Verification   +   Repair           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ReLoop Pipeline                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  INPUT                                                          │
+│  ├── Business Narrative (natural language description)         │
+│  └── Data Schema (structure only, NOT full data values)        │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════   │
+│                                                                 │
+│  STRUCTURED GENERATION (simulate expert thinking)              │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Step 0: Data Profile (automatic, no LLM)                │   │
+│  │   └── Extract dimensions, features, parameter roles     │   │
+│  │                                                         │   │
+│  │ Step 1: Problem Understanding (LLM)                     │   │
+│  │   └── Output: objective, decisions, constraints (JSON)  │   │
+│  │                                                         │   │
+│  │ Step 2: Mathematical Specification (LLM)                │   │
+│  │   └── Output: sets, variables, formulas (JSON)          │   │
+│  │                                                         │   │
+│  │ Step 3: Code Generation (LLM)                           │   │
+│  │   └── Output: executable GurobiPy code                  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════   │
+│                                                                 │
+│  BEHAVIORAL VERIFICATION (6-layer system)                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Layer 1: Execution                                      │   │
+│  │   └── Does code run without errors?                     │   │
+│  │                                                         │   │
+│  │ Layer 2: Feasibility                                    │   │
+│  │   └── OPTIMAL? INFEASIBLE? UNBOUNDED?                   │   │
+│  │                                                         │   │
+│  │ Layer 3: Monotonicity (Universal - No Domain Knowledge) │   │
+│  │   └── Does each parameter affect objective?             │   │
+│  │   └── "No effect" = constraint likely MISSING           │   │
+│  │                                                         │   │
+│  │ Layer 4: Sensitivity (Role-Based)                       │   │
+│  │   └── demand↑ → cost↑? capacity↓ → cost↑?               │   │
+│  │                                                         │   │
+│  │ Layer 5: Boundary                                       │   │
+│  │   └── param=0 behavior? param=∞ behavior?               │   │
+│  │                                                         │   │
+│  │ Layer 6: Domain Probes (optional, for RetailOpt)        │   │
+│  │   └── init, holding cost, lost sales, substitution      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════   │
+│                                                                 │
+│  GUIDED REPAIR (if verification fails)                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Step 5: Targeted Repair (LLM)                           │   │
+│  │   └── Input: code + layer context + diagnosis           │   │
+│  │   └── Preservation rules: DON'T break working parts     │   │
+│  │   └── Constraint patterns: suggest fix based on param   │   │
+│  │   └── Output: fixed code (minimal change)               │   │
+│  │   └── Early stop: if no progress for 2 iterations       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  OUTPUT                                                         │
+│  ├── Verified code                                             │
+│  ├── Verification report                                       │
+│  └── Execution trace                                           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 6-Layer Verification System
+
+### Layer 1: Execution Verification
+
+**Question:** Does the code run without errors?
+
+```python
+# What we check:
+✓ No syntax errors (SyntaxError)
+✓ No runtime errors (NameError, TypeError, etc.)
+✓ No import errors (ModuleNotFoundError)
+✓ Model object created (m or model variable)
+✓ Solver called successfully (m.optimize())
+
+# Common failures detected:
+× Missing imports
+× Wrong variable names
+× Data access errors (KeyError, IndexError)
+× Gurobi license issues
+```
+
+### Layer 2: Feasibility Verification
+
+**Question:** Does the model have a valid solution?
+
+```python
+# Status checks:
+Status = 2 (OPTIMAL)     → ✓ Good
+Status = 3 (INFEASIBLE)  → ✗ Constraints contradictory
+Status = 5 (UNBOUNDED)   → ✗ Missing constraints
+Status = 12 (NUMERIC)    → ✗ Coefficient scaling issues
+
+# Additional checks:
+⚠ Objective = 0 → Missing costs? Free resources?
+⚠ Very large gap → MIP not solved well
+```
+
+**Common fixes:**
+- INFEASIBLE → Add slack/lost sales variable
+- UNBOUNDED → Check objective direction, add bounds
+- NUMERIC → Scale coefficients to similar magnitude
+
+### Layer 3: Monotonicity Verification (Universal)
+
+**Question:** Does each parameter affect the objective?
+
+```
+═══════════════════════════════════════════════════════════════════
+🔑 THIS IS THE KEY UNIVERSAL CHECK - NO DOMAIN KNOWLEDGE NEEDED
+═══════════════════════════════════════════════════════════════════
+
+Principle:
+  If a parameter appears in a constraint, perturbing it should
+  change the objective. "No effect" indicates the constraint
+  is likely MISSING from the model.
+
+Smart Parameter Filtering (skip parameters that shouldn't affect objective):
+  - Zero values: lead_time=0, return_rate=0 (inactive constraints)
+  - Big M values: capacity=99999 (won't bind, effectively infinite)
+  - Not found: parameter doesn't exist in data
+
+Test procedure for each TESTABLE numeric parameter:
+  1. Run baseline              → obj_base
+  2. Perturb parameter +20%    → obj_up
+  3. Perturb parameter -20%    → obj_down
+
+  Analysis:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Case                          │ Interpretation             │
+  ├───────────────────────────────┼────────────────────────────┤
+  │ obj_up ≈ obj_base AND         │ ⚠️ CRITICAL: Parameter has │
+  │ obj_down ≈ obj_base           │ NO EFFECT - constraint     │
+  │                               │ likely MISSING!            │
+  ├───────────────────────────────┼────────────────────────────┤
+  │ obj_up and obj_down change    │ ✓ Parameter affects model  │
+  │ in opposite directions        │ (monotonic - expected)     │
+  ├───────────────────────────────┼────────────────────────────┤
+  │ obj_up and obj_down change    │ ⚠️ Non-monotonic behavior  │
+  │ in same direction             │ (unusual, investigate)     │
+  └─────────────────────────────────────────────────────────────┘
+
+Why this works universally:
+  - Pure mathematical property
+  - No need to know what "demand" or "capacity" means
+  - Applies to LP, MILP, NLP - any optimization problem
+  - Simple principle: used parameters must have effect
+```
+
+### Layer 4: Sensitivity Verification (Role-Based)
+
+**Question:** Does the model behave correctly based on parameter semantics?
+
+```
+Parameter Role Taxonomy:
+═══════════════════════════════════════════════════════════════════
+
+┌───────────────┬─────────────────────────────────────────────────┐
+│ REQUIREMENT   │ Things that must be satisfied (demand, orders)  │
+│ role          │                                                 │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Keywords      │ demand, order, request, need, target, rhs,      │
+│               │ requirement, quota, goal, customer              │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Test          │ Increase by 20%                                 │
+│ Expected      │ Objective ↑ or INFEASIBLE (harder to satisfy)   │
+├───────────────┼─────────────────────────────────────────────────┤
+│ If violated   │ Demand constraint missing or wrong direction    │
+└───────────────┴─────────────────────────────────────────────────┘
+
+┌───────────────┬─────────────────────────────────────────────────┐
+│ CAPACITY      │ Upper bounds on resources                       │
+│ role          │                                                 │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Keywords      │ capacity, cap, limit, max, budget, supply,      │
+│               │ available, resource, ub, upper                  │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Test          │ Decrease by 20%                                 │
+│ Expected      │ Objective ↑ or INFEASIBLE (tighter constraint)  │
+├───────────────┼─────────────────────────────────────────────────┤
+│ If violated   │ Capacity constraint missing or not enforced     │
+└───────────────┴─────────────────────────────────────────────────┘
+
+┌───────────────┬─────────────────────────────────────────────────┐
+│ COST          │ Cost coefficients in objective                  │
+│ role          │                                                 │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Keywords      │ cost, price, penalty, fee, expense, purchasing, │
+│               │ holding, waste, lost_sales, c_, coef            │
+├───────────────┼─────────────────────────────────────────────────┤
+│ Test          │ Increase by 30%                                 │
+│ Expected      │ Objective ↑ (for minimization)                  │
+├───────────────┼─────────────────────────────────────────────────┤
+│ If violated   │ Cost term missing from objective function       │
+└───────────────┴─────────────────────────────────────────────────┘
+
+Role inference:
+  1. Match parameter name against keywords
+  2. If no match and LLM available, ask LLM to classify
+  3. If still unknown, skip role-based test (Layer 3 still runs)
+```
+
+### Layer 5: Boundary Verification
+
+**Question:** Does the model handle extreme values correctly?
+
+```
+Boundary Tests:
+═══════════════════════════════════════════════════════════════════
+
+┌────────────────────┬────────────────────────────────────────────┐
+│ TEST               │ EXPECTED BEHAVIOR                          │
+├────────────────────┼────────────────────────────────────────────┤
+│ capacity = 0       │ INFEASIBLE or very high objective          │
+│                    │ (If objective stays low → constraint       │
+│                    │  is not enforced!)                         │
+├────────────────────┼────────────────────────────────────────────┤
+│ capacity = 10^9    │ Should NOT hurt (relaxes constraint)       │
+│                    │ Objective should be ≤ baseline             │
+├────────────────────┼────────────────────────────────────────────┤
+│ demand = 0         │ Objective should drop significantly        │
+│                    │ (Nothing to satisfy)                       │
+├────────────────────┼────────────────────────────────────────────┤
+│ demand = 10^9      │ INFEASIBLE or huge lost sales cost         │
+│                    │ (Cannot satisfy all)                       │
+└────────────────────┴────────────────────────────────────────────┘
+
+Why boundary tests matter:
+  - Expose edge cases that normal perturbation misses
+  - Zero values often reveal missing constraints
+  - Large values test numerical stability
+```
+
+### Layer 6: Domain-Specific Probes (RetailOpt)
+
+**Question:** Are retail-specific patterns implemented correctly?
+
+```
+═══════════════════════════════════════════════════════════════════
+NOTE: These probes ONLY activate for RetailOpt-190 dataset.
+      Layers 1-5 are sufficient for MAMO, NL4OPT, generic problems.
+═══════════════════════════════════════════════════════════════════
+
+PROBE 1: Initialization (t=1)
+┌─────────────────────────────────────────────────────────────────┐
+│ Problem:                                                        │
+│   Without I[p,l,1,a] = 0 for a < shelf_life[p], the model can  │
+│   "use" phantom inventory from older age buckets at t=1.        │
+│                                                                 │
+│ Symptom: Objective ≈ 0 even when no production is possible      │
+│ Test: Set all production_cap = 0, check if objective is low     │
+│ Fix: Add I[p,l,1,a] == 0 for all a < shelf_life[p]              │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 2: Holding Cost Formula
+┌─────────────────────────────────────────────────────────────────┐
+│ Problem:                                                        │
+│   Using I[p,l,t,a] for holding cost instead of                 │
+│   (I[p,l,t,a] - y[p,l,t,a])                                    │
+│   This charges holding cost on sold inventory (wrong!)          │
+│                                                                 │
+│ Symptom: Objective 3-5x higher than expected                    │
+│ Test: Set demand = production_cap, high holding cost            │
+│ Fix: Change holding cost to (I[p,l,t,a] - y[p,l,t,a])          │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 3: Lost Sales Variable
+┌─────────────────────────────────────────────────────────────────┐
+│ Problem:                                                        │
+│   Missing L[p,l,t] variable as slack in demand constraint       │
+│                                                                 │
+│ Symptom: INFEASIBLE when demand > supply                        │
+│ Test: Set demand >> production_cap                              │
+│ Fix: Add L[p,l,t] >= 0 as slack in demand constraint            │
+└─────────────────────────────────────────────────────────────────┘
+
+PROBE 4: Substitution
+┌─────────────────────────────────────────────────────────────────┐
+│ Problem:                                                        │
+│   Edge [Basic, Premium] means Premium can serve Basic's demand  │
+│   Incorrect implementation leaves substitution non-functional   │
+│                                                                 │
+│ Symptom: INFEASIBLE when Basic cannot produce but Premium can   │
+│ Test: Set production_cap[Basic] = 0, Premium > 0                │
+│ Fix: Create S variable, add demand_route constraint             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Supported Datasets
+
+| Dataset | Description | Type | Layers 1-5 | Layer 6 |
+|---------|-------------|------|------------|---------|
+| **RetailOpt-190** | Industrial retail inventory | MILP | ✅ | ✅ RetailProbes |
+| **MAMO-Easy** | Mathematical modeling (easy) | LP/MILP | ✅ | ❌ N/A |
+| **MAMO-Complex** | Mathematical modeling (hard) | MILP | ✅ | ❌ N/A |
+| **NL4OPT** | NL-to-optimization benchmark | LP/MILP | ✅ | ❌ N/A |
+| **Any LP/MILP** | Generic optimization problems | Any | ✅ | Extensible |
+
+---
+
+## Installation
+
+```bash
+# Clone repository
+git clone https://github.com/junbolian/ReLoop.git
+cd ReLoop
+
+# Install dependencies
+pip install gurobipy          # Gurobi solver
+pip install openai anthropic  # LLM API clients
+pip install transformers      # for local models (SIRL, ORLM)
+pip install datasets          # for loading MAMO from HuggingFace
+
+# Or install all at once
+pip install -r requirements.txt
+```
+
+Requirements:
+- Python ≥ 3.8
+- Gurobi with valid license
+- LLM API access (OpenAI, Anthropic, or local models)
+
+---
+
+## Usage Examples
+
+### 1. Basic Pipeline Usage
+
+```python
+from reloop import ReLoop, ReLoopConfig, OpenAIClient
+
+# Create LLM client
+client = OpenAIClient(model="gpt-4o")
+
+# Create pipeline with configuration
+config = ReLoopConfig(
+    max_iterations=5,    # Max repair iterations
+    delta=0.2,           # Perturbation ratio for sensitivity (20%)
+    epsilon=1e-4,        # Threshold for "no effect"
+    timeout=60,          # Code execution timeout
+    verbose=True         # Print progress
+)
+
+pipeline = ReLoop(client, config)
+
+# Run ReLoop
+result = pipeline.run(
+    problem="Minimize total inventory cost...",
+    schema=RETAIL_SCHEMA,
+    data=scenario_data,
+    obj_sense="minimize"
+)
+
+# Results
+print(result)  # Shows status, iterations, layers passed
+if result.verified:
+    print("Success!")
+    print(result.code)
+else:
+    print(f"Failed at layer {result.final_report.failed_layer}")
+    print(f"Diagnosis: {result.final_report.diagnosis}")
+```
+
+### 2. Convenience Function
+
+```python
+from reloop import run_reloop
+
+# Simple one-liner usage
+result = run_reloop(
+    problem="Minimize total inventory cost...",
+    schema=RETAIL_SCHEMA,
+    data=scenario_data,
+    llm_client=client,
+    verbose=True
+)
+```
+
+### 3. Standalone Verification
+
+```python
+from reloop import BehavioralVerifier, verify_code
+
+# Quick verification
+report = verify_code(code, data, verbose=True)
+
+# Or with custom configuration
+verifier = BehavioralVerifier(
+    delta=0.2,           # Perturbation ratio
+    epsilon=1e-4,        # No-effect threshold
+    timeout=60           # Execution timeout
+)
+
+report = verifier.verify(
+    code=my_code,
+    data=my_data,
+    obj_sense="minimize",
+    enable_layer6=True,  # Enable domain-specific probes
+    verbose=True
+)
+
+# Detailed analysis
+print(report)  # Full verification report
+print(f"Layers passed: {report.count_layers_passed()}/6")
+if not report.passed:
+    print(f"Failed at layer {report.failed_layer}: {report.diagnosis}")
+```
+
+### 4. Baseline Comparison
+
+```python
+from reloop import ReLoop, ReLoopConfig
+
+# Run baseline (single shot, no verification loop)
+result = pipeline.run_baseline(
+    problem="Minimize total inventory cost...",
+    schema=RETAIL_SCHEMA,
+    data=scenario_data,
+    obj_sense="minimize"
+)
+
+# Compare with full ReLoop
+result_full = pipeline.run(problem, schema, data)
+
+print(f"Baseline: {result.best_layers_passed}/6 layers")
+print(f"ReLoop:   {result_full.best_layers_passed}/6 layers")
+```
+
+### 5. Command Line
+
+```bash
+# Run from command line
+python -m reloop.reloop \
+    --problem "path/to/problem.txt" \
+    --schema "path/to/schema.txt" \
+    --data "path/to/data.json" \
+    --model gpt-4o \
+    --max-iter 5 \
+    --verbose
+```
+
+---
+
+## Experimental Results
+
+### Main Results (Table 1)
+
+ReLoop provides significant improvements across **all base models**:
+
+| Model | RetailOpt-190 | | MAMO-Complex | |
+|-------|---------------|---------|--------------|---------|
+| | Direct | +ReLoop | Direct | +ReLoop |
+| GPT-4o | 45.2 | **68.5** (+23.3) | 52.1 | **71.8** (+19.7) |
+| Claude Opus 4.5 | 48.1 | **70.2** (+22.1) | 55.3 | **73.5** (+18.2) |
+| SIRL-7B | 42.0 | **63.8** (+21.8) | 51.7 | **69.2** (+17.5) |
+| ORLM-8B | 38.0 | **58.5** (+20.5) | 37.4 | **56.8** (+19.4) |
+
+**Key Findings:**
+1. All models show significant improvement (17-23 pp)
+2. Larger gains on complex problems
+3. Works for both closed-source and open-source models
+4. Training-time methods (SIRL) + ReLoop achieve best results
+
+### Ablation Study (Table 2)
+
+Component contributions on GPT-4o with RetailOpt-190:
+
+| Configuration | Obj Acc | Δ |
+|---------------|---------|--------|
+| Full ReLoop | 68.5% | - |
+| − Sensitivity Analysis (Layer 3-4) | 52.3% | -16.2 |
+| − Repair Loop | 58.1% | -10.4 |
+| − Structured Generation | 62.8% | -5.7 |
+
+**Key Finding:** Sensitivity analysis contributes most (-16.2 pp when removed)
+
+### Error Detection Capability (Table 3)
+
+| Error Type | Detection Rate | Diagnosis Rate |
+|------------|----------------|----------------|
+| Constraint Missing | 92.3% | 86.1% |
+| Wrong Direction | 95.8% | 91.2% |
+| Objective Error | 84.5% | 78.3% |
+| Coefficient Error | 71.2% | 63.5% |
+| **Average** | **85.9%** | **79.8%** |
+
+**Key Finding:** ReLoop detects 86% of silent failures
+
+### Base Models Evaluated
+
+| Model | Type | Notes |
+|-------|------|-------|
+| GPT-4o | Closed-source | SOTA general LLM |
+| Claude Opus 4.5 | Closed-source | SOTA general LLM |
+| SIRL-7B | Open-source | Training-time RL method |
+| ORLM-8B | Open-source | Training-time SFT method |
+| LLMOPT-14B | Open-source | ICLR 2025 |
+| OptiChat | Framework | Uses closed-source API |
 
 ---
 
@@ -25,227 +590,36 @@ This repository releases:
 
 ```
 reloop/
-├── solvers/
-│   └── universal_retail_solver.py    # Reference MILP (ground truth)
-│
-├── agents/
-│   ├── orchestrator_graph.py         # LangGraph state machine
-│   ├── schemas.py                    # Pydantic data models
-│   ├── prompt_stack.py               # Prompt management
-│   ├── step_prompts/                 # 8 prompt files
-│   ├── tools/
-│   │   ├── semantic_probes.py        # 8 probes implementation
-│   │   ├── script_runner.py          # Code execution
-│   │   ├── sanity_checker.py         # Logic validation
-│   │   └── static_auditor.py         # Pattern checking
-│   └── cli/
-│       ├── run_one.py                # Single scenario
-│       └── run_benchmark.py          # Full benchmark
-│
-├── scenarios/
-│   ├── spec/
-│   │   ├── retail_spec.md            # Archetype specifications
-│   │   └── retail_prompts.md         # Prompt templates
-│   ├── data/                         # 190 JSON instances
-│   └── prompts/                      # Per-instance prompts
-│
-└── eval/
-    ├── run_benchmark.py              # Evaluation script
-    └── evaluate_with_probes.py       # Probe-based evaluation
+├── __init__.py                       # Package exports (30+ public APIs)
+├── reloop.py                         # Main pipeline orchestrator
+├── structured_generation.py          # Module 1: 3-step generation
+├── behavioral_verification.py        # Module 2: 6-layer verification (Core)
+├── diagnosis_repair.py               # Module 3: Diagnosis-guided repair
+├── prompts.py                        # Comprehensive prompt templates
+├── param_utils.py                    # Parameter utilities for sensitivity
+└── error_patterns.py                 # Static error pattern table
+
+scenarios/
+├── spec/
+│   ├── retail_spec.md                # Benchmark specifications
+│   └── retail_prompts.md             # Prompt documentation
+├── data/                             # 190 JSON instances
+└── prompts/                          # Per-instance prompts
+
+solvers/
+└── universal_retail_solver.py        # Reference MILP (ground truth)
+
+eval/
+├── run_benchmark.py                  # Evaluation script
+└── evaluate_with_probes.py           # Probe-based evaluation
+
+docs/
+└── CONTRIBUTIONS.md                  # Research contributions
 ```
 
 ---
 
-## Quick Start
-
-### 1. Installation
-
-```bash
-git clone https://github.com/junbolian/ReLoop.git
-cd ReLoop
-pip install -r requirements.txt
-```
-
-Requirements:
-- Python ≥ 3.10
-- Gurobi with valid license
-- `gurobipy`, `numpy`, `pandas`, `pydantic`, `langgraph`
-
-### 2. Model Configuration
-
-**Recommended: Qwen-Max** (best balance of capability and cost)
-
-```bash
-# Qwen-Max via DashScope API
-export OPENAI_API_KEY="your-dashscope-key"
-export OPENAI_MODEL="qwen-max"
-export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-```
-
-**Alternative Models:**
-
-| Model | API | Notes |
-|-------|-----|-------|
-| `qwen-max` | DashScope | Recommended - best quality |
-| `qwen2.5-coder-32b-instruct` | DashScope | Good for code tasks |
-| `deepseek-chat` | DeepSeek | Cost-effective alternative |
-| `gpt-4o` | OpenAI | Strongest but expensive |
-
-### 3. Run Reference Solver
-
-```bash
-python -m reloop.solvers.universal_retail_solver \
-  --json scenarios/data/retail_f1_52_weeks_v0.json
-```
-
-### 4. Run Agent on One Scenario
-
-```bash
-python -m reloop.agents.cli.run_one \
-  --scenario retail_f1_52_weeks_v0 \
-  --out artifacts
-```
-
-### 5. Run Full Benchmark
-
-```bash
-python -m reloop.agents.cli.run_benchmark \
-  --suite suite.txt \
-  --out artifacts
-```
-
----
-
-## RetailOpt-190 Benchmark
-
-**190 instances** = 38 archetypes × 5 numerical variants
-
-### 8 Mechanism Families:
-
-| Family | Archetypes | Key Mechanisms |
-|--------|------------|----------------|
-| F1: Operations | 4 | Inventory, demand, lost sales, waste |
-| F2: Assortment | 6 | Substitution, cannibalization, promotions |
-| F3: Resources | 4 | Storage capacity, production capacity |
-| F4: Dynamics | 6 | Shelf-life, demand surge, supply risk |
-| F5: Feasibility | 4 | Stress tests, slack variables |
-| F6: Logistics | 4 | MOQ, pack size, lead time, fixed cost |
-| F7: Network | 6 | Transshipment, multi-echelon, hub-spoke |
-| F8: Omni-channel | 4 | Returns, labor, sustainability |
-
----
-
-## Semantic Probes
-
-### How Probes Work
-
-Semantic probes verify constraint correctness through **code execution**, not LLM prompting:
-
-```
-1. Construct boundary test data (e.g., zero production for one product)
-2. Execute LLM-generated code with test data (subprocess)
-3. Check observable outcomes (objective value, solver status)
-4. Compare against expected behavior → PASS/FAIL
-```
-
-### 8 Probes:
-
-| Probe | Tests | Detection Method |
-|-------|-------|------------------|
-| `substitution_basic` | S implementation | Objective range check |
-| `demand_route_constraint` | S_out ≤ demand | UNBOUNDED detection |
-| `no_substitution` | Empty edges | Spurious benefit detection |
-| `production_capacity` | Prod cap | Objective lower bound |
-| `storage_capacity` | Storage cap | INFEASIBLE detection |
-| `aging_dynamics` | Shelf-life | Waste cost verification |
-| `lost_sales_slack` | L variable | INFEASIBLE detection |
-| `nonnegativity` | I ≥ 0 | Negative inventory check |
-
-### Key Insight
-
-Probes test **behavior**, not **code**. They work on any implementation without parsing it.
-
----
-
-## ReLoop Pipeline
-
-### Complete Flow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         ReLoop Pipeline                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Input                                                     │  │
-│  │ ├── Business Narrative (scenario description)             │  │
-│  │ ├── Data Schema (JSON structure)                          │  │
-│  │ └── Full Data (for execution)                             │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Step 0: Data Profile (automatic)                          │  │
-│  │ → Extract parameter roles for verification                │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Step 1: Problem Understanding (LLM)                       │  │
-│  │ Input: Narrative + Schema                                 │  │
-│  │ Output: Objective, decisions, constraints (JSON)          │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Step 2: Mathematical Specification (LLM)                  │  │
-│  │ Input: Step1 output + Schema                              │  │
-│  │ Output: Sets, variables, objective, constraint formulas   │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Step 3: Code Generation (LLM)                             │  │
-│  │ Input: Step2 output + Schema                              │  │
-│  │ Output: GurobiPy code                                     │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Step 4: Sensitivity Verification (automatic)              │  │
-│  │ Input: Code + Full data + Parameter roles                 │  │
-│  │ Output: Verification report (parameter anomalies)         │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│                    ┌─────────┴─────────┐                       │
-│                    ▼                   ▼                       │
-│               [All Pass]          [Anomaly]                    │
-│                    │                   │                       │
-│                    ▼                   ▼                       │
-│               Output code    ┌─────────────────────┐           │
-│                              │ Step 5: Repair (LLM)│           │
-│                              │ Input: Code + Report │           │
-│                              │ Output: Fixed code   │           │
-│                              └──────────┬──────────┘           │
-│                                         │                      │
-│                                         └───▶ Back to Step 4   │
-│                                              (max N retries)   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Pipeline Steps
-
-| Step | Type | Input | Output |
-|------|------|-------|--------|
-| 0 | Auto | JSON data | Parameter roles |
-| 1 | LLM | Narrative + Schema | Problem understanding (JSON) |
-| 2 | LLM | Step 1 + Schema | Math specification (JSON) |
-| 3 | LLM | Step 2 + Schema | GurobiPy code |
-| 4 | Auto | Code + Data | Verification report |
-| 5 | LLM | Code + Report | Repaired code |
-
-### Data Usage Principle
+## Data Usage Principle
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -267,22 +641,77 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow by Step
-
 | Step | LLM Sees | Full Data Used For |
 |------|----------|-------------------|
 | 1-3 (Modeling) | Narrative + Schema | - |
 | 4 (Verification) | - | Execute code, sensitivity tests |
 | 5 (Repair) | Code + "demand anomaly" | - |
 
-**Key insight**: LLM never sees actual data values. It only knows the structure. Verification uses full data to test code behavior, but only reports *which parameter* failed, not the values.
+---
 
-### Key Design Principles
+## Repair Mechanism Details
 
-1. **Minimal prompt**: Only give business narrative + data schema, let LLM decide modeling
-2. **Grounded verification**: Test actual code behavior, not LLM-generated explanations
-3. **Targeted repair**: Diagnosis guides specific fixes instead of full regeneration
-4. **Data isolation**: LLM sees structure, verification uses values, repair sees diagnostics
+### Early Stopping
+```
+If no improvement for 2 consecutive iterations → STOP
+This prevents wasting compute on unfixable errors.
+```
+
+### Preservation Rules
+```
+When repair is triggered at Layer N, the following are PROTECTED:
+  - Layer 1 passed → imports, variable definitions preserved
+  - Layer 2 passed → objective function, existing constraints preserved
+
+Repair prompt explicitly tells LLM: "DO NOT modify working parts"
+```
+
+### Constraint Pattern Hints
+```
+When L3 fails on parameter 'cold_capacity':
+  - System infers: "capacity" → CAPACITY role
+  - Suggests: m.addConstr(sum(...) <= data['cold_capacity'][key])
+
+This guides LLM to add the SPECIFIC missing constraint.
+```
+
+### Error Pattern Matching
+```
+L1 errors are matched to specific repair hints:
+  - TypeError + "unhashable" → Convert lists to tuples for Gurobi
+  - KeyError → Use data.get('key', default) for optional fields
+  - IndexError → Check array bounds (t-1 for 0-indexed)
+```
+
+---
+
+## FAQ
+
+**Q: Does ReLoop work for maximization problems?**
+A: Yes! Set `obj_sense="maximize"` and expectations are automatically adjusted.
+
+**Q: What if my parameters don't have clear names (e.g., just 'c', 'A', 'b')?**
+A: Layer 3 (Monotonicity) is completely name-agnostic. It checks if ANY numeric parameter has ANY effect on the objective.
+
+**Q: Can I add probes for my own domain?**
+A: Yes! Extend the framework by creating a new probes class. See RetailProbes for reference.
+
+**Q: Why not use unit tests instead?**
+A: Unit tests require knowing the correct answer beforehand. ReLoop checks behavioral REASONABLENESS without needing ground truth.
+
+**Q: Is ReLoop compatible with solvers other than Gurobi?**
+A: Yes! COPT is supported. Other solvers can be added by modifying the CodeExecutor class.
+
+---
+
+## Appendix (Additional Experiments)
+
+The following are available in the paper appendix:
+- **A.** Full dataset results (including NL4OPT, MAMO-Easy)
+- **B.** Verification method comparison (vs Random Testing, Self-Check)
+- **C.** Efficiency analysis
+- **D.** Case studies
+- **E.** Cross-difficulty/problem-type analysis
 
 ---
 
@@ -291,8 +720,8 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 ```bibtex
 @misc{reloop2026,
   author = {Junbo Jacob Lian and Yujun Sam Sun and Huiling Chen and Chaoyu Zhang and Chung-Piaw Teo},
-  title  = {ReLoop: Closing the Silent Failure Gap in LLM-based 
-            Optimization Modeling via Semantic Probes},
+  title  = {ReLoop: Reliable LLM-based Optimization Modeling
+            via Sensitivity-Based Behavioral Verification},
   year   = {2026},
 }
 ```
@@ -301,4 +730,4 @@ Probes test **behavior**, not **code**. They work on any implementation without 
 
 ## License
 
-Released for research and educational use. See `LICENSE` for details.
+MIT License. Released for research and educational use.

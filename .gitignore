@@ -60,7 +60,7 @@ Thumbs.db
 *.pfx
 
 # ----------------------------
-# Data
+# Data & Results
 # ----------------------------
 artifacts/
 models/
@@ -68,6 +68,25 @@ test/
 qwen3-max-result/
 claude-opus-4.5-result/
 claude-opus-4.5-result-round2/
+*-result/
+*-result-*/
+outputs/
+results/
+
+# ----------------------------
+# Test files (not for commit)
+# ----------------------------
+test_reloop.py
+test_*.py
+!reloop/test_*.py
+
+# ----------------------------
+# Temp files
+# ----------------------------
+tmp*/
+temp*/
+*.tmp
+
 # If you DO want to keep a small sample jsonl in repo, you can negate it like:
 # !data/sample.jsonl
 
