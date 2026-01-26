@@ -100,16 +100,25 @@ def perturb_param(data: Dict[str, Any], param_path: str, factor: float) -> Dict[
     if final_key not in obj:
         return data_copy
     value = obj[final_key]
+
+    def apply_factor(v, factor):
+        """Apply factor while preserving int type for int inputs."""
+        if isinstance(v, int):
+            return max(1, int(round(v * factor)))  # Preserve int, min 1
+        elif isinstance(v, float):
+            return v * factor
+        return v
+
     if isinstance(value, (int, float)):
-        obj[final_key] = value * factor
+        obj[final_key] = apply_factor(value, factor)
     elif isinstance(value, list):
-        obj[final_key] = [v * factor if isinstance(v, (int, float)) else v for v in value]
+        obj[final_key] = [apply_factor(v, factor) for v in value]
     elif isinstance(value, dict):
         for k, v in value.items():
             if isinstance(v, (int, float)):
-                value[k] = v * factor
+                value[k] = apply_factor(v, factor)
             elif isinstance(v, list):
-                value[k] = [x * factor if isinstance(x, (int, float)) else x for x in v]
+                value[k] = [apply_factor(x, factor) for x in v]
     return data_copy
 
 
