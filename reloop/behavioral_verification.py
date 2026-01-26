@@ -133,6 +133,8 @@ class BehavioralVerifier:
         if verbose:
             print("\n[L2: Feasibility]")
         l2_result = self._layer2_feasibility(baseline)
+        # Store objective in L2 details for extraction
+        l2_result.details["objective"] = baseline.get("objective")
         results.append(l2_result)
         if not l2_result.passed:
             if verbose:
