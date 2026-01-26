@@ -16,11 +16,22 @@ ERROR_PATTERNS = {
     },
     "L1_typeerror": {
         "repair_hints": [
-            "COMMON GUROBI ERROR: 'unhashable type: list' means you're using a list as dict key",
-            "FIX: Convert list of lists to list of tuples before addVars():",
-            "  edges = [tuple(e) for e in data.get('network', {}).get('edges', [])]",
-            "  var = m.addVars(edges, ...)  # Now edges contains tuples, not lists",
-            "Also check: m.addConstr() not comparison operators on Vars"
+            "COMMON GUROBI ERRORS:",
+            "",
+            "1. 'unhashable type: list' - using list as dict key:",
+            "   FIX: edges = [tuple(e) for e in data.get('network', {}).get('edges', [])]",
+            "",
+            "2. 'unsupported operand type(s) for *: float and GenExprMax' - gp.max_() returns expression, not value:",
+            "   WRONG: cost * gp.max_(0, I[p,l,t] - threshold)",
+            "   FIX: Use auxiliary variable: W[p,l,t] >= I[p,l,t] - threshold; W[p,l,t] >= 0",
+            "",
+            "3. '>' not supported between Var and int - comparing Gurobi Var directly:",
+            "   WRONG: if I[p,l,t] > 0: ...",
+            "   FIX: Use indicator constraints or Big-M formulation",
+            "",
+            "4. 'Var object has no attribute' - accessing Var value before optimization:",
+            "   WRONG: I[p,l,t].X in constraint building",
+            "   FIX: Use variable directly in expressions, not .X attribute"
         ]
     },
     "L1_indexerror": {
