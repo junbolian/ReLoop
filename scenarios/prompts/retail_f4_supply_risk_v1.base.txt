@@ -9,8 +9,10 @@ The retailer faces persistent but moderate supply risk in the middle of the seas
 
 Structure cues:
 - The inventory, storage, and lost sales framework is the same single-echelon structure as in the base scenario.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
 - In the JSON, per-product production capacities are reduced over a specified mid-horizon band of periods, but not set to zero. Outside this band, capacities are higher and should be used to build inventory when beneficial.
 - Waste cost parameters are increased for all products so that discarding inventory is more expensive, making overbuilding before the risk window more costly.
 - Inventory at each product, location, and period remains non-negative and is updated from previous stock, allowed production, sales, and waste.
-- Storage capacity constraints, substitution behavior, zero lead times, and generous labor capacity are unchanged from the baseline.
+- Substitution behavior, zero lead times, and generous labor capacity are unchanged from the baseline.
 - The objective is to minimize total cost while trading off early inventory builds against the increased waste cost and mid-season supply risk.

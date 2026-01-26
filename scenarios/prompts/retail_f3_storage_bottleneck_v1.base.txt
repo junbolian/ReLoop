@@ -9,8 +9,9 @@ All locations share a tight storage resource that applies across all products, r
 
 Structure cues:
 - The inventory, production, and lost sales logic is the same as in retail_f1_base: single-echelon, multiple products and locations, local demand, and no backorders or transshipment.
-- At every location and period, a single shared storage capacity constraint limits the volume-weighted sum of on-hand inventory across all products using product-specific storage usage and the location capacity from the JSON.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. This constraint is designed to be binding and central to the trade-offs.
 - Inventory levels at each location are kept non-negative and evolve from carried-over stock and new production, minus sales and waste.
 - Substitution edges, if any, are taken from the JSON and follow the standard semantics: edge [A, B] means A's demand can be served by B.
 - Production capacities, zero lead times, and generous labor capacity remain as in the base scenario.
-- The objective is to minimize total cost while the shared storage constraint is designed to be binding and thus central to the trade-offs.
+- The objective is to minimize total cost while respecting the tight storage constraint.

@@ -9,8 +9,10 @@ A quality issue forces the retailer to halt production of the basic product afte
 
 Structure cues:
 - The inventory and production logic is the same as in the base scenario: single-echelon, local demand, local production, and no transshipment.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
 - In the JSON, the production capacity for the basic product is set to zero after a specified time index, while other products retain their production capacities.
 - Inventory for each product and location evolves from period to period based on previous stock, production (which is zero for the basic product during the hold), sales, and waste, and must remain non-negative.
 - Any unmet demand for the basic product after considering allowed substitution becomes lost sales.
-- Storage capacity, substitution behavior, zero lead times, and generous labor capacity remain as usual.
+- Substitution behavior, zero lead times, and generous labor capacity remain as usual.
 - The objective is to minimize total cost while capturing the effect of the asymmetric quality hold on the basic product.

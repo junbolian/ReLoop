@@ -9,7 +9,8 @@ Storage capacity is reduced to the point where any attempt to maintain very high
 
 Structure cues:
 - The inventory structure with production and storage capacity constraints is the same as in the base scenario.
-- Storage capacities at all locations are sharply scaled down in the JSON. These tighter capacities must be enforced when limiting on-hand inventory.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Storage capacities are scaled to 10% of normal values, making these constraints very tight.
 - Inventory at each product, location, and period remains non-negative and is updated from previous stock, production, sales, and waste.
 - Unmet demand is treated as lost sales with penalties; backorders are not allowed, and there is no hard requirement that all demand be served.
 - There is no transshipment and lead times are zero. Substitution behavior remains as defined.

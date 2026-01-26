@@ -9,7 +9,9 @@ The retailer heavily promotes a low-margin basic product, strongly increasing it
 
 Structure cues:
 - The underlying inventory and substitution structure is the same as in retail_f2_circular_sub, with a single-echelon system, shared storage at each location, and a directed substitution graph defined in the JSON.
-- The JSON increases demand for the basic product and reduces its lost sales penalty while keeping higher margins on other items, and reduces storage capacity, making space more scarce.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. The JSON reduces storage capacity, making space more scarce.
+- The JSON increases demand for the basic product and reduces its lost sales penalty while keeping higher margins on other items.
 - Tight shared storage capacity means that choosing to stock more of the basic product can crowd out premium and short-life items in the warehouse, purely through the capacity and cost parameters.
 - Inventory remains non-negative, lost sales capture unsatisfied demand after substitution, and there is still no transshipment or backordering.
 - The objective is to minimize total cost, and the cannibalization effect is driven by the interplay of demand, margin, lost sales penalties, and capacity parameters rather than by any change to the model's basic structure.

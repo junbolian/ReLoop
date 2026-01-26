@@ -156,6 +156,86 @@ class LoggingDiagnosisRepairer(DiagnosisRepairer):
         return super().repair(code, diagnosis, failed_layer, history)
 
 
+def run_baseline_with_logging(
+    scenario_id: str,
+    problem: str,
+    data: Dict[str, Any],
+    model: str,
+    base_url: str,
+    api_key: str,
+    ground_truth: Optional[float] = None,
+    verbose: bool = True
+) -> ConversationLog:
+    """Run baseline (direct generation, no structured steps or repair) with logging"""
+
+    # Initialize log
+    log = ConversationLog(
+        scenario_id=scenario_id,
+        model=model,
+        start_time=datetime.now().isoformat(),
+        ground_truth=ground_truth
+    )
+
+    # Create base LLM client
+    from reloop.structured_generation import OpenAIClient
+    base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
+
+    # Wrap with logging
+    logging_client = LoggingLLMClient(base_client, log)
+
+    # Create components
+    generator = LoggingStructuredGenerator(logging_client)
+    verifier = BehavioralVerifier(delta=0.2, epsilon=1e-4, timeout=60)
+
+    schema = RETAIL_SCHEMA
+    obj_sense = "minimize"
+
+    start_time = time.time()
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print("BASELINE: Direct Generation (single prompt)")
+        print('='*60)
+
+    # Generate code directly (single prompt, no 3-step)
+    logging_client.set_context("baseline", "single_shot")
+    code = generator.generate_baseline(problem, schema)
+
+    if verbose:
+        print("  [Generate] Single-shot direct generation...")
+
+    # Verify
+    if verbose:
+        print("  [Verify] 6-layer behavioral verification...")
+    report = verifier.verify(
+        code, data, obj_sense,
+        enable_layer6=True,
+        verbose=verbose
+    )
+
+    log.add_verification(1, report)
+    layers_passed = report.count_layers_passed()
+
+    if verbose:
+        print(f"  [Result] {layers_passed}/6 layers passed")
+
+    # Finalize log
+    log.end_time = datetime.now().isoformat()
+    log.total_duration_s = time.time() - start_time
+    log.iterations = 1
+    log.final_status = "VERIFIED" if report.passed else "NOT_VERIFIED"
+    log.layers_passed = layers_passed
+    log.objective_value = None
+    if log.verification_reports:
+        for vr in reversed(log.verification_reports):
+            if vr.get("objective") is not None:
+                log.objective_value = vr["objective"]
+                break
+    log.final_code = code
+
+    return log
+
+
 def run_reloop_with_logging(
     scenario_id: str,
     problem: str,
@@ -166,6 +246,7 @@ def run_reloop_with_logging(
     ground_truth: Optional[float] = None,
     max_iterations: int = 5,
     enable_layer6: bool = True,
+    early_stop: bool = True,
     verbose: bool = True
 ) -> ConversationLog:
     """Run ReLoop with full conversation logging"""
@@ -178,7 +259,7 @@ def run_reloop_with_logging(
         ground_truth=ground_truth
     )
 
-    # Create base LLM client
+    # Create base LLM client (all models use OpenAI-compatible API)
     from reloop.structured_generation import OpenAIClient
     base_client = OpenAIClient(model=model, base_url=base_url, api_key=api_key)
 
@@ -250,8 +331,8 @@ def run_reloop_with_logging(
                 print(f"\n  [SUCCESS] All layers passed!")
             break
 
-        # Early stop
-        if no_progress_count >= 2 and k >= 2:
+        # Early stop (can be disabled with --no-early-stop)
+        if early_stop and no_progress_count >= 2 and k >= 2:
             if verbose:
                 print(f"  [Early Stop] No progress for {no_progress_count} iterations")
             break
@@ -313,6 +394,12 @@ if __name__ == "__main__":
                        help='Model name (default: from OPENAI_MODEL env)')
     parser.add_argument('--max-iter', type=int, default=5,
                        help='Maximum iterations')
+    parser.add_argument('--no-early-stop', action='store_true',
+                       help='Disable early stopping')
+    parser.add_argument('--baseline', action='store_true',
+                       help='Run baseline (direct generation) instead of ReLoop')
+    parser.add_argument('--compare', action='store_true',
+                       help='Run both baseline and ReLoop for comparison')
     parser.add_argument('--output', type=str, default=None,
                        help='Output JSON file path')
     args = parser.parse_args()
@@ -342,46 +429,135 @@ if __name__ == "__main__":
     if ground_truth:
         print(f"  - Ground Truth: {ground_truth:,.2f}")
 
-    # Run with logging
-    log = run_reloop_with_logging(
-        scenario_id=args.scenario,
-        problem=problem,
-        data=data,
-        model=model,
-        base_url=base_url,
-        api_key=api_key,
-        ground_truth=ground_truth,
-        max_iterations=args.max_iter,
-        enable_layer6=True,
-        verbose=True
-    )
-
-    # Print summary
-    print("\n" + "="*60)
-    print("SUMMARY")
-    print("="*60)
-    print(f"Status: {log.final_status}")
-    print(f"Layers Passed: {log.layers_passed}/6")
-    print(f"Iterations: {log.iterations}")
-    print(f"Duration: {log.total_duration_s:.2f}s")
-    print(f"LLM Turns: {len(log.turns)}")
-    if log.objective_value is not None:
-        print(f"Objective: {log.objective_value:,.2f}")
-    if log.ground_truth is not None:
-        print(f"Ground Truth: {log.ground_truth:,.2f}")
+    def print_summary(log: ConversationLog, title: str = "SUMMARY"):
+        """Print summary for a log"""
+        print("\n" + "="*60)
+        print(title)
+        print("="*60)
+        print(f"Status: {log.final_status}")
+        print(f"Layers Passed: {log.layers_passed}/6")
+        print(f"Iterations: {log.iterations}")
+        print(f"Duration: {log.total_duration_s:.2f}s")
+        print(f"LLM Turns: {len(log.turns)}")
         if log.objective_value is not None:
-            gap = abs(log.objective_value - log.ground_truth) / log.ground_truth * 100
-            print(f"Gap: {gap:.2f}%")
+            print(f"Objective: {log.objective_value:,.2f}")
+        if log.ground_truth is not None:
+            print(f"Ground Truth: {log.ground_truth:,.2f}")
+            if log.objective_value is not None:
+                gap = abs(log.objective_value - log.ground_truth) / log.ground_truth * 100
+                print(f"Gap: {gap:.2f}%")
 
-    # Save log
-    output_path = args.output or f"logs/{args.scenario}_{model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else "logs", exist_ok=True)
-    log.save(output_path)
-    print(f"\nConversation log saved to: {output_path}")
+    def save_log(log: ConversationLog, suffix: str = ""):
+        """Save log to file"""
+        output_path = args.output or f"logs/{args.scenario}_{model}{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else "logs", exist_ok=True)
+        log.save(output_path)
+        print(f"Log saved to: {output_path}")
+        return output_path
 
-    # Show conversation summary
-    print("\n" + "-"*60)
-    print("CONVERSATION TURNS:")
-    print("-"*60)
-    for turn in log.turns:
-        print(f"  [{turn['turn_id']}] {turn['role']}/{turn['step']} - {turn['duration_ms']}ms")
+    # Run based on mode
+    if args.compare:
+        # Run both baseline and ReLoop for comparison
+        print("\n" + "#"*60)
+        print("# COMPARISON MODE: Baseline vs ReLoop")
+        print("#"*60)
+
+        # Run baseline first
+        baseline_log = run_baseline_with_logging(
+            scenario_id=args.scenario,
+            problem=problem,
+            data=data,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            ground_truth=ground_truth,
+            verbose=True
+        )
+        print_summary(baseline_log, "BASELINE SUMMARY")
+        save_log(baseline_log, "_baseline")
+
+        # Run ReLoop
+        reloop_log = run_reloop_with_logging(
+            scenario_id=args.scenario,
+            problem=problem,
+            data=data,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            ground_truth=ground_truth,
+            max_iterations=args.max_iter,
+            enable_layer6=True,
+            early_stop=not args.no_early_stop,
+            verbose=True
+        )
+        print_summary(reloop_log, "RELOOP SUMMARY")
+        save_log(reloop_log, "_reloop")
+
+        # Print comparison
+        print("\n" + "="*60)
+        print("COMPARISON RESULTS")
+        print("="*60)
+        print(f"{'Metric':<25} {'Baseline':>15} {'ReLoop':>15} {'Delta':>10}")
+        print("-"*60)
+        print(f"{'Layers Passed':<25} {baseline_log.layers_passed:>15}/6 {reloop_log.layers_passed:>15}/6 {reloop_log.layers_passed - baseline_log.layers_passed:>+10}")
+        print(f"{'LLM Turns':<25} {len(baseline_log.turns):>15} {len(reloop_log.turns):>15} {len(reloop_log.turns) - len(baseline_log.turns):>+10}")
+        print(f"{'Duration (s)':<25} {baseline_log.total_duration_s:>15.2f} {reloop_log.total_duration_s:>15.2f} {reloop_log.total_duration_s - baseline_log.total_duration_s:>+10.2f}")
+
+        if baseline_log.objective_value is not None and reloop_log.objective_value is not None:
+            print(f"{'Objective':<25} {baseline_log.objective_value:>15,.2f} {reloop_log.objective_value:>15,.2f}")
+
+        # Conclusion
+        print("\n" + "-"*60)
+        if reloop_log.layers_passed > baseline_log.layers_passed:
+            print(f"CONCLUSION: ReLoop improves by {reloop_log.layers_passed - baseline_log.layers_passed} layers")
+        elif reloop_log.layers_passed == baseline_log.layers_passed:
+            print("CONCLUSION: No difference in layers passed")
+        else:
+            print(f"CONCLUSION: Baseline performed better (unusual)")
+
+    elif args.baseline:
+        # Run baseline only
+        log = run_baseline_with_logging(
+            scenario_id=args.scenario,
+            problem=problem,
+            data=data,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            ground_truth=ground_truth,
+            verbose=True
+        )
+        print_summary(log, "BASELINE SUMMARY")
+        save_log(log, "_baseline")
+
+        # Show conversation summary
+        print("\n" + "-"*60)
+        print("CONVERSATION TURNS:")
+        print("-"*60)
+        for turn in log.turns:
+            print(f"  [{turn['turn_id']}] {turn['role']}/{turn['step']} - {turn['duration_ms']}ms")
+
+    else:
+        # Run ReLoop (default)
+        log = run_reloop_with_logging(
+            scenario_id=args.scenario,
+            problem=problem,
+            data=data,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            ground_truth=ground_truth,
+            max_iterations=args.max_iter,
+            enable_layer6=True,
+            early_stop=not args.no_early_stop,
+            verbose=True
+        )
+        print_summary(log, "RELOOP SUMMARY")
+        save_log(log, "_reloop")
+
+        # Show conversation summary
+        print("\n" + "-"*60)
+        print("CONVERSATION TURNS:")
+        print("-"*60)
+        for turn in log.turns:
+            print(f"  [{turn['turn_id']}] {turn['role']}/{turn['step']} - {turn['duration_ms']}ms")

@@ -9,7 +9,8 @@ One product—typically a bulky premium item—uses much more storage volume per
 
 Structure cues:
 - The overall structure and shared storage framework match retail_f3_storage_bottleneck.
-- Product-specific storage usage parameters in the JSON are much larger for the premium product than for other SKUs. These usage factors must be applied when enforcing the shared storage limit at each location and period.
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by age (cohorts). Units produced in period t can only be held for shelf_life[p] periods; after that they expire and must be discarded as waste. Use age-indexed inventory I[p,l,t,a] with FIFO sales and automatic expiry.
+- Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. Product-specific storage usage parameters in the JSON are much larger for the premium product than for other SKUs.
 - Inventory cannot be negative and is updated based on previous stock, local production, sales, and waste.
 - There is no transshipment, lead times are zero, and substitution behavior follows the JSON graph with standard semantics.
 - The objective is to minimize total cost under capacity constraints that make the volumetrically heavy premium product particularly expensive in terms of space.

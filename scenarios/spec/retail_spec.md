@@ -321,32 +321,3 @@ fixed_order = data.get('costs', {}).get('fixed_order', 0)
 | OPTIMAL | Proven optimal | ✓ |
 | TIME_LIMIT | Time limit with solution | ✓ (near-optimal) |
 | INFEASIBLE | No feasible solution | ✗ |
-
----
-
-## 10. Ablation Study Design
-
-### Three Ablation Dimensions
-
-| Dimension | Options |
-|-----------|---------|
-| **STEP** (Pipeline Depth) | Zero-shot, 5-step |
-| **PROBE** (Verification) | No probe, Probe + Diagnosis |
-| **REPAIR** (Iteration) | No repair, Guided repair |
-
-### Ablation Configurations
-
-| Config | Steps | Probes | Repair | Description |
-|--------|-------|--------|--------|-------------|
-| A1 | Zero-shot | No | No | Baseline: single LLM call |
-| A2 | 5-step | No | No | Pipeline only |
-| A3 | 5-step | Yes | No | + Probe verification |
-| A4 | 5-step | Yes | Yes | Full ReLoop |
-
-### Research Questions
-
-| RQ | Question | Ablation |
-|----|----------|----------|
-| RQ1 | Does step-by-step pipeline improve accuracy? | A1 vs A2 |
-| RQ2 | Do probes detect silent failures? | A2 vs A3 |
-| RQ3 | Does probe-guided repair improve accuracy? | A3 vs A4 |
