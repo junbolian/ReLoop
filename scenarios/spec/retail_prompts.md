@@ -171,6 +171,8 @@ The following parameters require explicit constraint modeling. The business desc
 ```
 - The variable `data` is pre-loaded. Do NOT use file I/O.
 - Network data is nested: use data.get('network', {}).get('sub_edges', [])
+- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
+  Convert to tuples for Gurobi indexing: [tuple(e) for e in sub_edges]
 - Lists are 0-indexed
 ```
 

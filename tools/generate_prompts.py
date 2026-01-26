@@ -82,6 +82,8 @@ DATA_SCHEMA = """
 DATA_ACCESS = """
 - The variable `data` is pre-loaded. Do NOT use file I/O.
 - Network data is nested: use data.get('network', {}).get('sub_edges', [])
+- IMPORTANT: sub_edges and trans_edges are lists of lists [[a,b], ...].
+  Convert to tuples for Gurobi indexing: [tuple(e) for e in edges]
 - Lists are 0-indexed
 """.strip()
 
