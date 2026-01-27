@@ -210,6 +210,12 @@ DO NOT combine equations. If the problem says:
 
 Write TWO constraints, not one merged equation.
 
+### RULE 4: VARIABLE INDEX VERIFICATION
+BEFORE creating variables, check the DECISION VARIABLES section in the problem context.
+If the problem defines variable X[a,b,c] with specific indices, you MUST:
+- Use ALL indices: X = m.addVars(A, B, C, ...)
+- DO NOT drop or simplify indices
+
 ## Mathematical Specification (from Step 2)
 {step2_output}
 

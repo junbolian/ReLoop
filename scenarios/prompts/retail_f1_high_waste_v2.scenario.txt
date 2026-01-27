@@ -12,22 +12,14 @@ Structure cues:
 - Inventory is held at each location, evolves from period to period by adding local production and subtracting sales and waste, and is never allowed to go negative. Unserved demand is treated as lost sales and penalized as in the baseline.
 - Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE.
 
-  DECISION VARIABLES - define EXACTLY as specified:
-  - Q[p,l,t] = order quantity for product p at location l in period t
-    CRITICAL: Q is indexed over (products, locations, periods), NOT just (products, periods)!
-    Define as: Q = m.addVars(P, L, T, ...) NOT m.addVars(P, T, ...)
-  - I[p,l,t,r] = inventory at START of period t with r periods remaining
-  - sales[p,l,t,r] = units sold from inventory cohort with r remaining life
-  - W[p,l,t] = waste (expired units)
-  - L[p,l,t] = lost sales (unmet demand)
-
+  VARIABLE DEFINITION: I[p,l,t,r] = inventory at START of period t with r periods remaining.
   Convention: r=1 is OLDEST (sell first FIFO), r=shelf_life[p] is FRESHEST.
 
   KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-  (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
-      - Each location places its OWN orders. Q[p,l,t] is already per-location.
-      - Do NOT multiply by demand_share. demand_share is ONLY for calculating demand values.
+  (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
+      - This is ONLY the inflow from production. Do NOT subtract sales here!
+      - Q is total production, demand_share distributes it to locations.
 
   (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
       - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
