@@ -88,7 +88,8 @@ class StructuredGenerator:
     def generate(self, problem: str, schema: str, history: List[str] = None) -> str:
         """Run complete 3-step generation."""
         understanding = self._step1(problem, schema)
-        math_spec = self._step2(understanding, schema)
+        # Pass original problem to Step 2 to preserve key equations
+        math_spec = self._step2(understanding, schema, problem)
         # Pass original problem to Step 3 to preserve key equations
         code = self._step3(math_spec, schema, history, problem)
         return code
@@ -107,13 +108,13 @@ class StructuredGenerator:
         prompt = PromptGenerator.step1(problem, schema)
         return self._extract_json(self.llm.generate(prompt))
 
-    def _step2(self, understanding: str, schema: str) -> str:
+    def _step2(self, understanding: str, schema: str, original_problem: str = None) -> str:
         """
         Step 2: Mathematical Specification
 
         Output: JSON with sets, parameters, variables, constraints, objective
         """
-        prompt = PromptGenerator.step2(understanding, schema)
+        prompt = PromptGenerator.step2(understanding, schema, original_problem)
         return self._extract_json(self.llm.generate(prompt))
 
     def _step3(self, math_spec: str, data_access: str, history: List[str] = None,

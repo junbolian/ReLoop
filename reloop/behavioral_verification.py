@@ -278,7 +278,7 @@ class BehavioralVerifier:
             if obj_sense.lower() == "minimize" and objective is not None and objective < 0:
                 return VerificationResult(False, 2,
                     f"SUSPICIOUS: Negative objective ({objective:.2f}) in minimization problem. "
-                    f"Check if penalty/cost terms can become negative (e.g., lost_sales = demand - sales "
+                    f"Check if cost/penalty terms can become negative (e.g., difference terms "
                     f"without max(0, ...) or slack variable). All cost terms should be >= 0.")
             return VerificationResult(True, 2)
         if status == "INFEASIBLE":
@@ -625,15 +625,17 @@ class BehavioralVerifier:
 
     def _layer3_code_structure(self, code: str, data: Dict, verbose: bool) -> List[VerificationResult]:
         """
-        Layer 3: Code Structure Verification (AST-based)
+        Layer 3: Code Structure Verification (AST-based) - ALL UNIVERSAL
 
         Universal checks that analyze code structure without running it.
         Does NOT leak data - only examines variable names, patterns, formulas.
 
-        Checks:
-        1. Objective function pattern - detects common formula errors
-        2. Constraint structure - detects missing or malformed constraints
-        3. Index pattern analysis - detects common indexing errors
+        Checks (ALL UNIVERSAL - no domain-specific logic):
+        1. Objective function exists - m.setObjective() call
+        2. Index boundaries - t-1/t+1 handling at boundaries
+        3. Variables declared - m.addVar() calls
+        4. Constraints added - m.addConstr() calls
+        5. Parameter references - data params appear in code (for L3+L4 analysis)
         """
         results = []
 
@@ -664,30 +666,7 @@ class BehavioralVerifier:
             if verbose:
                 print("    PASS")
 
-        # Check 2: Inventory holding cost pattern (semi-universal for inventory problems)
-        # This catches the (I vs I-y) error pattern
-        if "inventory" in code_lower or "holding" in code_lower:
-            if verbose:
-                print("  Check: Holding cost formula pattern")
-
-            # Look for patterns like: cost * I[...] vs cost * (I[...] - y[...])
-            # Pattern that suggests WRONG formula: inventory_cost * I[...] without subtraction
-            has_holding_cost = bool(re.search(r'(inv|inventory|holding).*\*.*[IiQq]\[', code_text))
-            has_minus_sales = bool(re.search(r'[IiQq]\[.*\]\s*-\s*[yYsS]\[', code_text))
-
-            if has_holding_cost and not has_minus_sales:
-                # Holding cost exists but doesn't subtract sales - potential issue
-                # This is a WARNING, not a hard fail (depends on the specific problem)
-                results.append(VerificationResult(True, 3, skipped=True,
-                    details={"warning": "Holding cost may not account for sales (I vs I-y pattern)"}))
-                if verbose:
-                    print("    SKIP (warning: holding cost pattern may be incorrect)")
-            else:
-                results.append(VerificationResult(True, 3))
-                if verbose:
-                    print("    PASS")
-
-        # Check 3: Loop index boundary patterns (universal)
+        # Check 2: Loop index boundary patterns (UNIVERSAL)
         if verbose:
             print("  Check: Loop index boundaries")
 
@@ -715,7 +694,7 @@ class BehavioralVerifier:
             if verbose:
                 print("    PASS")
 
-        # Check 4: Variable declaration before use (universal)
+        # Check 3: Variable declaration before use (UNIVERSAL)
         if verbose:
             print("  Check: Variable declarations")
 
@@ -737,7 +716,7 @@ class BehavioralVerifier:
             if verbose:
                 print(f"    PASS (found {len(var_declarations)} variable patterns)")
 
-        # Check 5: Constraint addition (universal)
+        # Check 4: Constraint addition (UNIVERSAL)
         if verbose:
             print("  Check: Constraint additions")
 
@@ -754,26 +733,37 @@ class BehavioralVerifier:
             if verbose:
                 print("    PASS")
 
-        # Check 6: Sales availability constraint (for inventory problems)
-        # This is CRITICAL: sales[...] <= I[...] must exist if both variables are present
-        has_sales_var = bool(re.search(r'sales\s*=\s*m\.addVar', code_text)) or bool(re.search(r'sales\s*\[', code_text))
-        has_inventory_var = bool(re.search(r'[IiQq]\s*=\s*m\.addVar', code_text)) or bool(re.search(r'\bI\s*\[', code_text))
+        # Check 5: Parameter reference detection (UNIVERSAL)
+        # For each parameter in data, check if it appears in the code
+        # This helps distinguish "constraint missing" vs "constraint has slack" in L4
+        if verbose:
+            print("  Check: Parameter references in code")
 
-        if has_sales_var and has_inventory_var:
-            if verbose:
-                print("  Check: Sales availability constraint (sales <= I)")
+        param_refs = {}  # {param_name: appears_in_code}
+        params = extract_numeric_params(data)
 
-            # Look for sales <= I pattern (with various spacing)
-            has_sales_bound = bool(re.search(r'sales\[.*\]\s*<=\s*[IiQq]\[', code_text))
+        for param in params[:20]:  # Check up to 20 parameters
+            # Extract the base parameter name (e.g., "costs.inventory" -> "inventory")
+            param_parts = param.split('.')
+            base_name = param_parts[-1] if param_parts else param
 
-            if not has_sales_bound:
-                diag = "Missing sales availability constraint: sales[...] <= I[...]. Sales can exceed inventory!"
-                results.append(VerificationResult(False, 3, diag))
-                if verbose:
-                    print(f"    FAIL: {diag}")
-            else:
-                results.append(VerificationResult(True, 3))
-                if verbose:
-                    print("    PASS")
+            # Check if parameter name appears in code (case-insensitive)
+            # Also check for common variations (underscore vs camelCase)
+            variations = [base_name, base_name.replace('_', ''), base_name.lower()]
+            appears = any(re.search(rf'\b{re.escape(v)}\b', code_text, re.IGNORECASE) for v in variations)
+            param_refs[param] = appears
+
+        # Count how many parameters are referenced
+        refs_found = sum(1 for v in param_refs.values() if v)
+        refs_total = len(param_refs)
+
+        results.append(VerificationResult(True, 3, details={
+            "param_references": param_refs,
+            "refs_found": refs_found,
+            "refs_total": refs_total
+        }))
+
+        if verbose:
+            print(f"    PASS ({refs_found}/{refs_total} parameters referenced in code)")
 
         return results

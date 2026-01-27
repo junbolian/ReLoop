@@ -335,12 +335,28 @@ def run_reloop_with_logging(
         log.add_verification(k + 1, report)
         layers_passed = report.count_layers_passed()
 
-        # Track best
+        # Track best (by layers, then by objective for minimization)
+        current_obj = report.objective
+        best_obj = best_report.objective if best_report else None
+
+        is_better = False
         if layers_passed > best_layers:
+            is_better = True
+            reason = f"{best_layers}/7 → {layers_passed}/7 layers"
+        elif layers_passed == best_layers and current_obj is not None and best_obj is not None:
+            # For minimize: lower is better; for maximize: higher is better
+            if obj_sense == "minimize" and current_obj < best_obj:
+                is_better = True
+                reason = f"obj {best_obj:.0f} → {current_obj:.0f} (better)"
+            elif obj_sense == "maximize" and current_obj > best_obj:
+                is_better = True
+                reason = f"obj {best_obj:.0f} → {current_obj:.0f} (better)"
+
+        if is_better:
             best_code, best_layers, best_report = current_code, layers_passed, report
             no_progress_count = 0
             if verbose:
-                print(f"  [Best] New best: {best_layers}/7 layers")
+                print(f"  [Best] New best: {reason}")
         else:
             no_progress_count += 1
             if verbose:
@@ -354,18 +370,55 @@ def run_reloop_with_logging(
 
         # Smart repair: distinguish between slack constraints and missing constraints
         # - L3 failures: Always repair (code structure issues)
-        # - L4 "NO EFFECT" failures: Repair (parameter not used = constraint missing)
-        # - L4 "direction" failures: May be slack, skip repair
+        # - L4 "NO EFFECT" failures:
+        #   - If L3 shows constraint pattern EXISTS → skip (slack constraint, not bug)
+        #   - If L3 shows constraint pattern MISSING → repair (missing constraint)
         # - L5/L6/L7 failures: Usually not critical, skip repair
         if report.failed_layer is not None and report.failed_layer > 2:
-            # Check if L4 has "NO EFFECT" failures (clear bug, not slack)
             has_no_effect_failure = report.diagnosis and "NO EFFECT" in report.diagnosis
             has_l3_failure = report.failed_layer == 3
 
-            if has_no_effect_failure or has_l3_failure:
+            # Extract L3 parameter reference results (UNIVERSAL)
+            l3_param_refs = {}
+            for r in report.results:
+                if r.layer == 3 and r.details:
+                    if "param_references" in r.details:
+                        l3_param_refs = r.details.get("param_references", {})
+
+            # Extract ALL L4 "NO EFFECT" parameters (not just the first one)
+            no_effect_params = []
+            missing_params = []  # Parameters with NO EFFECT that are NOT in code
+            for r in report.results:
+                if r.layer == 4 and not r.passed and not r.skipped:
+                    if r.diagnosis and "NO EFFECT" in r.diagnosis:
+                        import re as re_mod
+                        match = re_mod.search(r"Parameter '([^']+)'", r.diagnosis)
+                        if match:
+                            param = match.group(1)
+                            no_effect_params.append(param)
+                            # Check if this parameter is in code
+                            if not l3_param_refs.get(param, False):
+                                missing_params.append(param)
+
+            if has_l3_failure:
+                # L3 failure = code structure issue, always repair
                 if verbose:
-                    print(f"  [L{report.failed_layer} Critical] Parameter has NO EFFECT = constraint missing. Repairing...")
-                # Continue to repair - don't break
+                    print(f"  [L3 Critical] Code structure issue. Repairing...")
+                # Continue to repair
+            elif has_no_effect_failure:
+                # L4 "NO EFFECT" - check if ANY NO EFFECT param is missing from code
+                if missing_params:
+                    # Some NO EFFECT params are not in code → constraint missing
+                    if verbose:
+                        print(f"  [L4 Critical] NO EFFECT params not in code: {missing_params}")
+                        print(f"  [Repair] Constraint(s) likely missing. Repairing...")
+                    # Continue to repair
+                else:
+                    # All NO EFFECT params are in code → slack constraints
+                    if verbose:
+                        print(f"  [L4 NO EFFECT] All {len(no_effect_params)} params appear in code: {no_effect_params}")
+                        print(f"  [Stop] These are likely slack constraints, not bugs.")
+                    break
             else:
                 if verbose:
                     print(f"  [L1/L2 OK] Code runs and is feasible. L{report.failed_layer} warnings are informational only.")
@@ -408,9 +461,10 @@ def load_scenario(scenario_id: str) -> tuple:
         problem: str - base prompt for ReLoop agent (.base.txt)
         baseline_prompt: str - full prompt for baseline (.scenario.txt)
     """
-    data_path = f"scenarios/data/{scenario_id}.json"
-    base_prompt_path = f"scenarios/prompts/{scenario_id}.base.txt"
-    scenario_prompt_path = f"scenarios/prompts/{scenario_id}.scenario.txt"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(base_dir, f"scenarios/data/{scenario_id}.json")
+    base_prompt_path = os.path.join(base_dir, f"scenarios/prompts/{scenario_id}.base.txt")
+    scenario_prompt_path = os.path.join(base_dir, f"scenarios/prompts/{scenario_id}.scenario.txt")
 
     with open(data_path, 'r') as f:
         data = json.load(f)
@@ -430,6 +484,8 @@ def load_scenario(scenario_id: str) -> tuple:
 def get_ground_truth(scenario_id: str, data: Dict) -> Optional[float]:
     """Get ground truth using universal solver"""
     try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, base_dir)
         from solvers.universal_retail_solver import solve_scenario
         model = solve_scenario(data, summarize=False)
         if model.SolCount > 0:
@@ -456,6 +512,8 @@ if __name__ == "__main__":
                        help='Run baseline (direct generation) instead of ReLoop')
     parser.add_argument('--compare', action='store_true',
                        help='Run both baseline and ReLoop for comparison')
+    parser.add_argument('--mode', type=str, choices=['baseline', 'reloop'], default=None,
+                       help='Run mode: baseline or reloop')
     parser.add_argument('--output', type=str, default=None,
                        help='Output JSON file path')
     args = parser.parse_args()
@@ -465,10 +523,10 @@ if __name__ == "__main__":
 
     # Detect if model is Claude and use appropriate API key
     if 'claude' in model.lower():
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
-        base_url = os.environ.get('ANTHROPIC_BASE_URL')
+        api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('OPENAI_API_KEY')
+        base_url = os.environ.get('ANTHROPIC_BASE_URL') or os.environ.get('OPENAI_BASE_URL')
         if not api_key:
-            print("Error: ANTHROPIC_API_KEY not set (required for Claude models)")
+            print("Error: ANTHROPIC_API_KEY or OPENAI_API_KEY not set (required for Claude models)")
             sys.exit(1)
     else:
         api_key = os.environ.get('OPENAI_API_KEY')
@@ -513,8 +571,10 @@ if __name__ == "__main__":
 
     def save_log(log: ConversationLog, suffix: str = ""):
         """Save log to file"""
-        output_path = args.output or f"logs/{args.scenario}_{model}{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else "logs", exist_ok=True)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        output_path = args.output or os.path.join(log_dir, f"{args.scenario}_{model}{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else log_dir, exist_ok=True)
         log.save(output_path)
         print(f"Log saved to: {output_path}")
         return output_path
@@ -570,17 +630,29 @@ if __name__ == "__main__":
 
         if baseline_log.objective_value is not None and reloop_log.objective_value is not None:
             print(f"{'Objective':<25} {baseline_log.objective_value:>15,.2f} {reloop_log.objective_value:>15,.2f}")
+            if ground_truth:
+                baseline_gap = abs(baseline_log.objective_value - ground_truth) / ground_truth * 100
+                reloop_gap = abs(reloop_log.objective_value - ground_truth) / ground_truth * 100
+                print(f"{'Gap to Ground Truth':<25} {baseline_gap:>14.2f}% {reloop_gap:>14.2f}% {reloop_gap - baseline_gap:>+9.2f}%")
 
         # Conclusion
         print("\n" + "-"*60)
         if reloop_log.layers_passed > baseline_log.layers_passed:
             print(f"CONCLUSION: ReLoop improves by {reloop_log.layers_passed - baseline_log.layers_passed} layers")
         elif reloop_log.layers_passed == baseline_log.layers_passed:
-            print("CONCLUSION: No difference in layers passed")
+            if ground_truth and baseline_log.objective_value and reloop_log.objective_value:
+                baseline_gap = abs(baseline_log.objective_value - ground_truth) / ground_truth * 100
+                reloop_gap = abs(reloop_log.objective_value - ground_truth) / ground_truth * 100
+                if reloop_gap < baseline_gap:
+                    print(f"CONCLUSION: Same layers, but ReLoop has better objective gap ({reloop_gap:.2f}% vs {baseline_gap:.2f}%)")
+                else:
+                    print("CONCLUSION: No significant difference")
+            else:
+                print("CONCLUSION: No difference in layers passed")
         else:
             print(f"CONCLUSION: Baseline performed better (unusual)")
 
-    elif args.baseline:
+    elif args.baseline or args.mode == 'baseline':
         # Run baseline only
         log = run_baseline_with_logging(
             scenario_id=args.scenario,

@@ -11,8 +11,39 @@ Structure cues:
 - The inventory system is the same as in retail_f1_base, with multiple products, multiple locations, and capacity-limited production for each product and period.
 - The time index now runs for fifty-two periods. The same inventory evolution and demand fulfillment logic is applied in every period of the year.
 - At each location and for each product, stock at the end of a week depends on what was carried over, what was produced for that location during the week, and what was sold or discarded. Inventory cannot go below zero; any unmet demand in a week is lost and penalized.
-- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE. Use I[p,l,t,r] where r = remaining periods until expiry (1..shelf_life[p]). Convention: r=1 is OLDEST (sell first under FIFO), r=shelf_life[p] is FRESHEST. Key equations: (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l] where Q is total production. (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1. (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]. (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r].
+- Shelf life: Each product has a shelf life in periods. Inventory must be tracked by REMAINING LIFE.
+
+  VARIABLE DEFINITION: I[p,l,t,r] = inventory at START of period t with r periods remaining.
+  Convention: r=1 is OLDEST (sell first FIFO), r=shelf_life[p] is FRESHEST.
+
+  KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
+
+  (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
+      - This is ONLY the inflow from production. Do NOT subtract sales here!
+      - Q is total production, demand_share distributes it to locations.
+
+  (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
+      - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
+
+  (3) Waste: W[p,l,t] = I[p,l,t,1] - sales[p,l,t,1]
+      - Items with r=1 that aren't sold become waste
+
+  (4) Sales availability: sales[p,l,t,r] <= I[p,l,t,r]
+      - Can only sell what you have in inventory
+
+  (5) Inventory holding cost: charged on (I[p,l,t,r] - sales[p,l,t,r]) for r >= 2
+      - Charge on END-of-period inventory (after sales), exclude expiring items (r=1)
 - Storage capacity: sum over products of (cold_usage[p] * total_inventory[p,l,t]) <= cold_capacity[l]. These limits must be respected.
-- Substitution (edge [Basic, Premium] means Basic's demand can be served by Premium), the absence of transshipment, and zero lead times all remain as in the baseline case.
+- Substitution: Edge [p_from, p_to] means p_from's demand can be served by p_to's inventory.
+  Variable sub[p_from, p_to, l, t] = units of p_from's demand fulfilled by p_to.
+
+  Demand fulfillment equation:
+  - For p_from: total_sales[p_from] + sub[p_from, p_to] + L[p_from] = demand[p_from]
+  - For p_to: total_sales[p_to] - sub[p_from, p_to] + L[p_to] = demand[p_to]
+
+  Interpretation: p_from's demand is served by own sales + substitution + lost.
+  p_to's total sales include serving both its own demand and p_from's demand.
+
+- No transshipment and zero lead times in this scenario.
 - Labor capacity remains high enough that it does not materially bind, though it can be represented consistently with the JSON.
 - The objective is to minimize total cost over the entire year, aggregating holding, waste, and lost sales costs across all weeks.
