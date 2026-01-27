@@ -40,9 +40,9 @@ retail_f1_base:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -89,9 +89,9 @@ retail_f1_high_waste:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -126,9 +126,9 @@ retail_f1_jit_logic:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -164,9 +164,9 @@ retail_f1_52_weeks:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -211,9 +211,9 @@ retail_f2_no_substitution:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -248,9 +248,9 @@ retail_f2_circular_sub:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -285,9 +285,9 @@ retail_f2_cannibalization:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -337,9 +337,9 @@ retail_f2_price_band_tight:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -375,9 +375,9 @@ retail_f2_promo_budget:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -413,9 +413,9 @@ retail_f3_storage_bottleneck:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -450,9 +450,9 @@ retail_f3_volumetric_constraint:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -486,9 +486,9 @@ retail_f3_supply_bottleneck:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -523,9 +523,9 @@ retail_f3_unbalanced_network:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -559,9 +559,9 @@ retail_f4_early_stockout:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -597,9 +597,9 @@ retail_f4_peak_failure:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -634,9 +634,9 @@ retail_f4_demand_surge:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -671,9 +671,9 @@ retail_f4_quality_hold:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -709,9 +709,9 @@ retail_f4_robust_variance:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -746,9 +746,9 @@ retail_f4_supply_risk:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -784,9 +784,9 @@ retail_f5_impossible_demand:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -822,9 +822,9 @@ retail_f5_strict_service_trap:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -859,9 +859,9 @@ retail_f5_storage_overflow:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -896,9 +896,9 @@ retail_f5_ultimate_stress:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -934,9 +934,9 @@ retail_f6_lead_time:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -972,9 +972,9 @@ retail_f6_moq_binary:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1010,9 +1010,9 @@ retail_f6_fixed_order_cost:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1048,9 +1048,9 @@ retail_f6_pack_size_integer:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1086,9 +1086,9 @@ retail_f7_transshipment:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1123,9 +1123,9 @@ retail_f7_hub_and_spoke:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1161,9 +1161,9 @@ retail_f7_budget_limit:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1199,9 +1199,9 @@ retail_f7_multi_sourcing:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1236,9 +1236,9 @@ retail_f7_multiechelon_chain:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1274,9 +1274,9 @@ retail_f7_ring_routing:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1312,9 +1312,9 @@ retail_f8_reverse_logistics:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1349,9 +1349,9 @@ retail_f8_labor_constraint:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1387,9 +1387,9 @@ retail_f8_ship_from_store:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
@@ -1425,9 +1425,9 @@ retail_f8_sustainability:
 
       KEY EQUATIONS - implement EXACTLY as written, do NOT add or remove terms:
 
-      (1) Fresh inflow: I[p,l,t,SL] = Q[p,t] * demand_share[l]
-          - This is ONLY the inflow from production. Do NOT subtract sales here!
-          - Q is total production, demand_share distributes it to locations.
+      (1) Fresh inflow: I[p,l,t,SL] = Q[p,l,t]
+          - Q[p,l,t] is the order quantity for product p at location l in period t.
+          - Orders are placed PER LOCATION, not centralized. Do NOT use Q[p,t] * demand_share[l].
 
       (2) Aging: I[p,l,t+1,r] = I[p,l,t,r+1] - sales[p,l,t,r+1] for r=1..SL-1
           - Inventory tomorrow with r remaining = inventory today with r+1 remaining - sales
