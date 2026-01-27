@@ -150,8 +150,25 @@ Layer failures do not always indicate incorrect modeling. Common legitimate scen
 > If code crashes with periods=1, there's an indexing bug (t-1 or t+1 boundary).
 
 L7 (Domain Probes) is the ONLY domain-specific layer:
-- RetailOpt: Lost sales, shelf_life=1 structure, substitution probes
+- **8 specialized probes for modeling error detection**
 - Extensible: Add custom probes for other domains
+
+**L7 Domain Probes - Modeling Error Detection:**
+
+| Probe | What it detects | Test Method |
+|-------|-----------------|-------------|
+| 1. Inventory Balance | Wrong balance equation | Double initial_inventory → cost should decrease |
+| 2. Constraint Direction | Wrong inequality (<=, >=) | Halve capacity → cost should increase |
+| 3. Holding Cost | Missing cost term in objective | Holding_cost × 10 → objective should change >1% |
+| 4. Waste/Penalty Cost | Missing cost term in objective | Waste_cost × 10 → objective should change >1% |
+| 5. Lost Sales | Missing slack variable | Demand × 10 → should NOT be INFEASIBLE |
+| 6. Shelf Life Structure | Wrong aging constraint | shelf_life=1 → cost should increase |
+| 7. Substitution | Missing substitution logic | Set sub_from capacity=0 → should NOT be INFEASIBLE |
+| 8. Objective Sign | Wrong minimize/maximize | All costs × 2 → objective should increase |
+
+**L7 Probe Design Principle:**
+> Each probe tests a specific modeling pattern by perturbing parameters and checking
+> if the objective responds correctly. Wrong response = likely modeling error.
 
 **Supported Datasets:**
 
