@@ -103,6 +103,16 @@ Check the Data Schema for ALL cost parameters (usually in data['costs']).
 The objective function MUST include ALL cost terms from the data schema.
 Do NOT omit any cost terms - each cost in the schema affects the optimal solution.
 
+## CRITICAL: Copy Original Equations EXACTLY
+If the Original Problem Equations section below contains specific formulas, you MUST:
+1. Copy them EXACTLY into the constraints section
+2. Do NOT add, remove, or modify any terms
+3. Preserve the EXACT index patterns - DO NOT shift indices!
+   - If original says x[t+1] = f(x[t]), keep t+1 on LHS, do NOT change to x[t] = f(x[t-1])
+   - If original says y[i,j+1], keep j+1, do NOT change to y[i,j]
+4. Do NOT add extra terms to equations (if original says A = B, don't write A = B - C)
+5. Do NOT "rewrite" equations by uniformly shifting all time indices
+
 Output a JSON object with:
 
 {{
@@ -162,69 +172,114 @@ STEP3_PROMPT = """
 
 Generate executable GurobiPy code from the mathematical specification.
 
+## CRITICAL: EQUATION COPYING RULES (READ FIRST!)
+
+The problem context below contains EXPLICIT EQUATIONS. You MUST implement them EXACTLY.
+FAILURE TO COPY EQUATIONS EXACTLY IS THE #1 SOURCE OF ERRORS.
+
+### RULE 1: NO EXTRA TERMS
+If the problem says:
+    x[t] = f(a, b)
+
+You MUST write:
+    x[t] == f(a, b)
+
+DO NOT write:
+    x[t] == f(a, b) - c      # WRONG: added -c that's not in original
+    x[t] == f(a, b) + d - e  # WRONG: added extra terms
+
+WHY: Each equation describes ONE relationship. Other relationships are SEPARATE constraints.
+
+### RULE 2: NO INDEX SHIFTING
+If the problem says:
+    x[t+1] = g(x[t], u[t])
+
+You MUST write:
+    x[t+1] == g(x[t], u[t])
+
+DO NOT write:
+    x[t] == g(x[t-1], u[t-1])  # WRONG: shifted all indices by -1
+
+These look mathematically equivalent but have DIFFERENT computational loop structures.
+
+### RULE 3: SEPARATE CONSTRAINTS
+When the problem defines multiple relationships, implement each as a SEPARATE constraint.
+DO NOT combine equations. If the problem says:
+    - Equation A: x = f(y)
+    - Equation B: z = g(x, w)
+
+Write TWO constraints, not one merged equation.
+
 ## Mathematical Specification (from Step 2)
 {step2_output}
 
 ## Data Access Patterns and Problem Context
 {data_access}
 
-## CRITICAL: Follow Original Equations EXACTLY
+## Additional Error Prevention
 
-If the original problem context above contains specific equations, you MUST implement them EXACTLY as written.
-Pay careful attention to INDEX SUBSCRIPTS in equations - a common error is using wrong indices.
+COMMON ERRORS TO AVOID:
 
-Example: If the equation says "sales[p,l,t,r+1]", do NOT use "sales[p,l,t,r]".
+1. WRONG INDEX SUBSCRIPTS:
+   - If equation says "x[i,j+1]", do NOT use "x[i,j]"
+   - Copy indices EXACTLY as written
+
+2. ADDING EXTRA TERMS:
+   - If equation says "A = B", do NOT write "A = B - C"
+   - Copy the RHS EXACTLY as written in the original
+
+3. INDEX SHIFTING:
+   - WRONG: Transforming "x[t+1] = f(x[t])" into "x[t] = f(x[t-1])"
+   - ALWAYS preserve the EXACT index expressions
 
 ## CRITICAL: Objective Function Completeness Check
 
-BEFORE writing the objective function, examine the Original Problem Context and data['costs'] to identify ALL cost terms:
-1. Check data['costs'] dictionary - it lists ALL available cost parameters
-2. The objective function MUST include ALL relevant costs from data['costs']
-3. Common cost terms to verify:
-   - purchasing/ordering cost (cost per unit produced/ordered)
-   - inventory/holding cost (cost per unit held per period)
-   - waste/spoilage cost (cost per unit expired)
-   - lost_sales/stockout cost (penalty per unit of unmet demand)
-   - fixed_order cost (fixed cost per order placed)
-   - transshipment cost (cost per unit transferred)
+BEFORE writing the objective function:
+1. Examine the Original Problem Context and data to identify ALL cost/revenue terms
+2. Check if there is a 'costs' section in the data - include ALL listed cost parameters
+3. The objective function MUST include ALL relevant terms from the data schema
+4. If the Mathematical Specification from Step 2 is MISSING any cost terms that exist in the data,
+   you MUST ADD them to the objective function
 
-If the Mathematical Specification from Step 2 is MISSING any cost terms that exist in data['costs'],
-you MUST ADD them to the objective function. The Step 2 spec may be incomplete.
+## CRITICAL: State Variable Semantics
+
+When implementing state equations (inventory, stock, balance, etc.):
+1. Be consistent about timing: start-of-period vs end-of-period
+2. If x[t] is start-of-period state, then end-of-period = x[t] - consumption[t]
+3. Costs on state variables typically apply to END-of-period values
+4. Follow the problem context for specific variable definitions
 
 ## Gurobi API Patterns (Universal)
 
 When implementing the mathematical model in Gurobi, follow these API patterns:
 
 1. VARIABLES WITH VARYING INDEX RANGES:
-   If different items have different index ranges (e.g., different products have different shelf_life),
-   do NOT use a single addVars with max value. Instead use dict comprehension:
+   If different items have different index ranges, use dict comprehension:
    ```python
-   # WRONG: Creates same range for all products
-   I = m.addVars(products, locations, periods, max(shelf_life.values()), ...)
+   # WRONG: Creates same range for all items
+   x = m.addVars(items, times, max(range_per_item.values()), ...)
 
-   # CORRECT: Creates product-specific ranges
-   I = {{(p, l, t, r): m.addVar(...)
-        for p in products for l in locations for t in periods
-        for r in range(1, shelf_life[p] + 1)}}
+   # CORRECT: Creates item-specific ranges
+   x = {{(i, t, k): m.addVar(...)
+        for i in items for t in times
+        for k in range(1, range_per_item[i] + 1)}}
    ```
 
 2. SLACK VARIABLES FOR DEFICITS:
-   For quantities that represent deficits (unmet demand, shortage, etc.), use explicit slack variables:
+   For quantities that represent deficits (shortage, unmet requirement, etc.), use explicit slack variables:
    ```python
-   # WRONG: Can become negative if sales > demand
-   lost_sales[p,l,t] = demand[p,l,t] - sales[p,l,t]  # May be negative!
+   # WRONG: Can become negative if supply > requirement
+   deficit[i,t] = requirement[i,t] - supply[i,t]  # May be negative!
 
    # CORRECT: Use explicit non-negative slack variable
-   unmet = m.addVars(..., lb=0, name="unmet")  # Always >= 0
-   m.addConstr(sales[p,l,t] + unmet[p,l,t] == demand[p,l,t])
-   # Objective: += cost * unmet[p,l,t]
+   slack = m.addVars(..., lb=0, name="slack")  # Always >= 0
+   m.addConstr(supply[i,t] + slack[i,t] == requirement[i,t])
    ```
 
 3. CONSTRAINT BOUNDS FOR SLACK:
    When adding balance constraints with slack, ensure the slack variable captures the deficit:
    ```python
-   # For demand satisfaction with lost sales penalty:
-   m.addConstr(sales[p,l,t] + lost[p,l,t] == demand[p,l,t])  # lost >= 0 by lb
+   m.addConstr(x[i,t] + slack[i,t] == target[i,t])  # slack >= 0 by lb
    ```
 
 ## Implementation Notes
@@ -237,7 +292,7 @@ When implementing the mathematical model in Gurobi, follow these API patterns:
 2. INDEXING ALIGNMENT:
    - Model indices may be 1-based (periods 1..T) while data arrays are 0-based
    - CRITICAL: In constraint equations, preserve the exact index relationships from the problem
-   - If equation has I[p,l,t+1,r] on LHS and I[p,l,t,r+1] on RHS, implement this EXACTLY
+   - If equation has x[i,t+1,k] on LHS and x[i,t,k+1] on RHS, implement this EXACTLY
 
 3. BOUNDARY CONDITIONS:
    - Handle first period initialization carefully (no "previous" period)
@@ -498,11 +553,15 @@ class PromptGenerator:
         )
 
     @staticmethod
-    def step2(step1_output: str, schema: str) -> str:
+    def step2(step1_output: str, schema: str, original_problem: str = None) -> str:
         """Generate Step 2 prompt (Mathematical Specification)"""
+        # Include original problem equations if provided
+        equations_section = ""
+        if original_problem:
+            equations_section = f"\n\n## Original Problem Equations (MUST COPY EXACTLY)\n{original_problem}"
         return STEP2_PROMPT.format(
             step1_output=step1_output,
-            data_schema=schema
+            data_schema=schema + equations_section
         )
 
     @staticmethod
