@@ -517,10 +517,210 @@ class BehavioralVerifier:
         return results
 
     def _layer7_domain_probes(self, code: str, data: Dict, baseline_obj: float, verbose: bool) -> List[VerificationResult]:
+        """
+        Layer 7: Domain-Specific Probes for Modeling Error Detection
+
+        These probes detect SEMANTIC modeling errors that L1-L6 cannot catch:
+        1. Inventory balance equation errors
+        2. Constraint direction errors (<=, >=, ==)
+        3. Cost component completeness errors
+        4. Extreme value response errors
+        5. Domain-specific structure errors
+        """
         import copy
         results = []
 
-        # Probe 1: Lost Sales Variable
+        # =================================================================
+        # Probe 1: Inventory Balance Equation Check
+        # Correct: I[t] = I[t-1] + order[t] - sales[t] - waste[t]
+        # Error detection: If initial_inventory affects ALL periods equally,
+        # the balance equation is likely missing or wrong
+        # =================================================================
+        if "initial_inventory" in data or "init_inventory" in data:
+            if verbose:
+                print("  Probe: Inventory Balance Equation")
+
+            init_key = "initial_inventory" if "initial_inventory" in data else "init_inventory"
+            test_data = copy.deepcopy(data)
+
+            # Double the initial inventory
+            if isinstance(test_data[init_key], dict):
+                for k in test_data[init_key]:
+                    if isinstance(test_data[init_key][k], (int, float)):
+                        test_data[init_key][k] = test_data[init_key][k] * 2
+                    elif isinstance(test_data[init_key][k], list):
+                        test_data[init_key][k] = [v * 2 for v in test_data[init_key][k]]
+            elif isinstance(test_data[init_key], (int, float)):
+                test_data[init_key] = test_data[init_key] * 2
+
+            result = self.executor.execute(code, test_data)
+            obj_double_init = result.get("objective")
+
+            if obj_double_init is not None:
+                # More initial inventory should reduce cost (less need to order)
+                # If cost INCREASES, the balance equation may be wrong
+                if obj_double_init > baseline_obj * 1.1:  # Cost increased by >10%
+                    diag = f"Doubling initial_inventory INCREASED cost ({obj_double_init:.2f} > {baseline_obj:.2f}). " \
+                           f"Inventory balance equation likely incorrect (check I[t] = I[t-1] + order - sales)."
+                    results.append(VerificationResult(False, 7, diag))
+                    if verbose:
+                        print(f"    FAIL: {diag}")
+                else:
+                    results.append(VerificationResult(True, 7))
+                    if verbose:
+                        print(f"    PASS (obj={obj_double_init:.2f} <= baseline={baseline_obj:.2f})")
+            else:
+                results.append(VerificationResult(True, 7, skipped=True))
+                if verbose:
+                    print("    SKIP (no objective)")
+
+        # =================================================================
+        # Probe 2: Constraint Direction Check (Capacity)
+        # Correct: usage <= capacity
+        # Error: If reducing capacity by 50% has NO effect or REDUCES cost,
+        # the constraint direction is likely wrong
+        # =================================================================
+        cap_keys = [k for k in data.keys() if 'capacity' in k.lower() or 'cap' in k.lower()]
+        if cap_keys:
+            if verbose:
+                print("  Probe: Constraint Direction (Capacity)")
+
+            test_data = copy.deepcopy(data)
+            cap_key = cap_keys[0]
+
+            # Reduce capacity by 50%
+            if isinstance(test_data[cap_key], dict):
+                for k in test_data[cap_key]:
+                    if isinstance(test_data[cap_key][k], (int, float)):
+                        test_data[cap_key][k] = test_data[cap_key][k] * 0.5
+                    elif isinstance(test_data[cap_key][k], list):
+                        test_data[cap_key][k] = [v * 0.5 for v in test_data[cap_key][k]]
+            elif isinstance(test_data[cap_key], (int, float)):
+                test_data[cap_key] = test_data[cap_key] * 0.5
+            elif isinstance(test_data[cap_key], list):
+                test_data[cap_key] = [v * 0.5 for v in test_data[cap_key]]
+
+            result = self.executor.execute(code, test_data)
+            status = result.get("status")
+            obj_half_cap = result.get("objective")
+
+            if status == "INFEASIBLE":
+                # Good - reduced capacity made problem infeasible
+                results.append(VerificationResult(True, 7))
+                if verbose:
+                    print("    PASS (INFEASIBLE with reduced capacity)")
+            elif obj_half_cap is not None:
+                # Reducing capacity should increase cost or have no effect
+                if obj_half_cap < baseline_obj * 0.9:  # Cost DECREASED by >10%
+                    diag = f"Halving capacity DECREASED cost ({obj_half_cap:.2f} < {baseline_obj:.2f}). " \
+                           f"Capacity constraint direction likely wrong (should be usage <= capacity, not >=)."
+                    results.append(VerificationResult(False, 7, diag))
+                    if verbose:
+                        print(f"    FAIL: {diag}")
+                else:
+                    results.append(VerificationResult(True, 7))
+                    if verbose:
+                        print(f"    PASS (obj={obj_half_cap:.2f} >= baseline*0.9)")
+            else:
+                results.append(VerificationResult(True, 7, skipped=True))
+                if verbose:
+                    print("    SKIP (no objective)")
+
+        # =================================================================
+        # Probe 3: Cost Component Completeness
+        # Test if holding cost is actually being computed
+        # If holding_cost * 10 has NO effect on objective, it's not included
+        # =================================================================
+        cost_keys = [k for k in data.keys() if 'cost' in k.lower() and 'hold' in k.lower()]
+        if not cost_keys:
+            cost_keys = [k for k in data.keys() if 'holding' in k.lower()]
+
+        if cost_keys:
+            if verbose:
+                print("  Probe: Cost Component Completeness (Holding Cost)")
+
+            test_data = copy.deepcopy(data)
+            cost_key = cost_keys[0]
+
+            # Multiply holding cost by 10
+            if isinstance(test_data[cost_key], dict):
+                for k in test_data[cost_key]:
+                    if isinstance(test_data[cost_key][k], (int, float)):
+                        test_data[cost_key][k] = test_data[cost_key][k] * 10
+                    elif isinstance(test_data[cost_key][k], list):
+                        test_data[cost_key][k] = [v * 10 for v in test_data[cost_key][k]]
+            elif isinstance(test_data[cost_key], (int, float)):
+                test_data[cost_key] = test_data[cost_key] * 10
+            elif isinstance(test_data[cost_key], list):
+                test_data[cost_key] = [v * 10 for v in test_data[cost_key]]
+
+            result = self.executor.execute(code, test_data)
+            obj_high_hold = result.get("objective")
+
+            if obj_high_hold is not None:
+                change_ratio = abs(obj_high_hold - baseline_obj) / max(abs(baseline_obj), 1e-6)
+                if change_ratio < 0.01:  # Less than 1% change
+                    diag = f"Multiplying {cost_key} by 10x had NO effect on objective. " \
+                           f"Holding cost likely NOT included in objective function."
+                    results.append(VerificationResult(False, 7, diag))
+                    if verbose:
+                        print(f"    FAIL: {diag}")
+                else:
+                    results.append(VerificationResult(True, 7))
+                    if verbose:
+                        print(f"    PASS (change_ratio={change_ratio:.2%})")
+            else:
+                results.append(VerificationResult(True, 7, skipped=True))
+                if verbose:
+                    print("    SKIP (no objective)")
+
+        # =================================================================
+        # Probe 4: Waste/Penalty Cost Check
+        # If waste_cost * 10 has NO effect, waste penalty is not implemented
+        # =================================================================
+        waste_keys = [k for k in data.keys() if 'waste' in k.lower() or 'spoil' in k.lower() or 'penalty' in k.lower()]
+        if waste_keys:
+            if verbose:
+                print("  Probe: Cost Component Completeness (Waste/Penalty)")
+
+            test_data = copy.deepcopy(data)
+            waste_key = waste_keys[0]
+
+            # Multiply waste cost by 10
+            if isinstance(test_data[waste_key], dict):
+                for k in test_data[waste_key]:
+                    if isinstance(test_data[waste_key][k], (int, float)):
+                        test_data[waste_key][k] = test_data[waste_key][k] * 10
+                    elif isinstance(test_data[waste_key][k], list):
+                        test_data[waste_key][k] = [v * 10 for v in test_data[waste_key][k]]
+            elif isinstance(test_data[waste_key], (int, float)):
+                test_data[waste_key] = test_data[waste_key] * 10
+            elif isinstance(test_data[waste_key], list):
+                test_data[waste_key] = [v * 10 for v in test_data[waste_key]]
+
+            result = self.executor.execute(code, test_data)
+            obj_high_waste = result.get("objective")
+
+            if obj_high_waste is not None:
+                change_ratio = abs(obj_high_waste - baseline_obj) / max(abs(baseline_obj), 1e-6)
+                if change_ratio < 0.01:  # Less than 1% change
+                    diag = f"Multiplying {waste_key} by 10x had NO effect on objective. " \
+                           f"Waste/penalty cost likely NOT included in objective function."
+                    results.append(VerificationResult(False, 7, diag))
+                    if verbose:
+                        print(f"    FAIL: {diag}")
+                else:
+                    results.append(VerificationResult(True, 7))
+                    if verbose:
+                        print(f"    PASS (change_ratio={change_ratio:.2%})")
+            else:
+                results.append(VerificationResult(True, 7, skipped=True))
+                if verbose:
+                    print("    SKIP (no objective)")
+
+        # =================================================================
+        # Probe 5: Lost Sales Variable (existing)
+        # =================================================================
         if verbose:
             print("  Probe: Lost Sales Variable")
         test_data = copy.deepcopy(data)
@@ -537,9 +737,9 @@ class BehavioralVerifier:
             if verbose:
                 print("    PASS")
 
-        # Probe 2: Shelf Life Structure (Retail-specific)
-        # With shelf_life=1, all inventory expires after 1 period
-        # So total waste should be significant if production > demand
+        # =================================================================
+        # Probe 6: Shelf Life Structure (Retail-specific)
+        # =================================================================
         if "shelf_life" in data:
             if verbose:
                 print("  Probe: Shelf Life Structure (shelf_life=1)")
@@ -563,8 +763,7 @@ class BehavioralVerifier:
                     print(f"    FAIL: {diag}")
             elif obj_sl1 is not None:
                 # With shelf_life=1, cost should be HIGHER than baseline
-                # (more waste, less ability to buffer inventory)
-                if obj_sl1 < baseline_obj * 0.9:  # Suspicious if cost drops significantly
+                if obj_sl1 < baseline_obj * 0.9:
                     diag = f"shelf_life=1 gives LOWER cost ({obj_sl1:.2f} < {baseline_obj:.2f}). " \
                            f"Aging/waste constraint likely incorrect."
                     results.append(VerificationResult(False, 7, diag))
@@ -579,9 +778,9 @@ class BehavioralVerifier:
                 if verbose:
                     print(f"    SKIP (status={status})")
 
-        # Probe 3: Substitution Edge (Retail-specific)
-        # If sub_edge [A, B] exists and A capacity=0, model should still be feasible
-        # (B can substitute for A)
+        # =================================================================
+        # Probe 7: Substitution Edge (Retail-specific)
+        # =================================================================
         network = data.get("network", {})
         sub_edges = network.get("sub_edges", [])
         if sub_edges and "production_cap" in data:
@@ -589,11 +788,9 @@ class BehavioralVerifier:
                 print("  Probe: Substitution Structure")
             test_data = copy.deepcopy(data)
 
-            # Get first substitution edge
             edge = sub_edges[0]
             p_from = edge[0] if isinstance(edge, list) else edge
 
-            # Set production capacity of substituted product to 0
             if isinstance(test_data["production_cap"], dict) and p_from in test_data["production_cap"]:
                 if isinstance(test_data["production_cap"][p_from], list):
                     test_data["production_cap"][p_from] = [0] * len(test_data["production_cap"][p_from])
@@ -617,6 +814,52 @@ class BehavioralVerifier:
                 results.append(VerificationResult(True, 7, skipped=True))
                 if verbose:
                     print(f"    SKIP (status={status})")
+
+        # =================================================================
+        # Probe 8: Objective Sign Check (Minimize vs Maximize)
+        # If all costs doubled → objective should roughly double for minimize
+        # =================================================================
+        all_cost_keys = [k for k in data.keys() if 'cost' in k.lower()]
+        if len(all_cost_keys) >= 2:
+            if verbose:
+                print("  Probe: Objective Function Sign (cost doubling)")
+
+            test_data = copy.deepcopy(data)
+
+            # Double all cost parameters
+            for cost_key in all_cost_keys:
+                if isinstance(test_data[cost_key], dict):
+                    for k in test_data[cost_key]:
+                        if isinstance(test_data[cost_key][k], (int, float)):
+                            test_data[cost_key][k] = test_data[cost_key][k] * 2
+                        elif isinstance(test_data[cost_key][k], list):
+                            test_data[cost_key][k] = [v * 2 for v in test_data[cost_key][k]]
+                elif isinstance(test_data[cost_key], (int, float)):
+                    test_data[cost_key] = test_data[cost_key] * 2
+                elif isinstance(test_data[cost_key], list):
+                    test_data[cost_key] = [v * 2 for v in test_data[cost_key]]
+
+            result = self.executor.execute(code, test_data)
+            obj_double_cost = result.get("objective")
+
+            if obj_double_cost is not None and baseline_obj > 0:
+                ratio = obj_double_cost / baseline_obj
+                # For minimize: doubling costs should roughly double objective (ratio ~2)
+                # If ratio < 1, objective may have wrong sign
+                if ratio < 0.8:  # Objective DECREASED when costs doubled
+                    diag = f"Doubling all costs DECREASED objective ({obj_double_cost:.2f} < {baseline_obj:.2f}). " \
+                           f"Objective function may have wrong sign (minimize vs maximize) or missing cost terms."
+                    results.append(VerificationResult(False, 7, diag))
+                    if verbose:
+                        print(f"    FAIL: {diag}")
+                else:
+                    results.append(VerificationResult(True, 7))
+                    if verbose:
+                        print(f"    PASS (ratio={ratio:.2f})")
+            else:
+                results.append(VerificationResult(True, 7, skipped=True))
+                if verbose:
+                    print("    SKIP (no valid objective)")
 
         return results
 
