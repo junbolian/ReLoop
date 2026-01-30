@@ -1,0 +1,286 @@
+{
+  "run_id": "20260126T014735Z-a9459c7a",
+  "created_at": "2026-01-26T01:47:56Z",
+  "input_text": "Imagine you're meticulously planning your weekly meals to ensure you're hitting all your nutritional goals while sticking to a budget. You're considering five diverse food items, each with unique nutritional benefits and costs. \n\nHere's a breakdown of what each food offers and its cost:\n\n- Food_1: Delivers 3 grams of protein, 16 grams of carbohydrates, and 96 calories for $9.\n- Food_2: Provides 17 grams of protein, 24 grams of carbohydrates, and 182 calories for $9.\n- Food_3: Offers 16 grams of protein, 27 grams of carbohydrates, and 114 calories for just $2.\n- Food_4: Contains 8 grams of protein, 16 grams of carbohydrates, and 208 calories for $9.\n- Food_5: Supplies 6 grams of protein, 6 grams of carbohydrates, and 236 calories for $5.\n\nYour dietary targets for the week are to consume at least 100 grams of protein, 180 grams of carbohydrates, and 1796 calories. Your challenge is to determine the most cost-effective combination of these food items to meet or exceed these nutritional requirements. What is the cheapest cost to achieve your dietary goals?",
+  "archetype_id": "diet_lp",
+  "input_data": null,
+  "route": {
+    "archetype_id": "diet_lp",
+    "confidence": 0.82,
+    "rationale": "Detected allocation/dietary terms.",
+    "missing_inputs": []
+  },
+  "extraction_config": {
+    "use_llm": true,
+    "prompt_version": "v2_strict",
+    "strict_mode": false,
+    "auto_apply_trusted": true,
+    "suggest_candidate": false,
+    "allow_candidate_auto_apply": false,
+    "max_retries": 1
+  },
+  "extracted_schema": {
+    "items": [
+      {
+        "name": "Food_1",
+        "cost": 9.0,
+        "features": {
+          "protein": 3.0,
+          "carbohydrates": 16.0,
+          "calories": 96.0
+        }
+      },
+      {
+        "name": "Food_2",
+        "cost": 9.0,
+        "features": {
+          "protein": 17.0,
+          "carbohydrates": 24.0,
+          "calories": 182.0
+        }
+      },
+      {
+        "name": "Food_3",
+        "cost": 2.0,
+        "features": {
+          "protein": 16.0,
+          "carbohydrates": 27.0,
+          "calories": 114.0
+        }
+      },
+      {
+        "name": "Food_4",
+        "cost": 9.0,
+        "features": {
+          "protein": 8.0,
+          "carbohydrates": 16.0,
+          "calories": 208.0
+        }
+      },
+      {
+        "name": "Food_5",
+        "cost": 5.0,
+        "features": {
+          "protein": 6.0,
+          "carbohydrates": 6.0,
+          "calories": 236.0
+        }
+      }
+    ],
+    "requirements": {
+      "protein": 100.0,
+      "carbohydrates": 180.0,
+      "calories": 1796.0
+    }
+  },
+  "canonical_schema": {
+    "items": [
+      {
+        "name": "Food_1",
+        "cost": 9.0,
+        "features": {
+          "calories": 96.0,
+          "carbohydrates": 16.0,
+          "protein": 3.0
+        }
+      },
+      {
+        "name": "Food_2",
+        "cost": 9.0,
+        "features": {
+          "calories": 182.0,
+          "carbohydrates": 24.0,
+          "protein": 17.0
+        }
+      },
+      {
+        "name": "Food_3",
+        "cost": 2.0,
+        "features": {
+          "calories": 114.0,
+          "carbohydrates": 27.0,
+          "protein": 16.0
+        }
+      },
+      {
+        "name": "Food_4",
+        "cost": 9.0,
+        "features": {
+          "calories": 208.0,
+          "carbohydrates": 16.0,
+          "protein": 8.0
+        }
+      },
+      {
+        "name": "Food_5",
+        "cost": 5.0,
+        "features": {
+          "calories": 236.0,
+          "carbohydrates": 6.0,
+          "protein": 6.0
+        }
+      }
+    ],
+    "requirements": {
+      "calories": 1796.0,
+      "carbohydrates": 180.0,
+      "protein": 100.0
+    },
+    "feature_order": [
+      "calories",
+      "carbohydrates",
+      "protein"
+    ],
+    "warnings": []
+  },
+  "model_plan": {
+    "variables": [
+      "Food_1",
+      "Food_2",
+      "Food_3",
+      "Food_4",
+      "Food_5"
+    ],
+    "constraints": [
+      "req_calories",
+      "req_carbohydrates",
+      "req_protein"
+    ],
+    "objective": "minimize cost"
+  },
+  "model_plan_hash": "d61d789904fa82c7a1f1ad583695e86b2338a9ea1c0fbbc120f88e72e836f0b0",
+  "model_summary": {
+    "variables": [
+      "Food_1",
+      "Food_2",
+      "Food_3",
+      "Food_4",
+      "Food_5"
+    ],
+    "constraints": [
+      "req_calories",
+      "req_carbohydrates",
+      "req_protein"
+    ],
+    "objective": "minimize cost"
+  },
+  "solve_result": {
+    "status": "optimal",
+    "objective": 31.508771929824558,
+    "runtime": null,
+    "mip_gap": null,
+    "solver_log": "fallback_solver original_error='StatusConstClass' object has no attribute 'names'"
+  },
+  "audit_result": {
+    "passed": true,
+    "violations": [],
+    "audit_score": 1.0,
+    "symptom_tags": []
+  },
+  "diagnosis": null,
+  "symptoms": [],
+  "candidate_fix": null,
+  "applied_fixes": [
+    {
+      "fix_id": "cand1",
+      "archetype_id": "diet_lp",
+      "symptom_tags": [
+        "nutrient_shortfall"
+      ],
+      "patch_type": "prompt_patch",
+      "patch_payload": {
+        "prompt_version": "v2_strict"
+      },
+      "preconditions": [],
+      "expected_effect": "Improve extraction",
+      "created_at": "2026-01-26T01:46:00Z",
+      "human_label": "correct",
+      "notes": "looks good",
+      "source_run_id": null
+    }
+  ],
+  "sandbox_report": null,
+  "final_status": "success",
+  "not_implemented": null,
+  "expected_objective": 32.0,
+  "expected_tolerance": 5.0,
+  "is_correct": true,
+  "prompt_injections": {
+    "model_plan": {
+      "skill_id": "model_plan",
+      "files": [
+        {
+          "path": "skill_docs/common/progressive_disclosure.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nEnforce progressive disclosure: load only minimal necessary docs for each LLM call.\n\n## When to use\n- Every LLM skill before assembling prompts.\n\n## Hard constraints\n- Load only listed docs for the skill and current archetype.\n- Trim injected text to budget_tokens (default 3000).\n- Record injected files and sha256 hashes in state.\n\n## Examples\n- route skill injects route.skill.md + archetype doc only.",
+          "sha256": "53724900481f925587a1f24e3e38950e48385a2594beea457bfe921235f0625d"
+        },
+        {
+          "path": "skill_docs/common/or_modeling_principles.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nProvide safe OR modeling principles for LP/MIP construction.\n\n## When to use\n- Model planning/building for any archetype.\n\n## Hard constraints\n- Objectives must match problem intent (usually cost minimization).\n- Do not relax constraints; only add tightening cuts if justified.\n- Variable domains must reflect problem (nonnegative or binary).\n\n## Examples\n- Diet/allocation: x[item] >=0, meet requirements >=.",
+          "sha256": "ce86e846b4c2c741a6edea352ee09bc8b99e99524ba7b691345899a00830aa14"
+        },
+        {
+          "path": "skill_docs/common/gurobi_guidelines.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nSafe defaults for Gurobi modeling/solving.\n\n## When to use\n- Any model build or plan step targeting Gurobi.\n\n## Hard constraints\n- Set `OutputFlag=0` for reproducibility.\n- Avoid non-determinism; no random seeds.\n- Respect variable types; avoid large-M unless justified.\n\n## Examples\n- Linear constraints only for IR compilation.",
+          "sha256": "28480d8d2645bbcf0fbed62944640a6a445858113e197e55c7103580b249b764"
+        },
+        {
+          "path": "skill_docs/nodes/model_plan.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nProduce a JSON IR (intermediate representation) of the optimization model before building.\n\n## When to use\n- After canonicalization and trusted fix retrieval, before build_model.\n\n## Hard constraints\n- JSON only; conform to model_ir.py schema (sets, parameters, variables, constraints, objective).\n- Do not change objective sense; use \"minimize\" for cost problems.\n- Include missing_fields array if information is absent.\n\n## Examples\n- Objective: {\"sense\":\"minimize\",\"expr\":[[\"cost\",\"x[item]\"]]}",
+          "sha256": "927428bcfdc561e51b2bd48cffea8167c12c6dcbfc8829353df893cbddf5010d"
+        },
+        {
+          "path": "skill_docs/archetypes/allocation_lp/skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nSkill Card: allocation_lp. Allocation LP (diet-style) minimizing cost while meeting feature requirements.\n\n## Hard constraints\n- Objective sense: minimize\n- No relaxation of requirements.\n\n## Inputs\n- text\n\n## Outputs\n- allocation schema, model plan, solution\n\n## Examples\n- requirements calories>=2000, protein>=50 with foods.",
+          "sha256": "c1709cc791bbbd8edee83ec3f1ca0bd9e4011a3caed1fc552a7cc64e70e04a22"
+        }
+      ],
+      "budget_tokens": 3000,
+      "used_tokens_est": 440,
+      "sha256": "155aeeb7a455f4796d761a30f43ca4fbd317b56d5bea60cd94850d2a84117a50"
+    }
+  },
+  "warnings": [
+    "model_plan LLM parsing failed; falling back to code builder"
+  ]
+}

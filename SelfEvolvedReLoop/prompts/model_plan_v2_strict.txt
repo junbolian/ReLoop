@@ -1,0 +1,1 @@
+STRICT IR JSON ONLY. Conform to model_ir schema. Linear expressions only. Include missing_fields if unsure. No prose.

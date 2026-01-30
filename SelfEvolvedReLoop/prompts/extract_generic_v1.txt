@@ -1,0 +1,1 @@
+Extract the schema for the given archetype. Use the canonical JSON schema described in the injected docs. Output JSON only. Include missing_fields array for absent data.

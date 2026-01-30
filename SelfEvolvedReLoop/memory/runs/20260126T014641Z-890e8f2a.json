@@ -1,0 +1,306 @@
+{
+  "run_id": "20260126T014641Z-890e8f2a",
+  "created_at": "2026-01-26T01:47:11Z",
+  "input_text": "Imagine you are a dietitian and you have been tasked with creating a meal plan for a bodybuilder. You have six food items to choose from: Steak, Tofu, Chicken, Broccoli, Rice, and Spinach. Each food provides certain amounts of protein, carbohydrates, and calories, and each has its own cost.\n\nHere's the nutritional value and cost of each food:\n\n- Steak: It gives you 14 grams of protein, 23 grams of carbohydrates, and 63 calories for $4.\n- Tofu: It offers 2 grams of protein, 13 grams of carbohydrates, and 162 calories for $6.\n- Chicken: It packs a punch with 17 grams of protein, 13 grams of carbohydrates, and gives you 260 calories for $6.\n- Broccoli: It provides 3 grams of protein, a mere 1 gram of carbohydrates, and 55 calories for $8.\n- Rice: It gives a hearty 15 grams of protein, 23 grams of carbohydrates, and 231 calories for $8.\n- Spinach: It provides 2 grams of protein, 8 grams of carbohydrates, and a huge 297 calories for just $5.\n\nYour goal is to ensure that the bodybuilder gets at least 83 grams of protein, 192 grams of carbohydrates, and 2089 calories from whatever combination of these foods you choose. The challenge is to keep the cost as low as possible while meeting these nutritional targets. \n\nWhat is the minimum cost to meet these nutritional requirements with the available food options?",
+  "archetype_id": "diet_lp",
+  "input_data": null,
+  "route": {
+    "archetype_id": "diet_lp",
+    "confidence": 0.82,
+    "rationale": "Detected allocation/dietary terms.",
+    "missing_inputs": []
+  },
+  "extraction_config": {
+    "use_llm": true,
+    "prompt_version": "v2_strict",
+    "strict_mode": false,
+    "auto_apply_trusted": true,
+    "suggest_candidate": false,
+    "allow_candidate_auto_apply": false,
+    "max_retries": 1
+  },
+  "extracted_schema": {
+    "items": [
+      {
+        "name": "Steak",
+        "cost": 4.0,
+        "features": {
+          "protein": 14.0,
+          "carbohydrates": 23.0,
+          "calories": 63.0
+        }
+      },
+      {
+        "name": "Tofu",
+        "cost": 6.0,
+        "features": {
+          "protein": 2.0,
+          "carbohydrates": 13.0,
+          "calories": 162.0
+        }
+      },
+      {
+        "name": "Chicken",
+        "cost": 6.0,
+        "features": {
+          "protein": 17.0,
+          "carbohydrates": 13.0,
+          "calories": 260.0
+        }
+      },
+      {
+        "name": "Broccoli",
+        "cost": 8.0,
+        "features": {
+          "protein": 3.0,
+          "carbohydrates": 1.0,
+          "calories": 55.0
+        }
+      },
+      {
+        "name": "Rice",
+        "cost": 8.0,
+        "features": {
+          "protein": 15.0,
+          "carbohydrates": 23.0,
+          "calories": 231.0
+        }
+      },
+      {
+        "name": "Spinach",
+        "cost": 5.0,
+        "features": {
+          "protein": 2.0,
+          "carbohydrates": 8.0,
+          "calories": 297.0
+        }
+      }
+    ],
+    "requirements": {
+      "protein": 83.0,
+      "carbohydrates": 192.0,
+      "calories": 2089.0
+    }
+  },
+  "canonical_schema": {
+    "items": [
+      {
+        "name": "Steak",
+        "cost": 4.0,
+        "features": {
+          "calories": 63.0,
+          "carbohydrates": 23.0,
+          "protein": 14.0
+        }
+      },
+      {
+        "name": "Tofu",
+        "cost": 6.0,
+        "features": {
+          "calories": 162.0,
+          "carbohydrates": 13.0,
+          "protein": 2.0
+        }
+      },
+      {
+        "name": "Chicken",
+        "cost": 6.0,
+        "features": {
+          "calories": 260.0,
+          "carbohydrates": 13.0,
+          "protein": 17.0
+        }
+      },
+      {
+        "name": "Broccoli",
+        "cost": 8.0,
+        "features": {
+          "calories": 55.0,
+          "carbohydrates": 1.0,
+          "protein": 3.0
+        }
+      },
+      {
+        "name": "Rice",
+        "cost": 8.0,
+        "features": {
+          "calories": 231.0,
+          "carbohydrates": 23.0,
+          "protein": 15.0
+        }
+      },
+      {
+        "name": "Spinach",
+        "cost": 5.0,
+        "features": {
+          "calories": 297.0,
+          "carbohydrates": 8.0,
+          "protein": 2.0
+        }
+      }
+    ],
+    "requirements": {
+      "calories": 2089.0,
+      "carbohydrates": 192.0,
+      "protein": 83.0
+    },
+    "feature_order": [
+      "calories",
+      "carbohydrates",
+      "protein"
+    ],
+    "warnings": []
+  },
+  "model_plan": {
+    "variables": [
+      "Steak",
+      "Tofu",
+      "Chicken",
+      "Broccoli",
+      "Rice",
+      "Spinach"
+    ],
+    "constraints": [
+      "req_calories",
+      "req_carbohydrates",
+      "req_protein"
+    ],
+    "objective": "minimize cost"
+  },
+  "model_plan_hash": "cd6419a9a85c8725332678bf809bc9f09e59b911f53b684d4083df1134bb3e07",
+  "model_summary": {
+    "variables": [
+      "Steak",
+      "Tofu",
+      "Chicken",
+      "Broccoli",
+      "Rice",
+      "Spinach"
+    ],
+    "constraints": [
+      "req_calories",
+      "req_carbohydrates",
+      "req_protein"
+    ],
+    "objective": "minimize cost"
+  },
+  "solve_result": {
+    "status": "optimal",
+    "objective": 53.896475422791205,
+    "runtime": null,
+    "mip_gap": null,
+    "solver_log": "fallback_solver original_error='StatusConstClass' object has no attribute 'names'"
+  },
+  "audit_result": {
+    "passed": true,
+    "violations": [],
+    "audit_score": 1.0,
+    "symptom_tags": []
+  },
+  "diagnosis": null,
+  "symptoms": [],
+  "candidate_fix": null,
+  "applied_fixes": [
+    {
+      "fix_id": "cand1",
+      "archetype_id": "diet_lp",
+      "symptom_tags": [
+        "nutrient_shortfall"
+      ],
+      "patch_type": "prompt_patch",
+      "patch_payload": {
+        "prompt_version": "v2_strict"
+      },
+      "preconditions": [],
+      "expected_effect": "Improve extraction",
+      "created_at": "2026-01-26T01:46:00Z",
+      "human_label": "correct",
+      "notes": "looks good",
+      "source_run_id": null
+    }
+  ],
+  "sandbox_report": null,
+  "final_status": "success",
+  "not_implemented": null,
+  "expected_objective": 57.0,
+  "expected_tolerance": 5.0,
+  "is_correct": true,
+  "prompt_injections": {
+    "model_plan": {
+      "skill_id": "model_plan",
+      "files": [
+        {
+          "path": "skill_docs/common/progressive_disclosure.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nEnforce progressive disclosure: load only minimal necessary docs for each LLM call.\n\n## When to use\n- Every LLM skill before assembling prompts.\n\n## Hard constraints\n- Load only listed docs for the skill and current archetype.\n- Trim injected text to budget_tokens (default 3000).\n- Record injected files and sha256 hashes in state.\n\n## Examples\n- route skill injects route.skill.md + archetype doc only.",
+          "sha256": "53724900481f925587a1f24e3e38950e48385a2594beea457bfe921235f0625d"
+        },
+        {
+          "path": "skill_docs/common/or_modeling_principles.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nProvide safe OR modeling principles for LP/MIP construction.\n\n## When to use\n- Model planning/building for any archetype.\n\n## Hard constraints\n- Objectives must match problem intent (usually cost minimization).\n- Do not relax constraints; only add tightening cuts if justified.\n- Variable domains must reflect problem (nonnegative or binary).\n\n## Examples\n- Diet/allocation: x[item] >=0, meet requirements >=.",
+          "sha256": "ce86e846b4c2c741a6edea352ee09bc8b99e99524ba7b691345899a00830aa14"
+        },
+        {
+          "path": "skill_docs/common/gurobi_guidelines.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nSafe defaults for Gurobi modeling/solving.\n\n## When to use\n- Any model build or plan step targeting Gurobi.\n\n## Hard constraints\n- Set `OutputFlag=0` for reproducibility.\n- Avoid non-determinism; no random seeds.\n- Respect variable types; avoid large-M unless justified.\n\n## Examples\n- Linear constraints only for IR compilation.",
+          "sha256": "28480d8d2645bbcf0fbed62944640a6a445858113e197e55c7103580b249b764"
+        },
+        {
+          "path": "skill_docs/nodes/model_plan.skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nProduce a JSON IR (intermediate representation) of the optimization model before building.\n\n## When to use\n- After canonicalization and trusted fix retrieval, before build_model.\n\n## Hard constraints\n- JSON only; conform to model_ir.py schema (sets, parameters, variables, constraints, objective).\n- Do not change objective sense; use \"minimize\" for cost problems.\n- Include missing_fields array if information is absent.\n\n## Examples\n- Objective: {\"sense\":\"minimize\",\"expr\":[[\"cost\",\"x[item]\"]]}",
+          "sha256": "927428bcfdc561e51b2bd48cffea8167c12c6dcbfc8829353df893cbddf5010d"
+        },
+        {
+          "path": "skill_docs/archetypes/allocation_lp/skill.md",
+          "sections": [
+            "Purpose",
+            "When to use",
+            "Inputs",
+            "Outputs",
+            "Hard constraints",
+            "Examples"
+          ],
+          "text": "## Purpose\nSkill Card: allocation_lp. Allocation LP (diet-style) minimizing cost while meeting feature requirements.\n\n## Hard constraints\n- Objective sense: minimize\n- No relaxation of requirements.\n\n## Inputs\n- text\n\n## Outputs\n- allocation schema, model plan, solution\n\n## Examples\n- requirements calories>=2000, protein>=50 with foods.",
+          "sha256": "c1709cc791bbbd8edee83ec3f1ca0bd9e4011a3caed1fc552a7cc64e70e04a22"
+        }
+      ],
+      "budget_tokens": 3000,
+      "used_tokens_est": 440,
+      "sha256": "c2b4ca2d3a983eff396d63f3ed6e0ae67dab1d025d9137030d3510c60423144b"
+    }
+  },
+  "warnings": [
+    "model_plan LLM parsing failed; falling back to code builder"
+  ]
+}

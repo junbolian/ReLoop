@@ -1,0 +1,1 @@
+Return JSON: {"summary":"...","symptom_tags":[...],"recommended_params":{},"missing_fields":[]} based on solver and audit outcomes.

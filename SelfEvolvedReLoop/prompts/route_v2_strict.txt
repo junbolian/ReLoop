@@ -1,0 +1,2 @@
+STRICT JSON ONLY. Fields: archetype_id, confidence, rationale, missing_inputs.
+Do not add text. If unsure, set confidence <=0.5 and list missing_inputs.

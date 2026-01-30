@@ -1,0 +1,1 @@
+{"fix_id": "cand1", "archetype_id": "diet_lp", "symptom_tags": ["nutrient_shortfall"], "patch_type": "prompt_patch", "patch_payload": {"prompt_version": "v2_strict"}, "preconditions": [], "expected_effect": "Improve extraction", "created_at": "2026-01-26T01:46:00Z", "human_label": "correct", "notes": "looks good", "source_run_id": null}

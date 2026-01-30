@@ -1,0 +1,1 @@
+Return exactly one FixRecord JSON or null. Allowed patch_type: prompt_patch, canonicalize_patch. Do not relax constraints or change objectives.

@@ -1,0 +1,1 @@
+STRICT JSON extraction. Follow the canonical schema exactly. No prose, no code fences. Fill missing numeric fields with 0 and include missing_fields.

@@ -1,0 +1,108 @@
+skills:
+  - id: route
+    type: llm
+    triggers: ["low_confidence_route"]
+    doc_paths:
+      - skill_docs/common/progressive_disclosure.skill.md
+      - skill_docs/nodes/route.skill.md
+    prompt_template: prompts/route_v1.txt
+    io_schema:
+      input_fields: ["input_text"]
+      output_fields: ["route", "archetype_id"]
+    safety: ["json_only"]
+    budget_tokens: 3000
+  - id: extract
+    type: llm
+    triggers: ["archetype_known"]
+    doc_paths:
+      - skill_docs/common/progressive_disclosure.skill.md
+      - skill_docs/common/json_only.skill.md
+      - skill_docs/nodes/extract.skill.md
+    prompt_template: prompts/extract_generic_v1.txt
+    io_schema:
+      input_fields: ["input_text", "archetype_id"]
+      output_fields: ["extracted_schema"]
+    safety: ["json_only"]
+    budget_tokens: 3000
+  - id: model_plan
+    type: llm
+    triggers: ["need_model_plan"]
+    doc_paths:
+      - skill_docs/common/progressive_disclosure.skill.md
+      - skill_docs/common/or_modeling_principles.skill.md
+      - skill_docs/common/gurobi_guidelines.skill.md
+      - skill_docs/nodes/model_plan.skill.md
+    prompt_template: prompts/model_plan_v1.txt
+    io_schema:
+      input_fields: ["canonical_schema", "archetype_id"]
+      output_fields: ["model_plan"]
+    safety: ["json_only"]
+    budget_tokens: 3000
+  - id: diagnose
+    type: llm
+    triggers: ["needs_diagnosis"]
+    doc_paths:
+      - skill_docs/common/progressive_disclosure.skill.md
+      - skill_docs/nodes/diagnose.skill.md
+    prompt_template: prompts/diagnose_v1.txt
+    io_schema:
+      input_fields: ["solve_result", "audit_result", "symptoms", "archetype_id"]
+      output_fields: ["diagnosis"]
+    safety: []
+    budget_tokens: 2000
+  - id: fix_propose
+    type: llm
+    triggers: ["needs_fix"]
+    doc_paths:
+      - skill_docs/common/progressive_disclosure.skill.md
+      - skill_docs/common/fix_safety.skill.md
+      - skill_docs/nodes/fix_propose.skill.md
+    prompt_template: prompts/fix_propose_v1.txt
+    io_schema:
+      input_fields: ["archetype_id", "symptoms", "diagnosis"]
+      output_fields: ["candidate_fix"]
+    safety: ["no_semantic_change"]
+    budget_tokens: 2000
+  - id: finalize
+    type: code
+    triggers: ["always"]
+    doc_paths:
+      - skill_docs/nodes/finalize.skill.md
+    io_schema:
+      input_fields: ["run_state"]
+      output_fields: ["run_record"]
+    safety: []
+    budget_tokens: 0
+
+archetypes:
+  - id: allocation_lp
+    aliases: ["diet_lp"]
+    required_inputs: ["text"]
+    supported_status: "implemented"
+    builder: "build_allocation"
+    doc_paths:
+      - skill_docs/archetypes/allocation_lp/skill.md
+  - id: transport_flow
+    required_inputs: ["text"]
+    supported_status: "implemented"
+    builder: "build_transport"
+    doc_paths:
+      - skill_docs/archetypes/transport_flow/skill.md
+  - id: assignment
+    required_inputs: ["text"]
+    supported_status: "implemented"
+    builder: "build_assignment"
+    doc_paths:
+      - skill_docs/archetypes/assignment/skill.md
+  - id: facility_location
+    required_inputs: ["text"]
+    supported_status: "implemented"
+    builder: "build_facility"
+    doc_paths:
+      - skill_docs/archetypes/facility_location/skill.md
+  - id: retail_inventory
+    required_inputs: ["text", "data_dict"]
+    supported_status: "baseline_no_aging"
+    builder: "build_retail"
+    doc_paths:
+      - skill_docs/archetypes/retail_inventory/skill.md

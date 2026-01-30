@@ -1,0 +1,1 @@
+Produce a JSON IR (sets, parameters, variables, constraints, objective) compatible with model_ir.py. Include missing_fields if something is absent. Objective sense must be minimize unless stated otherwise.

@@ -1,0 +1,8 @@
+{
+  "n": 3,
+  "feasibility_rate": 1.0,
+  "optimal_rate": 1.0,
+  "correctness_rate": 1.0,
+  "mae": 1.5077746919852224,
+  "avg_runtime_ms": 25047.185977300007
+}
