@@ -48,56 +48,8 @@ Structure cues:
 - Labor capacity remains high enough that it does not materially bind, though it can be represented consistently with the JSON.
 - The objective is to minimize total cost over the entire year, aggregating holding, waste, and lost sales costs across all weeks.
 
-[DATA SCHEMA]
-{
-  "name": str,                          # scenario identifier
-  "periods": int,                       # number of time periods
-  "products": [str, ...],               # list of product IDs
-  "locations": [str, ...],              # list of location IDs
-
-  "shelf_life": {p: int},               # shelf life in periods per product
-  "lead_time": {p: int},                # order lead time per product (0 = same-period arrival)
-
-  "demand_curve": {p: [float, ...]},    # demand per product per period (0-indexed list)
-  "demand_share": {l: float},           # fraction of total demand at each location
-
-  "production_cap": {p: [float, ...]},  # max production per product per period (0-indexed list)
-  "cold_capacity": {l: float},          # storage capacity per location
-  "cold_usage": {p: float},             # storage units per unit of product
-
-  "labor_cap": {l: [float, ...]},       # labor hours per location per period (0-indexed list)
-  "labor_usage": {p: float},            # labor hours per unit sold
-  "return_rate": {p: float},            # fraction of sales returned next period
-
-  "costs": {
-    "purchasing": {p: float},           # cost per unit ordered
-    "inventory": {p: float},            # holding cost per unit per period
-    "waste": {p: float},                # cost per unit expired
-    "lost_sales": {p: float},           # penalty per unit of unmet demand
-    "fixed_order": float,               # fixed cost per order placed
-    "transshipment": float              # cost per unit transshipped
-  },
-
-  "constraints": {
-    "moq": float,                       # minimum order quantity (0 = no MOQ)
-    "pack_size": int,                   # order must be multiple of this (1 = no constraint)
-    "budget_per_period": float|null,    # max purchasing cost per period
-    "waste_limit_pct": float|null       # max waste as fraction of total demand
-  },
-
-  "network": {
-    "sub_edges": [[p_from, p_to], ...], # substitution: p_from's demand can be served by p_to
-    "trans_edges": [[l_from, l_to], ...]# transshipment: can ship from l_from to l_to
-  }
-}
-
-[DATA ACCESS]
-- The variable `data` is pre-loaded. Do NOT use file I/O.
-- Lists are 0-indexed (period t in model uses index [t-1] in data arrays)
-
-CRITICAL - Network edges require tuple conversion for Gurobi:
-  sub_edges = [tuple(e) for e in data.get('network', {}).get('sub_edges', [])]
-  trans_edges = [tuple(e) for e in data.get('network', {}).get('trans_edges', [])]
+[DATA]
+{"name":"retail_f1_52_weeks_v2","description":"Standard seasonal retail scenario.","periods":52,"products":["SKU_Basic","SKU_Premium","SKU_ShortLife"],"locations":["DC1","DC2","DC3","DC4","DC5"],"shelf_life":{"SKU_Basic":10,"SKU_Premium":8,"SKU_ShortLife":4},"lead_time":{"SKU_Basic":0,"SKU_Premium":0,"SKU_ShortLife":0},"cold_capacity":{"DC1":4291.310835751933,"DC2":3586.8980554014483,"DC3":2802.1254967501045,"DC4":2560.502105140458,"DC5":2521.5221885622987},"cold_usage":{"SKU_Basic":1.0,"SKU_Premium":3.0,"SKU_ShortLife":1.2},"production_cap":{"SKU_Basic":[800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800],"SKU_Premium":[400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400],"SKU_ShortLife":[500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500]},"labor_cap":{"DC1":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC2":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC3":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC4":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC5":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0]},"labor_usage":{"SKU_Basic":0.0,"SKU_Premium":0.0,"SKU_ShortLife":0.0},"return_rate":{"SKU_Basic":0.0,"SKU_Premium":0.0,"SKU_ShortLife":0.0},"demand_curve":{"SKU_Basic":[331,304,318,378,411,628,792,880,1028,1292,1186,1166,1258,808,713,621,394,343,361,348,311,345,356,403,410,611,659,983,1013,1172,1257,1291,1053,976,737,536,435,339,306,322,303,315,335,326,458,575,717,955,1047,1179,1112,1071],"SKU_Premium":[150,172,159,162,227,279,397,400,615,691,722,707,614,473,395,261,195,181,182,168,131,174,163,182,249,308,320,514,526,645,679,673,563,435,335,279,228,192,144,149,138,152,164,167,238,301,354,456,611,643,612,601],"SKU_ShortLife":[138,134,146,167,154,221,249,408,460,445,532,513,453,398,303,243,199,124,121,128,127,135,122,134,158,189,272,324,408,439,540,508,471,357,308,187,173,156,129,142,137,140,116,159,175,235,256,402,492,519,455,518]},"demand_share":{"DC1":0.25,"DC2":0.2,"DC3":0.2,"DC4":0.2,"DC5":0.15},"costs":{"lost_sales":{"SKU_Basic":50.0,"SKU_Premium":80.0,"SKU_ShortLife":40.0},"inventory":{"SKU_Basic":1.0,"SKU_Premium":1.5,"SKU_ShortLife":1.0},"waste":{"SKU_Basic":2.0,"SKU_Premium":3.0,"SKU_ShortLife":2.0},"fixed_order":0.0,"transshipment":0.5,"purchasing":{"SKU_Basic":10.0,"SKU_Premium":20.0,"SKU_ShortLife":15.0}},"constraints":{"moq":0,"pack_size":1,"budget_per_period":null,"waste_limit_pct":null},"network":{"sub_edges":[["SKU_Basic","SKU_Premium"]],"trans_edges":[]}}
 
 [OUTPUT FORMAT]
 - Import: import gurobipy as gp; from gurobipy import GRB
