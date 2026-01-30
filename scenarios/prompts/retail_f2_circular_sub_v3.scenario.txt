@@ -38,56 +38,8 @@ Structure cues:
 - Zero lead times remain in effect, and there is no transshipment between locations.
 - The objective is to minimize total cost including holding, waste, and lost sales while respecting the substitution pattern encoded in the JSON.
 
-[DATA SCHEMA]
-{
-  "name": str,                          # scenario identifier
-  "periods": int,                       # number of time periods
-  "products": [str, ...],               # list of product IDs
-  "locations": [str, ...],              # list of location IDs
-
-  "shelf_life": {p: int},               # shelf life in periods per product
-  "lead_time": {p: int},                # order lead time per product (0 = same-period arrival)
-
-  "demand_curve": {p: [float, ...]},    # demand per product per period (0-indexed list)
-  "demand_share": {l: float},           # fraction of total demand at each location
-
-  "production_cap": {p: [float, ...]},  # max production per product per period (0-indexed list)
-  "cold_capacity": {l: float},          # storage capacity per location
-  "cold_usage": {p: float},             # storage units per unit of product
-
-  "labor_cap": {l: [float, ...]},       # labor hours per location per period (0-indexed list)
-  "labor_usage": {p: float},            # labor hours per unit sold
-  "return_rate": {p: float},            # fraction of sales returned next period
-
-  "costs": {
-    "purchasing": {p: float},           # cost per unit ordered
-    "inventory": {p: float},            # holding cost per unit per period
-    "waste": {p: float},                # cost per unit expired
-    "lost_sales": {p: float},           # penalty per unit of unmet demand
-    "fixed_order": float,               # fixed cost per order placed
-    "transshipment": float              # cost per unit transshipped
-  },
-
-  "constraints": {
-    "moq": float,                       # minimum order quantity (0 = no MOQ)
-    "pack_size": int,                   # order must be multiple of this (1 = no constraint)
-    "budget_per_period": float|null,    # max purchasing cost per period
-    "waste_limit_pct": float|null       # max waste as fraction of total demand
-  },
-
-  "network": {
-    "sub_edges": [[p_from, p_to], ...], # substitution: p_from's demand can be served by p_to
-    "trans_edges": [[l_from, l_to], ...]# transshipment: can ship from l_from to l_to
-  }
-}
-
-[DATA ACCESS]
-- The variable `data` is pre-loaded. Do NOT use file I/O.
-- Lists are 0-indexed (period t in model uses index [t-1] in data arrays)
-
-CRITICAL - Network edges require tuple conversion for Gurobi:
-  sub_edges = [tuple(e) for e in data.get('network', {}).get('sub_edges', [])]
-  trans_edges = [tuple(e) for e in data.get('network', {}).get('trans_edges', [])]
+[DATA]
+{"name":"retail_f2_circular_sub_v3","description":"Standard seasonal retail scenario.","periods":20,"products":["SKU_Basic","SKU_Premium","SKU_ShortLife"],"locations":["DC1","DC2","DC3","DC4","DC5"],"shelf_life":{"SKU_Basic":10,"SKU_Premium":8,"SKU_ShortLife":4},"lead_time":{"SKU_Basic":0,"SKU_Premium":0,"SKU_ShortLife":0},"cold_capacity":{"DC1":3462.23662947628,"DC2":3989.713994899447,"DC3":2795.6840758104636,"DC4":3207.3520166764847,"DC5":2480.6254358169203},"cold_usage":{"SKU_Basic":1.0,"SKU_Premium":3.0,"SKU_ShortLife":1.2},"production_cap":{"SKU_Basic":[800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800,800],"SKU_Premium":[400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400],"SKU_ShortLife":[500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500]},"labor_cap":{"DC1":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC2":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC3":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC4":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0],"DC5":[99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0,99999.0]},"labor_usage":{"SKU_Basic":0.0,"SKU_Premium":0.0,"SKU_ShortLife":0.0},"return_rate":{"SKU_Basic":0.0,"SKU_Premium":0.0,"SKU_ShortLife":0.0},"demand_curve":{"SKU_Basic":[335,266,286,316,491,531,796,901,1064,1362,1300,1214,1029,844,792,572,495,398,281,316],"SKU_Premium":[157,170,143,202,246,258,402,444,622,591,666,699,569,474,328,255,243,168,181,159],"SKU_ShortLife":[132,113,116,127,152,238,297,312,399,487,471,555,409,311,246,212,170,142,135,141]},"demand_share":{"DC1":0.25,"DC2":0.2,"DC3":0.2,"DC4":0.2,"DC5":0.15},"costs":{"lost_sales":{"SKU_Basic":50.0,"SKU_Premium":80.0,"SKU_ShortLife":40.0},"inventory":{"SKU_Basic":1.0,"SKU_Premium":1.5,"SKU_ShortLife":1.0},"waste":{"SKU_Basic":2.0,"SKU_Premium":3.0,"SKU_ShortLife":2.0},"fixed_order":0.0,"transshipment":0.5,"purchasing":{"SKU_Basic":10.0,"SKU_Premium":20.0,"SKU_ShortLife":15.0}},"constraints":{"moq":0,"pack_size":1,"budget_per_period":null,"waste_limit_pct":null},"network":{"sub_edges":[["SKU_Basic","SKU_Premium"],["SKU_Premium","SKU_ShortLife"],["SKU_ShortLife","SKU_Basic"]],"trans_edges":[]}}
 
 [OUTPUT FORMAT]
 - Import: import gurobipy as gp; from gurobipy import GRB
