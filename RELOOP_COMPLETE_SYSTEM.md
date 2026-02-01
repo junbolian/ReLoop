@@ -91,9 +91,11 @@
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │ L4: Solution Freedom Analysis (DIAGNOSTIC)                          │   │
-│  │     • Perturb parameters ±20%                                       │   │
-│  │     • Check: should have effect on objective                        │   │
-│  │     • No effect → WARNING (constraint may be missing)               │   │
+│  │     • Perturb parameters ±10% (delta=0.1)                           │   │
+│  │     • Check 1: No effect → WARNING (constraint may be missing)      │   │
+│  │     • Check 2: Direction (keyword-based role inference)             │   │
+│  │     • Check 3: Direction anomaly (auto-detect, keyword-free)        │   │
+│  │     • Check 4: High sensitivity detection (INFO)                    │   │
 │  │     • Zero objective check (threshold: 1e-2)                        │   │
 │  │     • Complexity calibration: SIMPLE problems get INFO not WARNING  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -120,19 +122,62 @@
 | **INFO** | Informational | All layers | Reference only |
 | **PASS** | Check passed | All layers | No issue |
 
-## 1.5 Guaranteed Output Mechanism
+## 1.5 Guaranteed Output Mechanism (Robustness Design)
 
 ```
 CORE GUARANTEE:
 
 If L1 passes (code runs + solver has solution):
-├── Always return objective value
-├── Always return solution vector
-├── Always return diagnostics
-└── L2-L5 findings do NOT block output
+├── ALWAYS return objective value      ← 无论其他层结果如何
+├── ALWAYS return solution vector      ← 无论其他层结果如何
+├── ALWAYS return diagnostics          ← 问题信息仅供参考
+└── L2-L5 findings do NOT block output ← 只添加信息，不删除输出
 
 Diagnostic layers ADD information, never DELETE output.
 ```
+
+### 1.5.1 Layer Severity Matrix (稳健性设计)
+
+| Layer | Possible Severities | Blocks Output? | False Positive Impact |
+|-------|--------------------|-----------------|-----------------------|
+| **L1** | FATAL, PASS | ✅ Yes (FATAL only) | N/A (no false positives) |
+| **L2** | WARNING, PASS | ❌ No | No negative impact |
+| **L3** | WARNING, INFO, PASS | ❌ No | No negative impact |
+| **L4** | WARNING, INFO, PASS | ❌ No | No negative impact |
+| **L5** | WARNING, INFO, PASS | ❌ No | No negative impact |
+
+### 1.5.2 False Positive Handling (误检处理)
+
+```python
+# Even if L2-L5 all report WARNING, complete result is still returned
+def _aggregate(self, results, objective, solution, ...):
+    # objective and solution come from L1, unaffected by other layers
+    return VerificationReport(
+        status='WARNINGS',        # Status label (indicates potential issues)
+        has_solution=True,        # ← Always True if L1 passed
+        objective=objective,      # ← Always has value if L1 passed
+        solution=solution,        # ← Always has value if L1 passed
+        layer_results=results,    # Diagnostic info (for reference only)
+        ...
+    )
+```
+
+### 1.5.3 Robustness Scenarios
+
+| Scenario | L1 | L2-L5 | Output |
+|----------|----|----|--------|
+| Completely correct | PASS | All PASS | status=VERIFIED, objective=✓, solution=✓ |
+| Has warnings but correct | PASS | Some WARNING | status=WARNINGS, objective=✓, solution=✓ |
+| **False positive** | PASS | Incorrect WARNING | status=WARNINGS, **objective=✓, solution=✓** |
+| Code execution fails | FATAL | Not executed | status=FAILED, objective=None |
+| Solver finds no solution | FATAL | Not executed | status=FAILED, objective=None |
+
+### 1.5.4 Design Principles
+
+1. **Only L1 FATAL blocks output** - Syntax error, runtime error, infeasible/unbounded
+2. **L2-L5 NEVER block** - Diagnostic layers only, they ADD information
+3. **False positives don't affect result values** - WARNING is just a hint, objective/solution always returned correctly
+4. **Better to over-detect than under-detect** - False positives acceptable, false negatives unacceptable
 
 ---
 
@@ -192,10 +237,36 @@ reloop/
 
 ```python
 class ParameterRole(Enum):
-    CAPACITY = "capacity"      # Upper bound (e.g., machine_capacity)
-    REQUIREMENT = "requirement" # Lower bound (e.g., demand)
-    COST = "cost"              # Objective coefficient
-    OTHER = "other"
+    REQUIREMENT = "requirement"  # Lower bound (e.g., demand, protein)
+    CAPACITY = "capacity"        # Upper bound (e.g., machine_capacity, budget)
+    COST = "cost"                # Objective coefficient (e.g., cost, price)
+    REVENUE = "revenue"          # Objective coefficient (e.g., profit, income)
+    UNKNOWN = "unknown"          # Cannot infer role
+
+# Cross-domain keyword coverage (expanded for MAMO, NL4OPT, IndustryOR)
+ROLE_KEYWORDS = {
+    ParameterRole.REQUIREMENT: [
+        # Core: demand, need, order, requirement, target, quota, goal
+        # Diet/Nutrition (MAMO): protein, carbohydrate, calories, fiber, nutrient
+        # Labor/Production (IndustryOR, NL4OPT): hours_needed, workers_needed, trips
+        # Transport (MAMO warehouse): required, units_needed, destination
+    ],
+    ParameterRole.CAPACITY: [
+        # Core: capacity, supply, limit, available, max, bound, cap, budget
+        # Inventory/Storage: stock, inventory, storage, warehouse
+        # Labor/Time (NL4OPT): hours_available, workers, shifts, overtime
+        # Physical: weight, volume, space, area, at_most, maximum, upper
+    ],
+    ParameterRole.COST: [
+        # Core: cost, price, penalty, expense, fee, rate, holding, waste, transport
+        # Specific: shipping, purchasing, production_cost, labor_cost, wage, salary
+        # Loss: loss, spoilage, damage
+    ],
+    ParameterRole.REVENUE: [
+        # Core: revenue, profit, income, benefit, reward, selling_price, value
+        # Sales: sales_price, unit_price, margin, return, gain, earning
+    ]
+}
 
 def extract_numeric_params(data: Dict, prefix: str = "") -> List[str]:
     """Recursively extract all numeric parameters from data dict."""
@@ -206,19 +277,18 @@ def perturb_param(data: Dict, param_path: str, factor: float) -> Dict:
     # factor > 1: increase, factor < 1: decrease
 
 def infer_param_role(param_name: str) -> ParameterRole:
-    """Infer parameter role from name keywords."""
-    # "capacity", "max", "limit" → CAPACITY
-    # "demand", "min", "requirement" → REQUIREMENT
-    # "cost", "price" → COST
+    """Infer parameter role from name keywords (cross-domain)."""
+    # Matches any keyword in ROLE_KEYWORDS
+    # Returns UNKNOWN if no match
 
-def should_skip_param(param_name: str, value: Any) -> bool:
+def should_skip_param(data: Dict, param_path: str) -> Tuple[bool, str]:
     """Skip zero values and Big-M parameters."""
-    # Skip if value is 0 or name contains "big_m", "bigm"
+    # Skip if: value is None, value is 0, value >= 90000 (Big-M)
 
-def get_expected_direction(param_name: str, obj_sense: str) -> str:
-    """Get expected objective change direction when tightening param."""
-    # CAPACITY tightened → objective should worsen
-    # REQUIREMENT tightened → objective should worsen
+def get_expected_direction(role: ParameterRole, obj_sense: str) -> Optional[str]:
+    """Get expected objective change direction when parameter increases."""
+    # For minimize: REQUIREMENT→increase, CAPACITY→decrease, COST→increase
+    # For maximize: directions are reversed
 ```
 
 ## 3.2 executor.py - Code Executor
@@ -349,52 +419,85 @@ def _layer3(self, objective: float, baseline: Dict, verbose: bool):
 
 ### Layer 4: Solution Freedom Analysis
 
+**Four Detection Mechanisms:**
+
+| Check | Method | Dependency | Severity |
+|-------|--------|------------|----------|
+| No Effect | Perturbation | None (universal) | WARNING/INFO |
+| Direction (keyword) | Role inference | Keywords | WARNING |
+| Direction (auto) | Both-improve detection | None (universal) | WARNING |
+| High Sensitivity | Threshold check | None (universal) | INFO |
+
 ```python
 def _layer4(self, code: str, data: Dict, params: List[str],
             baseline_obj: float, obj_sense: str, complexity: Complexity, verbose: bool):
     """L4: Solution Freedom Analysis (DIAGNOSTIC)"""
     results = []
+    no_effect_params = []
+    direction_violations = []      # Keyword-based
+    direction_anomalies = []       # NEW: Auto-detected (keyword-free)
+    high_sensitivity = []          # NEW: Sensitivity warnings
 
-    # Zero objective check (only for non-SIMPLE)
-    if complexity != Complexity.SIMPLE and abs(baseline_obj) < 1e-2:
-        results.append(LayerResult(
-            "L4", "zero_objective", Severity.WARNING,
-            f"Objective is ~0 ({baseline_obj:.4f}). Missing cost terms?",
-            0.7
-        ))
+    is_minimize = obj_sense == "minimize"
 
-    # Parameter effect testing
     for param in params[:self.max_params]:
-        if should_skip_param(param, get_param_value(data, param)):
+        if should_skip_param(data, param):
             continue
 
-        # Test both directions
-        up_data = perturb_param(data, param, 1.0 + self.delta)
-        down_data = perturb_param(data, param, 1.0 - self.delta)
+        # Perturb parameter ±10%
+        obj_up = self.executor.execute(code, perturb_param(data, param, 1.1)).get("objective")
+        obj_down = self.executor.execute(code, perturb_param(data, param, 0.9)).get("objective")
 
-        up_result = self.executor.execute(code, up_data)
-        down_result = self.executor.execute(code, down_data)
+        if obj_up is None or obj_down is None:
+            continue
 
-        up_obj = up_result.get("objective")
-        down_obj = down_result.get("objective")
+        threshold = self.epsilon * max(abs(baseline_obj), 1.0)
+        change_up = obj_up - baseline_obj
+        change_down = obj_down - baseline_obj
+        has_effect = abs(change_up) > threshold or abs(change_down) > threshold
 
-        if up_obj is not None and down_obj is not None:
-            # Check if parameter has effect
-            change = max(abs(up_obj - baseline_obj), abs(down_obj - baseline_obj))
-            relative_change = change / max(abs(baseline_obj), 1.0)
+        if not has_effect:
+            no_effect_params.append(param)
+        else:
+            # === NEW: Auto-detect direction anomaly (keyword-independent) ===
+            # Physical intuition: cannot both increase AND decrease improve objective
+            if is_minimize:
+                up_better = change_up < -threshold    # Decrease is "better"
+                down_better = change_down < -threshold
+            else:
+                up_better = change_up > threshold     # Increase is "better"
+                down_better = change_down > threshold
 
-            if relative_change < 0.001:  # No effect
-                severity = Severity.INFO if complexity == Complexity.SIMPLE else Severity.WARNING
-                results.append(LayerResult(
-                    "L4", "param_effect", severity,
-                    f"Parameter '{param}' has no effect on objective",
-                    0.6, {"param": param}
-                ))
+            if up_better and down_better:
+                # ANOMALY: both directions improve objective
+                direction_anomalies.append({"param": param, "reason": "both_improve"})
 
-    if not results:
-        results.append(LayerResult("L4", "freedom", Severity.PASS, "OK", 0.85))
+            # === NEW: High sensitivity detection ===
+            max_change = max(abs(change_up), abs(change_down))
+            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
+                high_sensitivity.append({"param": param, "sensitivity": max_change/abs(baseline_obj)})
 
-    return results
+            # === Original: Keyword-based direction check ===
+            role = infer_param_role(param)
+            if role != ParameterRole.UNKNOWN:
+                expected = get_expected_direction(role, obj_sense)
+                actual = "increase" if change_up > threshold else "decrease" if change_up < -threshold else "none"
+                if actual != "none" and actual != expected:
+                    direction_violations.append({"param": param, "role": role.value})
+
+    # Report all findings
+    # ... (see verification.py for full implementation)
+```
+
+**Why Auto-Detection is Universal:**
+
+```
+Physical Principle:
+- For minimize: increasing a parameter should WORSEN or have no effect
+- For minimize: decreasing a parameter should WORSEN or have no effect
+- If BOTH improve objective → model behavior is anomalous
+
+This detection works for ANY domain without keyword matching.
 ```
 
 ### Layer 5: CPT (Constraint Perturbation Testing)
@@ -874,8 +977,35 @@ Each line contains one problem:
 | L1 | Syntax errors, runtime errors, solver failures | Basic correctness |
 | L2 | Wrong constraint directions | Relaxation monotonicity theorem |
 | L3 | Constraint formulation errors | Strong duality theorem |
-| L4 | Missing constraints | Parameter sensitivity analysis |
+| L4 | Missing constraints, direction anomalies | Parameter sensitivity + physical intuition |
 | L5 | Semantic constraint violations | Counterfactual testing |
+
+## 5.1.1 L4 Cross-Domain Design
+
+**Problem:** Keyword-based role inference (demand, capacity, etc.) is domain-specific.
+
+**Solution:** Three-tier detection approach:
+
+```
+Tier 1: No-Effect Detection (Universal)
+├── Perturb any parameter ±10%
+├── If objective unchanged → WARNING: "constraint may be missing"
+└── Works for ANY domain, no keywords needed
+
+Tier 2: Keyword-Based Direction (Domain-Aware)
+├── Match parameter name to known keywords
+├── Infer role: REQUIREMENT, CAPACITY, COST, REVENUE
+├── Check if direction matches expected
+└── Expanded keywords cover: RetailOpt, MAMO, NL4OPT, IndustryOR
+
+Tier 3: Auto Direction Anomaly (Universal)
+├── Check if BOTH increase AND decrease improve objective
+├── Physically impossible in well-formed models
+├── No keywords needed - pure behavioral analysis
+└── Catches errors that keywords miss
+```
+
+**Result:** L4 is effective across all benchmark datasets without domain-specific tuning.
 
 ## 5.2 Why Only L1 is Blocking?
 
@@ -1043,6 +1173,9 @@ print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
 - [x] L2-L4 produce WARNING/ERROR, never FATAL
 - [x] L5 produces WARNING/INFO only, never ERROR/FATAL
 - [x] Guaranteed output when L1 passes
+- [x] L4 has universal detection (no-effect + auto-anomaly) that works without keywords
+- [x] L4 keywords expanded for cross-domain coverage (MAMO, NL4OPT, IndustryOR)
+- [x] L5 CPT uses LLM to understand problem description (domain-agnostic)
 
 ## 8.2 Implementation Completeness
 

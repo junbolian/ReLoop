@@ -241,10 +241,24 @@ summary.by_difficulty  # Dict[str, Dict]
 | L1 | Execution & Solver | Blocking | Syntax, runtime, solver status |
 | L2 | Relaxation Monotonicity | Diagnostic | Constraint direction verification |
 | L3 | Dual Consistency | Diagnostic | Primal-dual gap, shadow prices |
-| L4 | Solution Freedom | Diagnostic | Parameter effect, zero objective |
+| L4 | Solution Freedom | Diagnostic | Parameter effect, direction anomaly, sensitivity |
 | L5 | CPT | Enhancement | LLM-based constraint testing (optional) |
 
+**L4 Detection Mechanisms (Cross-Domain Universal):**
+
+| Check | Method | Keywords Required |
+|-------|--------|-------------------|
+| No Effect | Parameter perturbation | ❌ No |
+| Direction (keyword) | Role inference | ✅ Yes (expanded) |
+| Direction (auto) | Both-improve detection | ❌ No |
+| High Sensitivity | Threshold check | ❌ No |
+
 **Severity Levels:** `FATAL` (L1 only) → `ERROR` → `WARNING` → `INFO` → `PASS`
+
+**Robustness Guarantee:**
+- Only L1 `FATAL` blocks output (syntax/runtime error, infeasible model)
+- L2-L5 are diagnostic only: `WARNING`/`INFO` never block output
+- False positives don't affect result values (objective/solution always returned if L1 passes)
 
 ---
 
