@@ -333,6 +333,10 @@ class ReLoopVerifier:
 
         no_effect_params = []
         direction_violations = []
+        direction_anomalies = []  # New: auto-detected anomalies
+        high_sensitivity = []     # New: high sensitivity warnings
+
+        is_minimize = obj_sense == "minimize"
 
         for param in params[:self.max_params]:
             skip, reason = should_skip_param(data, param)
@@ -351,17 +355,48 @@ class ReLoopVerifier:
                 continue
 
             threshold = self.epsilon * max(abs(baseline_obj), 1.0)
-            has_effect = abs(obj_up - baseline_obj) > threshold or abs(obj_down - baseline_obj) > threshold
+            change_up = obj_up - baseline_obj
+            change_down = obj_down - baseline_obj
+            has_effect = abs(change_up) > threshold or abs(change_down) > threshold
 
             if not has_effect:
                 no_effect_params.append(param)
             else:
+                # === NEW: Auto-detect direction anomaly (keyword-independent) ===
+                # Check if both directions "improve" the objective (physically anomalous)
+                if is_minimize:
+                    up_better = change_up < -threshold    # Decrease is better
+                    down_better = change_down < -threshold
+                else:
+                    up_better = change_up > threshold     # Increase is better
+                    down_better = change_down > threshold
+
+                if up_better and down_better:
+                    # Both increase AND decrease improve objective - anomalous!
+                    direction_anomalies.append({
+                        "param": param,
+                        "change_up": change_up,
+                        "change_down": change_down,
+                        "reason": "both_improve"
+                    })
+
+                # === NEW: High sensitivity detection ===
+                max_change = max(abs(change_up), abs(change_down))
+                if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
+                    sensitivity = max_change / abs(baseline_obj)
+                    high_sensitivity.append({
+                        "param": param,
+                        "sensitivity": sensitivity,
+                        "change_up": change_up,
+                        "change_down": change_down
+                    })
+
+                # === Original: Keyword-based direction check ===
                 role = infer_param_role(param)
                 if role != ParameterRole.UNKNOWN:
                     expected = get_expected_direction(role, obj_sense)
-                    change = obj_up - baseline_obj
-                    actual = "increase" if change > threshold else \
-                             "decrease" if change < -threshold else "none"
+                    actual = "increase" if change_up > threshold else \
+                             "decrease" if change_up < -threshold else "none"
                     if actual != "none" and actual != expected:
                         direction_violations.append({
                             "param": param,
@@ -370,6 +405,7 @@ class ReLoopVerifier:
                             "actual": actual
                         })
 
+        # Report no-effect parameters
         for param in no_effect_params:
             results.append(LayerResult(
                 "L4", "param_effect", no_effect_severity,
@@ -378,10 +414,29 @@ class ReLoopVerifier:
                 {"param": param}
             ))
 
+        # Report keyword-based direction violations
         for v in direction_violations:
             results.append(LayerResult(
                 "L4", "direction", Severity.WARNING,
                 f"Parameter '{v['param']}' shows UNEXPECTED direction.", 0.7, v
+            ))
+
+        # NEW: Report auto-detected direction anomalies
+        for a in direction_anomalies:
+            results.append(LayerResult(
+                "L4", "direction_anomaly", Severity.WARNING,
+                f"Parameter '{a['param']}' shows ANOMALOUS behavior: "
+                f"both increase and decrease improve objective.",
+                0.75, a
+            ))
+
+        # NEW: Report high sensitivity (INFO level - may be normal)
+        for s in high_sensitivity[:3]:  # Limit to top 3
+            results.append(LayerResult(
+                "L4", "sensitivity", Severity.INFO,
+                f"Parameter '{s['param']}' has HIGH SENSITIVITY: "
+                f"{s['sensitivity']:.1%} change in objective.",
+                0.5, s
             ))
 
         if check_zero_obj and abs(baseline_obj) < self.epsilon:
@@ -390,7 +445,7 @@ class ReLoopVerifier:
                 "Objective is ~0. Check cost terms.", 0.6
             ))
 
-        if not no_effect_params and not direction_violations:
+        if not no_effect_params and not direction_violations and not direction_anomalies:
             results.append(LayerResult(
                 "L4", "solution_freedom", Severity.PASS,
                 "Solution freedom analysis passed", 0.85

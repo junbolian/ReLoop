@@ -24,20 +24,49 @@ class ParameterRole(Enum):
 
 ROLE_KEYWORDS = {
     ParameterRole.REQUIREMENT: [
+        # Core
         "demand", "need", "order", "request", "requirement",
-        "target", "quota", "goal"
+        "target", "quota", "goal",
+        # Diet/Nutrition (MAMO)
+        "protein", "carbohydrate", "carbs", "calorie", "calories",
+        "fiber", "nutrient", "minimum", "at_least", "min_",
+        # Labor/Production (IndustryOR, NL4OPT)
+        "hours_needed", "labor_required", "units_required",
+        "workers_needed", "trips", "deliveries",
+        # Transport (MAMO warehouse)
+        "required", "units_needed", "destination"
     ],
     ParameterRole.CAPACITY: [
+        # Core
         "capacity", "supply", "limit", "available", "max",
-        "bound", "cap", "budget", "resource"
+        "bound", "cap", "budget", "resource",
+        # Inventory/Storage
+        "stock", "inventory", "storage", "warehouse",
+        # Labor/Time (NL4OPT, IndustryOR)
+        "hours_available", "labor_cap", "time_limit",
+        "workers", "shifts", "overtime",
+        # Physical constraints
+        "weight", "volume", "space", "area",
+        "at_most", "maximum", "upper"
     ],
     ParameterRole.COST: [
+        # Core
         "cost", "price", "penalty", "expense", "fee",
-        "rate", "holding", "waste", "transport"
+        "rate", "holding", "waste", "transport",
+        # Specific costs
+        "shipping", "purchasing", "production_cost",
+        "labor_cost", "material", "raw_material",
+        "wage", "salary", "overtime_cost",
+        # Loss
+        "loss", "spoilage", "damage"
     ],
     ParameterRole.REVENUE: [
+        # Core
         "revenue", "profit", "income", "benefit",
-        "reward", "selling_price", "value"
+        "reward", "selling_price", "value",
+        # Sales
+        "sales_price", "unit_price", "margin",
+        "return", "gain", "earning"
     ]
 }
 
