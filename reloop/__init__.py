@@ -32,11 +32,6 @@ from .structured_generation import (
     StructuredGenerator,
     LLMClient,
     OpenAIClient,
-    get_schema_for_dataset,
-    detect_dataset_type,
-    RETAIL_SCHEMA,
-    MAMO_SCHEMA,
-    NL4OPT_SCHEMA,
 )
 
 # Prompts
@@ -47,9 +42,6 @@ from .prompts import (
     STEP2_PROMPT,
     STEP3_PROMPT,
     REPAIR_PROMPT,
-    MAMO_BASELINE_PROMPT,
-    NL4OPT_BASELINE_PROMPT,
-    RETAIL_SCHEMA_TEMPLATE,
 )
 
 # Module 2: Behavioral Verification
@@ -87,17 +79,19 @@ from .param_utils import (
     is_effectively_zero,
 )
 
+# Unified agent facade
+from .agents.unified_agent import UnifiedAgent, UnifiedRunResult
+
 
 __version__ = "1.0.0"
 __all__ = [
     # Main
     "ReLoop", "ReLoopResult", "ReLoopConfig", "run_reloop", "verify_code",
     # Generation
-    "StructuredGenerator", "LLMClient", "OpenAIClient", "get_schema_for_dataset", "detect_dataset_type",
-    "RETAIL_SCHEMA", "MAMO_SCHEMA", "NL4OPT_SCHEMA",
+    "StructuredGenerator", "LLMClient", "OpenAIClient",
+    "UnifiedAgent", "UnifiedRunResult",
     # Prompts
     "PromptGenerator", "BASELINE_PROMPT", "STEP1_PROMPT", "STEP2_PROMPT", "STEP3_PROMPT", "REPAIR_PROMPT",
-    "MAMO_BASELINE_PROMPT", "NL4OPT_BASELINE_PROMPT", "RETAIL_SCHEMA_TEMPLATE",
     # Verification
     "BehavioralVerifier", "VerificationReport", "VerificationResult", "VerificationStatus", "CodeExecutor",
     # Repair
