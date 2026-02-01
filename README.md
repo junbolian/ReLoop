@@ -10,7 +10,7 @@ This repository contains the official implementation of the paper:
 
 > **ReLoop: Detecting Silent Failures in LLM-Generated Optimization Code via Behavioral Verification**
 >
-> Junbo Jacob Lian, Yujun Sam Sun, Huiling Chen, Chaoyu Zhang, Chung-Piaw Teo
+> Junbo Jacob Lian, Yujun Sun, Huiling Chen, Chaoyu Zhang, Chung-Piaw Teo
 >
 > NeurIPS 2026
 
@@ -265,7 +265,7 @@ JSONL format, one problem per line:
 ```bibtex
 @inproceedings{lian2026reloop,
   title     = {ReLoop: Detecting Silent Failures in LLM-Generated Optimization Code via Behavioral Verification},
-  author    = {Lian, Junbo Jacob and Sun, Yujun Sam and Chen, Huiling and Zhang, Chaoyu and Teo, Chung-Piaw},
+  author    = {Lian, Junbo Jacob and Sun, Yujun and Chen, Huiling and Zhang, Chaoyu and Teo, Chung-Piaw},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2026}
 }
