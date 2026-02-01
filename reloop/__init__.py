@@ -1,72 +1,16 @@
-"""
-ReLoop: Reliable LLM-based Optimization Modeling
-via Sensitivity-Based Behavioral Verification
+"""ReLoop: Behavioral Verification for LLM-Generated Optimization Code"""
 
-Architecture:
-  Module 1: Structured Generation (3-step)
-  Module 2: Behavioral Verification (6-layer, Core)
-  Module 3: Diagnosis-Guided Repair
-
-Key Principles:
-  1. No Archetype: Works for any optimization problem
-  2. L3 is Core: Monotonicity check is universal
-  3. L4 is Best-Effort: Skip if role cannot be inferred
-  4. LLM sees Schema only: Not actual data values
-  5. No Human Feedback: Fully automated
-
-Usage:
-    from reloop import ReLoop, ReLoopConfig, run_reloop, verify_code
-"""
-
-# Main pipeline
-from .reloop import (
-    ReLoop,
-    ReLoopResult,
-    ReLoopConfig,
-    run_reloop,
+from .verification import (
+    ReLoopVerifier,
+    VerificationReport,
+    LayerResult,
+    Severity,
+    Complexity,
     verify_code,
 )
 
-# Module 1: Structured Generation
-from .structured_generation import (
-    StructuredGenerator,
-    LLMClient,
-    OpenAIClient,
-)
+from .executor import CodeExecutor
 
-# Prompts
-from .prompts import (
-    PromptGenerator,
-    BASELINE_PROMPT,
-    STEP1_PROMPT,
-    STEP2_PROMPT,
-    STEP3_PROMPT,
-    REPAIR_PROMPT,
-)
-
-# Module 2: Behavioral Verification
-from .behavioral_verification import (
-    BehavioralVerifier,
-    VerificationReport,
-    VerificationResult,
-    VerificationStatus,
-    CodeExecutor,
-)
-
-# Module 3: Diagnosis and Repair
-from .diagnosis_repair import (
-    DiagnosisRepairer,
-    RepairContext,
-)
-
-# Error patterns
-from .error_patterns import (
-    ERROR_PATTERNS,
-    get_repair_hints,
-    format_repair_guidance,
-)
-
-# Parameter utilities
 from .param_utils import (
     ParameterRole,
     extract_numeric_params,
@@ -74,29 +18,59 @@ from .param_utils import (
     get_expected_direction,
     perturb_param,
     set_param,
-    get_param_value,
     should_skip_param,
-    is_effectively_zero,
+    get_param_value,
 )
 
-# Unified agent facade
-from .agents.unified_agent import UnifiedAgent, UnifiedRunResult
+from .generation import CodeGenerator
 
+from .repair import CodeRepairer
+
+from .pipeline import ReLoopPipeline, PipelineResult, run_reloop
+
+from .data_extraction import DataExtractor, extract_data_from_question
+
+from .experiment_runner import (
+    ExperimentRunner,
+    ExperimentRecord,
+    ExperimentSummary,
+    run_experiment,
+)
 
 __version__ = "1.0.0"
 __all__ = [
-    # Main
-    "ReLoop", "ReLoopResult", "ReLoopConfig", "run_reloop", "verify_code",
-    # Generation
-    "StructuredGenerator", "LLMClient", "OpenAIClient",
-    "UnifiedAgent", "UnifiedRunResult",
-    # Prompts
-    "PromptGenerator", "BASELINE_PROMPT", "STEP1_PROMPT", "STEP2_PROMPT", "STEP3_PROMPT", "REPAIR_PROMPT",
     # Verification
-    "BehavioralVerifier", "VerificationReport", "VerificationResult", "VerificationStatus", "CodeExecutor",
+    "ReLoopVerifier",
+    "VerificationReport",
+    "LayerResult",
+    "Severity",
+    "Complexity",
+    "verify_code",
+    # Executor
+    "CodeExecutor",
+    # Parameter utilities
+    "ParameterRole",
+    "extract_numeric_params",
+    "infer_param_role",
+    "get_expected_direction",
+    "perturb_param",
+    "set_param",
+    "should_skip_param",
+    "get_param_value",
+    # Generation
+    "CodeGenerator",
     # Repair
-    "DiagnosisRepairer", "RepairContext", "ERROR_PATTERNS", "get_repair_hints", "format_repair_guidance",
-    # Params
-    "ParameterRole", "extract_numeric_params", "infer_param_role", "get_expected_direction",
-    "perturb_param", "set_param", "get_param_value", "should_skip_param", "is_effectively_zero",
+    "CodeRepairer",
+    # Pipeline
+    "ReLoopPipeline",
+    "PipelineResult",
+    "run_reloop",
+    # Data Extraction
+    "DataExtractor",
+    "extract_data_from_question",
+    # Experiment Runner
+    "ExperimentRunner",
+    "ExperimentRecord",
+    "ExperimentSummary",
+    "run_experiment",
 ]
