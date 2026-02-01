@@ -41,12 +41,13 @@ class ReLoopResult:
 
 @dataclass
 class ReLoopConfig:
-    """Configuration for ReLoop pipeline"""
+    """Configuration for ReLoop pipeline (prompt-only)."""
     max_iterations: int = 5
     delta: float = 0.2
     epsilon: float = 1e-4
     timeout: int = 60
-    enable_layer7: bool = False
+    enable_layer7: bool = False  # Layer7 is retail-specific; defaults off
+    dataset_type: str = "auto"   # retail, generic, or "auto"
     verbose: bool = False
 
 
@@ -64,7 +65,8 @@ class ReLoop:
 
     def __init__(self, llm_client: LLMClient, config: ReLoopConfig = None):
         self.config = config or ReLoopConfig()
-        self.generator = StructuredGenerator(llm_client)
+        # dataset_type may be resolved later; initialize with current setting
+        self.generator = StructuredGenerator(llm_client, dataset_type=self.config.dataset_type)
         self.verifier = BehavioralVerifier(
             delta=self.config.delta,
             epsilon=self.config.epsilon,
@@ -72,7 +74,7 @@ class ReLoop:
         )
         self.repairer = DiagnosisRepairer(llm_client)
 
-    def run(self, problem: str, schema: str, data: Dict[str, Any],
+    def run(self, problem: str, schema: str = "", data: Optional[Dict[str, Any]] = None,
             obj_sense: str = "minimize") -> ReLoopResult:
         """Run the complete ReLoop pipeline.
 
@@ -93,6 +95,13 @@ class ReLoop:
             print("ReLoop Pipeline Started")
             print("=" * 60)
 
+        # Dataset typing disabled; default to config-provided or generic
+        resolved_dataset_type = self.config.dataset_type or "generic"
+        self.generator.dataset_type = resolved_dataset_type
+
+        # Layer7 only if explicitly enabled and marked retail via config
+        enable_layer7 = self.config.enable_layer7 and resolved_dataset_type == "retail"
+
         for k in range(self.config.max_iterations):
             if self.config.verbose:
                 print(f"\n--- Iteration {k + 1}/{self.config.max_iterations} ---")
@@ -102,7 +111,7 @@ class ReLoop:
                 # First iteration: Structured Generation (3-step)
                 if self.config.verbose:
                     print("  [Generate] 3-step structured generation...")
-                current_code = self.generator.generate(problem, schema)
+                current_code = self.generator.generate(problem, "")
             else:
                 # Subsequent iterations: REPAIR the best code so far
                 if self.config.verbose:
@@ -115,13 +124,23 @@ class ReLoop:
                 )
 
             # Module 2: Behavioral Verification
-            report = self.verifier.verify(
-                current_code, data, obj_sense,
-                enable_layer7=self.config.enable_layer7,
-                verbose=self.config.verbose
-            )
+            report = None
+            if data is not None:
+                report = self.verifier.verify(
+                    current_code,
+                    data,
+                    obj_sense,
+                    enable_layer7=enable_layer7,
+                    verbose=self.config.verbose
+                )
+            else:
+                # No structured data provided: skip behavioral verification
+                best_code = current_code
+                best_layers = max(best_layers, 0)
+                best_report = None
+                break
 
-            layers_passed = report.count_layers_passed()
+            layers_passed = report.count_layers_passed() if report else 0
 
             # Track best result (only update if strictly better)
             if layers_passed > best_layers:
@@ -135,7 +154,7 @@ class ReLoop:
                     print(f"  [No Progress] {no_progress_count} iteration(s) without improvement")
 
             # Success: all layers passed
-            if report.passed:
+            if report and report.passed:
                 return ReLoopResult(
                     code=current_code, verified=True, iterations=k + 1,
                     diagnosis_history=history, final_report=report,
@@ -164,7 +183,8 @@ class ReLoop:
         start_time = time.time()
         code = self.generator.generate_baseline(problem, schema)
         report = self.verifier.verify(code, data, obj_sense,
-                                       enable_layer7=self.config.enable_layer7)
+                                       enable_layer7=self.config.enable_layer7,
+                                       dataset_type=self.config.dataset_type)
         return ReLoopResult(
             code=code, verified=report.passed, iterations=1,
             diagnosis_history=[report.diagnosis] if report.diagnosis else [],
@@ -175,9 +195,15 @@ class ReLoop:
 
 def run_reloop(problem: str, schema: str, data: Dict[str, Any],
                llm_client: LLMClient, obj_sense: str = "minimize",
-               max_iterations: int = 5, verbose: bool = False) -> ReLoopResult:
+               max_iterations: int = 5, verbose: bool = False,
+               dataset_type: str = "auto", enable_layer7: bool = False) -> ReLoopResult:
     """Convenience function to run ReLoop."""
-    config = ReLoopConfig(max_iterations=max_iterations, verbose=verbose)
+    config = ReLoopConfig(
+        max_iterations=max_iterations,
+        verbose=verbose,
+        dataset_type=dataset_type,
+        enable_layer7=enable_layer7
+    )
     pipeline = ReLoop(llm_client, config)
     return pipeline.run(problem, schema, data, obj_sense)
 
