@@ -48,6 +48,16 @@ Write Python code using gurobipy.
 5. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
 6. Implement ALL constraints from Step 2
 
+**Big-M Guidelines (if using indicator/logical constraints):**
+- NEVER hardcode Big-M values like `M = 1e6`
+- ALWAYS compute M dynamically from data: `M = sum(data["demand"]) * 1.5`
+- Use problem-relevant parameters for M calculation
+
+**Edge Case Handling:**
+- Check array length before iteration: `if data["items"]: ...`
+- Avoid division by zero: `max(value, 1e-6)`
+- Use `.get()` for optional keys: `data.get("key", default)`
+
 ---
 Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
 '''
@@ -73,6 +83,8 @@ The `data` variable is PRE-DEFINED with these keys:
 3. Set `m.Params.OutputFlag = 0`
 4. Print: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
 5. Implement ALL constraints mentioned in the problem
+6. For Big-M constraints: compute M dynamically from data (e.g., `M = sum(data["demand"]) * 1.5`), NEVER hardcode
+7. Handle edge cases: check array length, avoid division by zero
 
 Return ONLY Python code. Do NOT include any `data = ` definition.
 '''

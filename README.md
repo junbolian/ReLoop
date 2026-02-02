@@ -305,6 +305,16 @@ A key architectural principle is that generated code uses **schema-only visibili
 3. The `data` dict is injected by executor at runtime
 4. Generation prompts include schema; repair prompts also include schema to ensure consistency
 
+**Big-M Guidelines (for indicator/logical constraints):**
+- NEVER hardcode Big-M values like `M = 1e6`
+- ALWAYS compute M dynamically: `M = sum(data["demand"]) * 1.5`
+- Use problem-relevant parameters for M calculation
+
+**Edge Case Handling:**
+- Check array length: `if data["items"]: ...`
+- Avoid division by zero: `max(value, 1e-6)`
+- Use `.get()` for optional keys: `data.get("key", default)`
+
 ---
 
 ## 5-Layer Verification Architecture
