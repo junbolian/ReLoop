@@ -37,6 +37,11 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 - 3% false positive rate on correct code
 - No ground truth required for verification
 
+**Key Features:**
+- **Three-Stage Structured Generation**: Understand → Formalize → Synthesize pipeline
+- **L1 FATAL Recovery**: Automatic regeneration on execution errors (up to 3 attempts)
+- **Cross-Domain Universal**: Works on all benchmark datasets without domain-specific tuning
+
 ---
 
 ## Installation
@@ -186,18 +191,30 @@ report.layer_results  # List[LayerResult]
 ```python
 from reloop import ReLoopPipeline, run_reloop
 
-# Using class
-pipeline = ReLoopPipeline(llm_client, max_repair_iterations=3, enable_cpt=True)
+# Using class (full control)
+pipeline = ReLoopPipeline(
+    llm_client,
+    max_repair_iterations=3,        # L2-L5 repair attempts
+    max_regeneration_attempts=3,    # L1 FATAL regeneration attempts
+    enable_cpt=True,                # Enable L5 CPT layer
+    use_structured_generation=True  # Use 3-stage pipeline
+)
 result = pipeline.run(problem_description, data)
 
 # Using convenience function
-result = run_reloop(problem_description, data, llm_client)
+result = run_reloop(
+    problem_description, data, llm_client,
+    max_iterations=3,          # Repair iterations
+    max_regenerations=3,       # Regeneration attempts
+    use_structured_generation=True
+)
 
 # Result fields
-result.final_code     # str
-result.final_report   # VerificationReport
-result.iterations     # int
-result.success        # bool
+result.final_code         # str
+result.final_report       # VerificationReport
+result.iterations         # int (total verification iterations)
+result.success            # bool
+result.regeneration_count # int (L1 FATAL regenerations)
 ```
 
 ### Data Extraction
@@ -234,31 +251,102 @@ summary.by_difficulty  # Dict[str, Dict]
 
 ---
 
-## 5-Layer Architecture
+## Chain-of-Thought Code Generation
+
+ReLoop uses **Chain-of-Thought (CoT)** generation in a single API call:
+
+```
+Problem → [STEP 1: Understand] → [STEP 2: Formalize] → [STEP 3: Code] → Output
+                    ↓                    ↓                   ↓
+              (same context)      (same context)      (same context)
+```
+
+**Key Design:**
+- Single API call with step-by-step reasoning (NOT 3 separate calls)
+- LLM maintains context throughout all reasoning steps
+- Produces: Understanding (U) → Mathematical Model (M) → Executable Code (Ck)
+
+**Why CoT?**
+- Separate API calls lose context between stages (tested: 10.85% error)
+- Single CoT call preserves reasoning chain (tested: 2.17% error)
+
+---
+
+## Schema-Only Visibility Design
+
+A key architectural principle is that generated code uses **schema-only visibility**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Data Dict (external)                                         │
+│   {"capacity": 500, "costs": [10,15,8], "demand": [100,150]} │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+                   Schema Description (sent to LLM)
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ - capacity: int (scalar)                                     │
+│ - costs: list[3] of int                                      │
+│ - demand: list[3] of int                                     │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+                   Generated Code uses data["key"]
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ # Code accesses data at runtime                              │
+│ m.addConstr(x <= data["capacity"])                           │
+│ for i in range(len(data["costs"])): ...                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Points:**
+1. LLM sees schema (keys, types, dimensions) but NOT actual values
+2. Code must use `data["key"]` to access runtime-injected data
+3. The `data` dict is injected by executor at runtime
+4. Generation prompts include schema; repair prompts also include schema to ensure consistency
+
+---
+
+## 5-Layer Verification Architecture
 
 | Layer | Name | Type | Description |
 |-------|------|------|-------------|
-| L1 | Execution & Solver | Blocking | Syntax, runtime, solver status |
-| L2 | Relaxation Monotonicity | Diagnostic | Constraint direction verification |
-| L3 | Dual Consistency | Diagnostic | Primal-dual gap, shadow prices |
-| L4 | Solution Freedom | Diagnostic | Parameter effect, direction anomaly, sensitivity |
-| L5 | CPT | Enhancement | LLM-based constraint testing (optional) |
+| L1 | Execution & Solver | Blocking | Syntax, runtime, solver status → triggers regeneration on FATAL |
+| L2 | Relaxation Monotonicity | Diagnostic | Constraint direction verification (ERROR level) |
+| L3 | Dual Consistency | Diagnostic | Primal-dual gap (INFO level - likely numerical) |
+| L4 | Solution Freedom | Diagnostic | Parameter effect (INFO), direction anomaly (ERROR), sensitivity (INFO) |
+| L5 | CPT | Enhancement | LLM-based constraint testing (WARNING/INFO) |
+
+**Severity Levels (Conservative Repair Strategy):**
+
+| Severity | Confidence | Source | Repair Action |
+|----------|------------|--------|---------------|
+| `FATAL` | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
+| `ERROR` | 99%+ | L2 monotonicity, L4 anomaly | **MUST fix** |
+| `WARNING` | 80%+ | L5 cpt_missing | **SHOULD fix** |
+| `INFO` | <80% | L3 duality, L4 no_effect, L4 sensitivity | **DO NOT fix** (reference only) |
+| `PASS` | - | All layers | No action needed |
+
+**Key Design Principle:**
+- Only ERROR and WARNING trigger repair
+- INFO is for reference only - likely normal optimization behavior (slack constraints, numerical artifacts)
+- This prevents over-correction that was causing ReLoop to perform worse than baseline
 
 **L4 Detection Mechanisms (Cross-Domain Universal):**
 
-| Check | Method | Keywords Required |
-|-------|--------|-------------------|
-| No Effect | Parameter perturbation | ❌ No |
-| Direction (keyword) | Role inference | ✅ Yes (expanded) |
-| Direction (auto) | Both-improve detection | ❌ No |
-| High Sensitivity | Threshold check | ❌ No |
+| Check | Severity | Method | Rationale |
+|-------|----------|--------|-----------|
+| No Effect | INFO | Parameter perturbation | Likely slack constraint (normal) |
+| Direction Anomaly | ERROR | Both-improve detection | Physically impossible (99%+ confidence) |
+| High Sensitivity | INFO | Threshold check | Normal for well-optimized models |
 
-**Severity Levels:** `FATAL` (L1 only) → `ERROR` → `WARNING` → `INFO` → `PASS`
+> **Note:** L4 `no_effect` changed from WARNING to INFO because slack constraints are normal optimization behavior.
 
 **Robustness Guarantee:**
-- Only L1 `FATAL` blocks output (syntax/runtime error, infeasible model)
-- L2-L5 are diagnostic only: `WARNING`/`INFO` never block output
+- L1 `FATAL` triggers regeneration, not immediate termination
+- L2-L5 are diagnostic only: never block output
 - False positives don't affect result values (objective/solution always returned if L1 passes)
+- INFO-level issues do NOT trigger repair (prevents over-correction)
 
 ---
 

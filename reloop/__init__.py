@@ -22,7 +22,7 @@ from .param_utils import (
     get_param_value,
 )
 
-from .generation import CodeGenerator
+from .generation import CodeGenerator, GenerationResult
 
 from .repair import CodeRepairer
 
@@ -59,6 +59,7 @@ __all__ = [
     "get_param_value",
     # Generation
     "CodeGenerator",
+    "GenerationResult",
     # Repair
     "CodeRepairer",
     # Pipeline

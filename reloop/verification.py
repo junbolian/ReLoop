@@ -2,11 +2,18 @@
 ReLoop Core Verification Module - 5 Layer Architecture
 
 Layers:
-- L1: Execution & Solver (Blocking Layer)
-- L2: Relaxation Monotonicity (Diagnostic Layer)
-- L3: Dual Consistency (Diagnostic Layer)
-- L4: Solution Freedom Analysis (Diagnostic Layer)
-- L5: CPT (Enhancement Layer, Optional)
+- L1: Execution & Solver (Blocking Layer) → FATAL
+- L2: Relaxation Monotonicity (Diagnostic Layer) → ERROR
+- L3: Dual Consistency (Diagnostic Layer) → INFO only
+- L4: Solution Freedom Analysis (Diagnostic Layer) → ERROR/INFO
+- L5: CPT (Enhancement Layer, Optional) → WARNING/INFO
+
+Severity Levels:
+- FATAL: Code cannot run (L1 only)
+- ERROR: Mathematically certain error, must fix (L2, L4 anomaly)
+- WARNING: High-confidence issue, should fix (L5 cpt_missing)
+- INFO: Likely normal, for reference only
+- PASS: Check passed
 """
 
 import time
@@ -25,11 +32,11 @@ from .param_utils import (
 
 
 class Severity(Enum):
-    FATAL = "FATAL"
-    ERROR = "ERROR"
-    WARNING = "WARNING"
-    INFO = "INFO"
-    PASS = "PASS"
+    FATAL = "FATAL"      # L1 only: code cannot run
+    ERROR = "ERROR"      # Mathematically certain error, must fix
+    WARNING = "WARNING"  # High-confidence issue, should fix
+    INFO = "INFO"        # Likely normal, for reference only
+    PASS = "PASS"        # Check passed
 
 
 class Complexity(Enum):
@@ -149,7 +156,7 @@ class ReLoopVerifier:
         return self._aggregate(layer_results, objective, solution, complexity, start_time, verbose)
 
     # =========================================================================
-    # L1: Execution & Solver
+    # L1: Execution & Solver (FATAL only)
     # =========================================================================
 
     def _layer1(
@@ -162,7 +169,9 @@ class ReLoopVerifier:
         syntax_ok, syntax_err = self.executor.check_syntax(code)
         if not syntax_ok:
             results.append(LayerResult(
-                "L1", "syntax", Severity.FATAL, f"Syntax error: {syntax_err}", 1.0
+                "L1", "syntax", Severity.FATAL,
+                f"Syntax error: {syntax_err}", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False}
             ))
             return results, {}
 
@@ -171,7 +180,8 @@ class ReLoopVerifier:
         if baseline.get("exit_code", -1) != 0:
             results.append(LayerResult(
                 "L1", "runtime", Severity.FATAL,
-                f"Runtime error: {baseline.get('error', '')[:500]}", 1.0
+                f"Runtime error: {baseline.get('error', '')[:500]}", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False}
             ))
             return results, baseline
 
@@ -181,32 +191,43 @@ class ReLoopVerifier:
 
         if status is None:
             results.append(LayerResult(
-                "L1", "output", Severity.FATAL, "No solver status output", 1.0
+                "L1", "output", Severity.FATAL,
+                "No solver status output", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False}
             ))
             return results, baseline
 
         if status == "INFEASIBLE":
             results.append(LayerResult(
-                "L1", "feasibility", Severity.FATAL, "Model is INFEASIBLE", 1.0
+                "L1", "feasibility", Severity.FATAL,
+                "Model is INFEASIBLE", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False,
+                 "repair_hint": "Remove conflicting constraints or fix constraint directions"}
             ))
             return results, baseline
 
         if status == "UNBOUNDED":
             results.append(LayerResult(
-                "L1", "boundedness", Severity.FATAL, "Model is UNBOUNDED", 1.0
+                "L1", "boundedness", Severity.FATAL,
+                "Model is UNBOUNDED", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False,
+                 "repair_hint": "Add missing variable bounds or constraints"}
             ))
             return results, baseline
 
         if status == "TIMEOUT" and objective is None:
             results.append(LayerResult(
-                "L1", "timeout", Severity.FATAL, "Solver timeout with no solution", 1.0
+                "L1", "timeout", Severity.FATAL,
+                "Solver timeout with no solution", 1.0,
+                {"trigger_repair": True, "is_likely_normal": False}
             ))
             return results, baseline
 
         if objective is not None and obj_sense == "minimize" and objective < -self.epsilon:
             results.append(LayerResult(
-                "L1", "objective_sign", Severity.WARNING,
-                f"Negative objective ({objective:.4f}) in minimization", 0.7
+                "L1", "objective_sign", Severity.INFO,
+                f"Negative objective ({objective:.4f}) in minimization", 0.7,
+                {"trigger_repair": False, "is_likely_normal": True}
             ))
 
         results.append(LayerResult(
@@ -220,16 +241,21 @@ class ReLoopVerifier:
         return results, baseline
 
     # =========================================================================
-    # L2: Relaxation Monotonicity
+    # L2: Relaxation Monotonicity (ERROR level)
     # =========================================================================
 
     def _layer2(
         self, code: str, data: Dict, baseline_obj: float,
         obj_sense: str, params: List[str], verbose: bool
     ) -> List[LayerResult]:
-        """L2: Relaxation monotonicity detection."""
+        """
+        L2: Relaxation Monotonicity Detection.
+
+        Theory: Tightening a constraint cannot improve the objective.
+        Violation: Objective improved after tightening → constraint direction is WRONG.
+        Severity: ERROR (mathematically certain error).
+        """
         results = []
-        violations = []
         tested = 0
         is_minimize = obj_sense == "minimize"
 
@@ -248,44 +274,53 @@ class ReLoopVerifier:
             tested += 1
             threshold = self.epsilon * max(abs(baseline_obj), 1.0)
 
+            # Check for monotonicity violation
             if is_minimize:
-                if tightened_obj < baseline_obj - threshold:
-                    violations.append({
-                        "param": param,
-                        "baseline": baseline_obj,
-                        "tightened": tightened_obj
-                    })
+                violation = tightened_obj < baseline_obj - threshold
             else:
-                if tightened_obj > baseline_obj + threshold:
-                    violations.append({
+                violation = tightened_obj > baseline_obj + threshold
+
+            if violation:
+                # ERROR: Mathematically certain that constraint direction is wrong
+                results.append(LayerResult(
+                    "L2", "monotonicity_violation", Severity.ERROR,
+                    f"Tightening '{param}' IMPROVED objective "
+                    f"({baseline_obj:.4f} -> {tightened_obj:.4f}). "
+                    f"Constraint direction is WRONG.",
+                    0.95,
+                    {
                         "param": param,
-                        "baseline": baseline_obj,
-                        "tightened": tightened_obj
-                    })
+                        "baseline_obj": baseline_obj,
+                        "tightened_obj": tightened_obj,
+                        "trigger_repair": True,
+                        "is_likely_normal": False,
+                        "repair_hint": f"Check constraints involving '{param}'. "
+                                       f"Change '>=' to '<=' or vice versa."
+                    }
+                ))
 
-        for v in violations:
+        if not any(r.severity == Severity.ERROR for r in results):
             results.append(LayerResult(
-                "L2", "monotonicity", Severity.WARNING,
-                f"Tightening '{v['param']}' IMPROVED objective. Check constraint direction.",
-                0.8, v
-            ))
-
-        if not violations:
-            results.append(LayerResult(
-                "L2", "monotonicity", Severity.PASS,
-                f"Monotonicity passed ({tested} tested)", 0.9
+                "L2", "monotonicity_ok", Severity.PASS,
+                f"Monotonicity passed ({tested} parameters tested)", 0.9
             ))
 
         return results
 
     # =========================================================================
-    # L3: Dual Consistency
+    # L3: Dual Consistency (INFO only - likely numerical issues)
     # =========================================================================
 
     def _layer3(
         self, primal_obj: float, baseline: Dict, verbose: bool
     ) -> List[LayerResult]:
-        """L3: Dual consistency detection."""
+        """
+        L3: Dual Consistency Detection.
+
+        Purpose: Check primal-dual gap.
+        Severity: INFO only (not WARNING).
+        Reason: Large gap is often numerical precision, not modeling error.
+        """
         results = []
         dual_obj = baseline.get("dual_objective")
 
@@ -294,10 +329,18 @@ class ReLoopVerifier:
             relative_gap = gap / (abs(primal_obj) + self.epsilon)
 
             if relative_gap > 0.01:
+                # INFO: Large gap is likely numerical, not error
                 results.append(LayerResult(
-                    "L3", "duality_gap", Severity.WARNING,
-                    f"Primal-dual gap: {relative_gap:.2%}", 0.7,
-                    {"primal": primal_obj, "dual": dual_obj, "gap": relative_gap}
+                    "L3", "duality_gap", Severity.INFO,
+                    f"Primal-dual gap: {relative_gap:.2%}", 0.5,
+                    {
+                        "primal": primal_obj,
+                        "dual": dual_obj,
+                        "gap": relative_gap,
+                        "trigger_repair": False,
+                        "is_likely_normal": True,
+                        "note": "Large gap may indicate numerical issues, not modeling errors"
+                    }
                 ))
             else:
                 results.append(LayerResult(
@@ -306,14 +349,15 @@ class ReLoopVerifier:
                 ))
         else:
             results.append(LayerResult(
-                "L3", "duality_gap", Severity.INFO,
-                "Dual objective not available", 0.5
+                "L3", "dual_unavailable", Severity.INFO,
+                "Dual objective not available (MIP or solver limitation)", 0.5,
+                {"trigger_repair": False, "is_likely_normal": True}
             ))
 
         return results
 
     # =========================================================================
-    # L4: Solution Freedom Analysis
+    # L4: Solution Freedom Analysis (ERROR for anomaly, INFO for others)
     # =========================================================================
 
     def _layer4(
@@ -321,21 +365,18 @@ class ReLoopVerifier:
         baseline_obj: float, obj_sense: str,
         complexity: Complexity, verbose: bool
     ) -> List[LayerResult]:
-        """L4: Solution freedom analysis."""
+        """
+        L4: Solution Freedom Analysis.
+
+        Three detection mechanisms (all keyword-free, universal):
+        - no_effect: INFO (very likely normal - slack constraints)
+        - anomaly (both improve): ERROR (physically impossible, must be error)
+        - high_sensitivity: INFO (for reference only)
+        """
         results = []
-
-        if complexity == Complexity.SIMPLE:
-            no_effect_severity = Severity.INFO
-            check_zero_obj = False
-        else:
-            no_effect_severity = Severity.WARNING
-            check_zero_obj = True
-
         no_effect_params = []
-        direction_violations = []
-        direction_anomalies = []  # New: auto-detected anomalies
-        high_sensitivity = []     # New: high sensitivity warnings
-
+        direction_anomalies = []
+        high_sensitivity = []
         is_minimize = obj_sense == "minimize"
 
         for param in params[:self.max_params]:
@@ -359,109 +400,133 @@ class ReLoopVerifier:
             change_down = obj_down - baseline_obj
             has_effect = abs(change_up) > threshold or abs(change_down) > threshold
 
+            # ────────────────────────────────────────────────────
+            # Mechanism 1: No-effect → INFO (very likely normal)
+            # ────────────────────────────────────────────────────
             if not has_effect:
-                no_effect_params.append(param)
+                no_effect_params.append({
+                    "param": param,
+                    "baseline": baseline_obj,
+                    "obj_up": obj_up,
+                    "obj_down": obj_down
+                })
+                continue
+
+            # ────────────────────────────────────────────────────
+            # Mechanism 2: Anomaly (both directions improve) → ERROR
+            # ────────────────────────────────────────────────────
+            if is_minimize:
+                up_better = change_up < -threshold
+                down_better = change_down < -threshold
             else:
-                # === NEW: Auto-detect direction anomaly (keyword-independent) ===
-                # Check if both directions "improve" the objective (physically anomalous)
-                if is_minimize:
-                    up_better = change_up < -threshold    # Decrease is better
-                    down_better = change_down < -threshold
-                else:
-                    up_better = change_up > threshold     # Increase is better
-                    down_better = change_down > threshold
+                up_better = change_up > threshold
+                down_better = change_down > threshold
 
-                if up_better and down_better:
-                    # Both increase AND decrease improve objective - anomalous!
-                    direction_anomalies.append({
-                        "param": param,
-                        "change_up": change_up,
-                        "change_down": change_down,
-                        "reason": "both_improve"
-                    })
+            if up_better and down_better:
+                # ERROR: Physically impossible, must be error
+                direction_anomalies.append({
+                    "param": param,
+                    "baseline": baseline_obj,
+                    "obj_up": obj_up,
+                    "obj_down": obj_down,
+                    "change_up": change_up,
+                    "change_down": change_down
+                })
+                continue
 
-                # === NEW: High sensitivity detection ===
-                max_change = max(abs(change_up), abs(change_down))
-                if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
-                    sensitivity = max_change / abs(baseline_obj)
-                    high_sensitivity.append({
-                        "param": param,
-                        "sensitivity": sensitivity,
-                        "change_up": change_up,
-                        "change_down": change_down
-                    })
+            # ────────────────────────────────────────────────────
+            # Mechanism 3: High sensitivity → INFO
+            # ────────────────────────────────────────────────────
+            max_change = max(abs(change_up), abs(change_down))
+            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
+                sensitivity = max_change / abs(baseline_obj)
+                high_sensitivity.append({
+                    "param": param,
+                    "sensitivity": sensitivity,
+                    "change_up": change_up,
+                    "change_down": change_down
+                })
 
-                # === Original: Keyword-based direction check ===
-                role = infer_param_role(param)
-                if role != ParameterRole.UNKNOWN:
-                    expected = get_expected_direction(role, obj_sense)
-                    actual = "increase" if change_up > threshold else \
-                             "decrease" if change_up < -threshold else "none"
-                    if actual != "none" and actual != expected:
-                        direction_violations.append({
-                            "param": param,
-                            "role": role.value,
-                            "expected": expected,
-                            "actual": actual
-                        })
-
-        # Report no-effect parameters
-        for param in no_effect_params:
+        # Report no-effect parameters → INFO
+        for item in no_effect_params:
             results.append(LayerResult(
-                "L4", "param_effect", no_effect_severity,
-                f"Parameter '{param}' has NO EFFECT. Constraint may be MISSING.",
-                0.8 if complexity != Complexity.SIMPLE else 0.3,
-                {"param": param}
+                "L4", "no_effect", Severity.INFO,
+                f"Parameter '{item['param']}' has no measurable effect on objective",
+                0.3,
+                {
+                    "param": item["param"],
+                    "baseline": item["baseline"],
+                    "obj_up": item["obj_up"],
+                    "obj_down": item["obj_down"],
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "VERY LIKELY NORMAL - slack constraints naturally have no effect. "
+                            "Do NOT add constraints unless you are 100% certain."
+                }
             ))
 
-        # Report keyword-based direction violations
-        for v in direction_violations:
+        # Report direction anomalies → ERROR
+        for item in direction_anomalies:
             results.append(LayerResult(
-                "L4", "direction", Severity.WARNING,
-                f"Parameter '{v['param']}' shows UNEXPECTED direction.", 0.7, v
+                "L4", "anomaly", Severity.ERROR,
+                f"Parameter '{item['param']}': BOTH increasing AND decreasing "
+                f"IMPROVE the objective. This is PHYSICALLY IMPOSSIBLE.",
+                0.95,
+                {
+                    "param": item["param"],
+                    "baseline": item["baseline"],
+                    "obj_up": item["obj_up"],
+                    "obj_down": item["obj_down"],
+                    "trigger_repair": True,
+                    "is_likely_normal": False,
+                    "repair_hint": f"Parameter '{item['param']}' is used incorrectly. "
+                                   f"Check constraint signs and coefficients."
+                }
             ))
 
-        # NEW: Report auto-detected direction anomalies
-        for a in direction_anomalies:
+        # Report high sensitivity → INFO
+        for item in high_sensitivity[:3]:
             results.append(LayerResult(
-                "L4", "direction_anomaly", Severity.WARNING,
-                f"Parameter '{a['param']}' shows ANOMALOUS behavior: "
-                f"both increase and decrease improve objective.",
-                0.75, a
+                "L4", "high_sensitivity", Severity.INFO,
+                f"Parameter '{item['param']}' shows high sensitivity: "
+                f"{item['sensitivity']:.1%} change in objective",
+                0.4,
+                {
+                    "param": item["param"],
+                    "sensitivity": item["sensitivity"],
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "High sensitivity is often normal for critical/binding parameters"
+                }
             ))
 
-        # NEW: Report high sensitivity (INFO level - may be normal)
-        for s in high_sensitivity[:3]:  # Limit to top 3
+        if not no_effect_params and not direction_anomalies:
             results.append(LayerResult(
-                "L4", "sensitivity", Severity.INFO,
-                f"Parameter '{s['param']}' has HIGH SENSITIVITY: "
-                f"{s['sensitivity']:.1%} change in objective.",
-                0.5, s
-            ))
-
-        if check_zero_obj and abs(baseline_obj) < self.epsilon:
-            results.append(LayerResult(
-                "L4", "zero_objective", Severity.WARNING,
-                "Objective is ~0. Check cost terms.", 0.6
-            ))
-
-        if not no_effect_params and not direction_violations and not direction_anomalies:
-            results.append(LayerResult(
-                "L4", "solution_freedom", Severity.PASS,
+                "L4", "solution_freedom_ok", Severity.PASS,
                 "Solution freedom analysis passed", 0.85
             ))
 
         return results
 
     # =========================================================================
-    # L5: CPT (Constraint Perturbation Testing)
+    # L5: CPT (WARNING for missing <5%, INFO for uncertain 5-30%)
     # =========================================================================
 
     def _layer5(
         self, code: str, data: Dict, baseline_obj: float,
         obj_sense: str, problem_description: str, verbose: bool
     ) -> List[LayerResult]:
-        """L5: CPT - Safety: Only produces WARNING/INFO."""
+        """
+        L5: CPT (Constraint Perturbation Testing).
+
+        Severity grading based on change ratio:
+        - < 5%: WARNING (constraint likely missing)
+        - 5%-30%: INFO (uncertain, may be normal)
+        - > 30%: PASS (constraint present)
+
+        Note: L5 uses WARNING (not ERROR) because LLM-extracted
+        candidates may themselves be inaccurate.
+        """
         results = []
 
         try:
@@ -474,60 +539,132 @@ class ReLoopVerifier:
             if not candidates:
                 results.append(LayerResult(
                     "L5", "cpt_extraction", Severity.INFO,
-                    "No candidate constraints extracted", 0.5
+                    "No candidate constraints extracted", 0.5,
+                    {"trigger_repair": False, "is_likely_normal": True}
                 ))
                 return results
 
             if verbose:
                 print(f"  Extracted {len(candidates)} candidates")
 
-            missing = []
-            satisfied = 0
-            conflicts = 0
-            skipped = 0
-
             for candidate in candidates[:10]:
                 try:
-                    test_result = self._cpt_test_candidate(
-                        code, data, baseline_obj, obj_sense, candidate
+                    test_result = self._cpt_test_candidate_v2(
+                        code, data, baseline_obj, obj_sense, candidate, verbose
                     )
-                    status = test_result.get("status")
-                    if status == "MISSING":
-                        missing.append(test_result)
-                        if verbose:
-                            print(f"    [MISSING] {candidate.get('description', '')}")
-                    elif status == "SATISFIED":
-                        satisfied += 1
-                        if verbose:
-                            print(f"    [OK] {candidate.get('description', '')}")
-                    elif status == "CONFLICT":
-                        conflicts += 1
-                    else:
-                        skipped += 1
+                    if test_result:
+                        results.append(test_result)
                 except Exception:
-                    skipped += 1
-
-            if missing:
-                results.append(LayerResult(
-                    "L5", "cpt_missing", Severity.WARNING,
-                    f"CPT found {len(missing)} potentially missing constraint(s)",
-                    0.75, {"missing": missing}
-                ))
-
-            results.append(LayerResult(
-                "L5", "cpt_summary",
-                Severity.PASS if not missing else Severity.INFO,
-                f"CPT: {satisfied} satisfied, {len(missing)} missing, {conflicts} conflicts, {skipped} skipped",
-                0.8 if not missing else 0.6
-            ))
+                    pass
 
         except Exception as e:
             results.append(LayerResult(
                 "L5", "cpt_error", Severity.INFO,
-                f"CPT skipped: {str(e)[:100]}", 0.5
+                f"CPT skipped: {str(e)[:100]}", 0.5,
+                {"trigger_repair": False, "is_likely_normal": True}
             ))
 
         return results
+
+    def _cpt_test_candidate_v2(
+        self, code: str, data: Dict, baseline_obj: float,
+        obj_sense: str, candidate: Dict, verbose: bool
+    ) -> Optional[LayerResult]:
+        """Test a single candidate constraint with new thresholds."""
+        params = candidate.get("parameters", [])
+        if not params:
+            return None
+
+        param = params[0]
+        ctype = candidate.get("type", "other")
+        description = candidate.get("description", "")
+
+        # Create extreme perturbation based on constraint type
+        if ctype == "capacity":
+            test_data = set_param(data, param, 0.001)
+            perturbation_desc = "set to near-zero (x0.001)"
+        elif ctype == "demand":
+            test_data = perturb_param(data, param, 100.0)
+            perturbation_desc = "scaled up 100x"
+        else:
+            test_data = perturb_param(data, param, 0.01)
+            perturbation_desc = "scaled to 1%"
+
+        result = self.executor.execute(code, test_data)
+        new_status = result.get("status")
+        new_obj = result.get("objective")
+
+        # If became infeasible, constraint is present
+        if new_status == "INFEASIBLE":
+            if verbose:
+                print(f"    [PRESENT] {description} - perturbation caused infeasibility")
+            return LayerResult(
+                "L5", "cpt_present", Severity.PASS,
+                f"Constraint '{description}': extreme perturbation caused infeasibility - constraint is present",
+                0.9,
+                {"trigger_repair": False}
+            )
+
+        if new_obj is None:
+            return None
+
+        # Calculate change ratio
+        if abs(baseline_obj) > self.epsilon:
+            change_ratio = abs(new_obj - baseline_obj) / abs(baseline_obj)
+        else:
+            change_ratio = abs(new_obj - baseline_obj)
+
+        # ────────────────────────────────────────────────────
+        # Threshold-based grading
+        # ────────────────────────────────────────────────────
+
+        if change_ratio < 0.05:
+            # < 5%: WARNING (constraint likely missing)
+            if verbose:
+                print(f"    [MISSING] {description} - only {change_ratio:.1%} change")
+            return LayerResult(
+                "L5", "cpt_missing", Severity.WARNING,
+                f"Constraint '{description}' is likely MISSING: "
+                f"extreme perturbation ({perturbation_desc}) caused only {change_ratio:.1%} change",
+                0.75,
+                {
+                    "constraint_name": description,
+                    "constraint_type": ctype,
+                    "related_param": param,
+                    "change_ratio": change_ratio,
+                    "trigger_repair": True,
+                    "is_likely_normal": False,
+                    "repair_hint": f"Add constraint: {description}"
+                }
+            )
+
+        elif change_ratio < 0.30:
+            # 5%-30%: INFO (uncertain)
+            if verbose:
+                print(f"    [UNCERTAIN] {description} - {change_ratio:.1%} change")
+            return LayerResult(
+                "L5", "cpt_uncertain", Severity.INFO,
+                f"Constraint '{description}': {change_ratio:.1%} change (uncertain, may be normal)",
+                0.5,
+                {
+                    "constraint_name": description,
+                    "change_ratio": change_ratio,
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "Moderate change - constraint may be partially active"
+                }
+            )
+
+        else:
+            # > 30%: PASS (constraint present)
+            if verbose:
+                print(f"    [PRESENT] {description} - {change_ratio:.1%} change")
+            return LayerResult(
+                "L5", "cpt_present", Severity.PASS,
+                f"Constraint '{description}': {change_ratio:.1%} change - constraint is active",
+                0.85,
+                {"trigger_repair": False}
+            )
 
     def _cpt_extract_candidates(self, problem_description: str, data: Dict) -> List[Dict]:
         """LLM-based candidate extraction."""
@@ -569,47 +706,6 @@ Format: [{{"description": "...", "type": "capacity|demand|balance", "parameters"
                     "parameters": [param]
                 })
         return candidates
-
-    def _cpt_test_candidate(
-        self, code: str, data: Dict, baseline_obj: float,
-        obj_sense: str, candidate: Dict
-    ) -> Dict:
-        """Test a single candidate constraint."""
-        params = candidate.get("parameters", [])
-        if not params:
-            return {"status": "SKIP", "reason": "No parameters"}
-
-        param = params[0]
-        ctype = candidate.get("type", "other")
-
-        # Create test data based on constraint type
-        if ctype == "capacity":
-            test_data = set_param(data, param, 0.001)
-        elif ctype == "demand":
-            test_data = perturb_param(data, param, 100.0)
-        else:
-            test_data = perturb_param(data, param, 0.01)
-
-        result = self.executor.execute(code, test_data)
-        new_status = result.get("status")
-        new_obj = result.get("objective")
-
-        if new_status == "INFEASIBLE":
-            return {"status": "SATISFIED", "description": candidate.get("description", "")}
-
-        if new_obj is not None:
-            change_ratio = abs(new_obj - baseline_obj) / max(abs(baseline_obj), 1.0)
-            if change_ratio > 0.5:
-                return {"status": "SATISFIED", "description": candidate.get("description", "")}
-            else:
-                return {
-                    "status": "MISSING",
-                    "description": candidate.get("description", ""),
-                    "baseline_obj": baseline_obj,
-                    "new_obj": new_obj
-                }
-
-        return {"status": "SKIP", "reason": "Execution failed"}
 
     # =========================================================================
     # Helper Methods

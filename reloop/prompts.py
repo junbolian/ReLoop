@@ -1,34 +1,235 @@
-"""ReLoop LLM Prompt Templates"""
+"""ReLoop LLM Prompt Templates
 
-CODE_GENERATION_PROMPT = '''You are an optimization expert. Generate Gurobi Python code.
+Generation Approaches:
+  1. Chain-of-Thought (CoT): Single API call with 3-stage reasoning
+  2. Single-Stage: Direct problem → code generation
+  3. Legacy 3-Stage: Separate API calls (deprecated, kept for compatibility)
+"""
+
+# ============================================================================
+# Chain-of-Thought Generation (Recommended - Single API call)
+# ============================================================================
+
+CHAIN_OF_THOUGHT_SYSTEM = '''You are an optimization expert who solves problems with step-by-step reasoning.'''
+
+CHAIN_OF_THOUGHT_PROMPT = '''Solve this optimization problem using chain-of-thought reasoning.
 
 ## Problem
 {problem_description}
 
 ## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}
+
+---
+## STEP 1: UNDERSTAND THE PROBLEM
+First, analyze the problem:
+- What is the objective? (minimize cost / maximize profit / etc.)
+- What decisions need to be made?
+- What constraints exist?
+- What parameters are given?
+
+## STEP 2: FORMULATE THE MATHEMATICAL MODEL
+Write the formal model:
+- Sets and indices
+- Parameters (use exact keys from data structure)
+- Decision variables with domains
+- Constraints in mathematical notation
+- Objective function
+
+## STEP 3: GENERATE GUROBI CODE
+Write Python code using gurobipy.
+
+**CRITICAL RULES:**
+1. Do NOT define `data = {{...}}` - the data variable already exists
+2. Access data as: `data["key_name"]`
+3. Model variable must be named `m`
+4. Set `m.Params.OutputFlag = 0`
+5. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+6. Implement ALL constraints from Step 2
+
+---
+Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
+'''
+
+# ============================================================================
+# Single-Stage Generation (Simple direct approach)
+# ============================================================================
+
+CODE_GENERATION_SYSTEM = '''You write correct Gurobi Python code. Include ALL constraints from the problem.'''
+
+CODE_GENERATION_PROMPT = '''Generate Gurobi Python code for this optimization problem.
+
+## Problem
+{problem_description}
+
+## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
 {data_structure}
 
 ## Requirements
 1. Use `gurobipy` library, model named `m`
-2. Access data via `data` dictionary
+2. **CRITICAL: Do NOT create `data = {{...}}`. The data variable already exists. Just use `data["key"]`.**
 3. Set `m.Params.OutputFlag = 0`
-4. Print output format:
+4. Print: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+5. Implement ALL constraints mentioned in the problem
+
+Return ONLY Python code. Do NOT include any `data = ` definition.
+'''
+
+# ============================================================================
+# Legacy: Separate Stage Prompts (deprecated, kept for compatibility)
+# ============================================================================
+
+UNDERSTAND_SYSTEM = '''You are an optimization expert. Analyze optimization problems to identify key components.'''
+
+UNDERSTAND_PROMPT = '''Analyze this optimization problem and extract the key components.
+
+## Problem
+{problem_description}
+
+## Task
+Identify and describe:
+1. **Objective**: What are we optimizing? (minimize cost, maximize profit, etc.)
+2. **Decision Scope**: What decisions need to be made? (quantities, assignments, schedules, etc.)
+3. **Constraints**: What limitations or requirements exist?
+4. **Key Parameters**: What numerical data is provided?
+
+## Output Format
+```yaml
+objective:
+  sense: minimize|maximize
+  description: "brief description of what to optimize"
+
+decisions:
+  - name: "decision variable description"
+    type: continuous|integer|binary
+    indexed_by: "what dimensions (products, periods, locations, etc.)"
+
+constraints:
+  - name: "constraint name"
+    type: capacity|demand|balance|logical|bound
+    description: "what this constraint enforces"
+
+parameters:
+  - name: "parameter name"
+    role: cost|revenue|capacity|requirement|other
+    description: "what this parameter represents"
+```
+
+Return ONLY the YAML, no explanation.
+'''
+
+# ============================================================================
+# Stage 2: Formalize
+# ============================================================================
+
+FORMALIZE_SYSTEM = '''You are a mathematical optimization modeler. Transform problem understanding into formal mathematical specifications.'''
+
+FORMALIZE_PROMPT = '''Transform this problem understanding into a formal mathematical specification.
+
+## Problem Description
+{problem_description}
+
+## Problem Understanding
+{understanding}
+
+## Data Structure
+{data_structure}
+
+## Task
+Create a formal mathematical model with these 5 components:
+
+### S1: Index Sets (I)
+Define all index sets (products, periods, locations, etc.)
+
+### S2: Parameters (P)
+List all parameters with their dimensions and meanings.
+Use exact keys from the data structure.
+
+### S3: Decision Variables (V)
+Define decision variables with domains and bounds.
+
+### S4: Constraints (C)
+Write each constraint in mathematical notation.
+Use LaTeX-style notation: \\sum, \\forall, \\leq, \\geq
+
+### S5: Objective Function (f)
+Write the objective function to minimize or maximize.
+
+## Output Format
+```
+SETS:
+  I = {{...}}  # description
+
+PARAMETERS:
+  param_name[indices]: description
+
+VARIABLES:
+  var_name[indices] >= 0: description
+
+CONSTRAINTS:
+  constraint_name: mathematical_expression \\forall conditions
+
+OBJECTIVE:
+  minimize/maximize: expression
+```
+
+Return ONLY the mathematical specification.
+'''
+
+# ============================================================================
+# Stage 3: Synthesize
+# ============================================================================
+
+SYNTHESIZE_SYSTEM = '''You write correct Gurobi Python code. Implement the mathematical model exactly as specified.'''
+
+SYNTHESIZE_PROMPT = '''Generate Gurobi Python code from this mathematical specification.
+
+## Problem Description
+{problem_description}
+
+## Mathematical Model
+{mathematical_model}
+
+## Data Structure
+{data_structure}
+
+## Requirements
+1. Use `gurobipy` library
+2. Model variable named `m`
+3. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
+4. Set `m.Params.OutputFlag = 0`
+5. Print output format:
    ```
    print(f"status: {{m.Status}}")
    print(f"objective: {{m.ObjVal}}")
    ```
+6. Implement ALL constraints from the mathematical model
+7. Handle edge cases (empty lists, missing keys)
 
-Return ONLY Python code.
+Return ONLY Python code, no explanation. Do NOT include any `data = ` definition.
 '''
 
-CODE_GENERATION_SYSTEM = '''You write correct Gurobi Python code. Include ALL constraints.'''
+# ============================================================================
+# Legacy: Separate 3-stage prompts (deprecated)
+# ============================================================================
+# These are kept for backward compatibility but Chain-of-Thought is preferred.
+
+# ============================================================================
+# Repair prompts
+# ============================================================================
 
 REPAIR_PROMPT = '''Fix this optimization code based on the diagnostic report.
 
 ## Problem
 {problem_description}
 
-## Code
+## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}
+
+## Current Code
 ```python
 {code}
 ```
@@ -36,13 +237,102 @@ REPAIR_PROMPT = '''Fix this optimization code based on the diagnostic report.
 ## Diagnostic Report
 {diagnostic_report}
 
-## Issues
+## Issues to Fix
 {issues}
 
-Return the COMPLETE fixed code.
+## Instructions
+1. Carefully analyze each issue in the diagnostic report
+2. Fix the specific problems identified
+3. If a parameter "has NO EFFECT", add the missing constraint that uses it
+4. Ensure all constraints from the problem are implemented
+5. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
+6. Do not remove working code unnecessarily
+
+Return the COMPLETE fixed code. Do NOT include any `data = ` definition.
 '''
 
-REPAIR_SYSTEM = '''You debug optimization models. Fix each issue in the report.'''
+REPAIR_SYSTEM = '''You debug optimization models. Fix each issue in the report while preserving correct code.'''
+
+# ============================================================================
+# Regeneration prompt (for L1 FATAL)
+# ============================================================================
+
+REGENERATE_PROMPT = '''The previous code failed to execute. Generate a new, correct version.
+
+## Problem
+{problem_description}
+
+## Previous Code (FAILED)
+```python
+{failed_code}
+```
+
+## Error
+{error_message}
+
+## Data Structure
+{data_structure}
+
+## Instructions
+1. Analyze why the previous code failed
+2. Generate completely new code that avoids the error
+3. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
+4. Handle edge cases (empty arrays, missing keys)
+
+Return ONLY the corrected Python code. Do NOT include any `data = ` definition.
+'''
+
+REGENERATE_SYSTEM = '''You fix broken optimization code. Ensure the new code is syntactically correct and handles all edge cases.'''
+
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+
+def describe_data_schema(data: dict, prefix: str = "", depth: int = 0) -> str:
+    """
+    Create a schema description of the data dictionary.
+
+    Shows structure (keys, types, dimensions) but NOT actual values.
+    This is the "schema-only visibility" design from the paper.
+    """
+    if depth > 3:
+        return ""
+
+    lines = []
+    for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else key
+
+        if isinstance(value, (int, float)):
+            lines.append(f"- {path}: {type(value).__name__} (scalar)")
+        elif isinstance(value, list):
+            if len(value) > 0:
+                elem_type = type(value[0]).__name__
+                if isinstance(value[0], list):
+                    # 2D array
+                    inner_len = len(value[0]) if value[0] else 0
+                    lines.append(f"- {path}: list[{len(value)}][{inner_len}] (2D array)")
+                elif isinstance(value[0], dict):
+                    lines.append(f"- {path}: list[{len(value)}] of dict")
+                else:
+                    lines.append(f"- {path}: list[{len(value)}] of {elem_type}")
+            else:
+                lines.append(f"- {path}: list (empty)")
+        elif isinstance(value, dict):
+            keys_sample = list(value.keys())[:5]
+            if len(value) > 5:
+                keys_sample.append("...")
+            lines.append(f"- {path}: dict with keys {keys_sample}")
+            # Recurse for nested dicts
+            nested = describe_data_schema(value, path, depth + 1)
+            if nested:
+                lines.append(nested)
+        elif isinstance(value, str):
+            lines.append(f"- {path}: str")
+        else:
+            lines.append(f"- {path}: {type(value).__name__}")
+
+    return "\n".join(lines)
 
 
 def format_diagnostic_report(report) -> str:
@@ -63,11 +353,144 @@ def format_issues_for_repair(report) -> str:
     """Extract actionable issues for repair."""
     issues = []
     for r in report.layer_results:
-        if r.severity.value == 'WARNING':
-            if 'monotonicity' in r.check:
+        if r.severity.value in ['FATAL', 'ERROR', 'WARNING']:
+            if r.severity.value == 'FATAL':
+                issues.append(f"EXECUTION ERROR: {r.message}")
+            elif 'monotonicity' in r.check:
                 issues.append(f"CONSTRAINT DIRECTION ERROR: {r.message}")
             elif 'param_effect' in r.check:
                 issues.append(f"MISSING CONSTRAINT: {r.message}")
+            elif 'direction_anomaly' in r.check:
+                issues.append(f"DIRECTION ANOMALY: {r.message}")
             elif 'cpt_missing' in r.check:
                 issues.append(f"CPT DETECTED MISSING: {r.message}")
-    return "\n".join(issues) if issues else "No specific issues."
+            else:
+                issues.append(f"{r.severity.value}: {r.message}")
+    return "\n".join(issues) if issues else "No specific issues identified."
+
+
+# ============================================================================
+# Context-Based Repair Prompts (Conservative Strategy)
+# ============================================================================
+
+REPAIR_WITH_CONTEXT_SYSTEM = '''You are an optimization code repair expert.
+
+CRITICAL RULES:
+1. ONLY fix issues in Sections 1 and 2 (CRITICAL ERRORS and HIGH PRIORITY)
+2. Section 3 (DIAGNOSTIC INFO) is for REFERENCE ONLY - DO NOT modify code based on it
+3. Be conservative - only make changes that are clearly necessary
+4. Do NOT add constraints unless there is clear evidence they are missing
+5. Preserve all working code - only change what is broken'''
+
+REPAIR_WITH_CONTEXT_PROMPT = '''Fix this optimization code based on the categorized diagnostic report.
+
+## Problem
+{problem_description}
+
+## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}
+
+## Current Code
+```python
+{code}
+```
+
+---
+## DIAGNOSTIC REPORT (READ CAREFULLY!)
+
+### SECTION 1: CRITICAL ERRORS - YOU MUST FIX (NO EXCEPTIONS)
+{critical_errors}
+
+### SECTION 2: HIGH-PRIORITY ISSUES - YOU SHOULD FIX
+{should_fix}
+
+### SECTION 3: DIAGNOSTIC INFO - FOR REFERENCE ONLY (DO NOT FIX)
+{for_reference}
+
+---
+## REPAIR INSTRUCTIONS
+
+1. **MUST FIX** all issues in Section 1 (CRITICAL ERRORS)
+   - These are mathematically certain errors (99%+ confidence)
+   - Constraint direction errors, impossible behaviors, etc.
+
+2. **SHOULD FIX** issues in Section 2 (HIGH PRIORITY)
+   - These are high-confidence issues (80%+ confidence)
+   - Missing constraints detected by CPT, etc.
+
+3. **DO NOT FIX** issues in Section 3 (DIAGNOSTIC INFO)
+   - These are likely normal behavior or numerical artifacts
+   - Slack constraints, normal optimization behavior, etc.
+   - Provided for context only - ignore for repair purposes
+
+4. **CRITICAL**: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.
+
+Return the COMPLETE fixed code in a ```python block.
+'''
+
+
+def format_repair_section(items: list, empty_message: str = "None") -> str:
+    """Format a list of issues for repair prompt section (ERROR/WARNING)."""
+    if not items:
+        return empty_message
+
+    lines = []
+    for i, item in enumerate(items, 1):
+        layer = item.get("layer", "?")
+        severity = item.get("severity", "?")
+        message = item.get("message", "No message")
+        action = item.get("action", "")
+
+        lines.append(f"{i}. [{layer}] {severity}: {message}")
+        if action:
+            lines.append(f"   Action: {action}")
+
+        # Add relevant details if present
+        details = item.get("details", {})
+        if details:
+            if "param" in details:
+                lines.append(f"   Parameter: {details['param']}")
+            if "expected" in details and "actual" in details:
+                lines.append(f"   Expected: {details['expected']}, Actual: {details['actual']}")
+
+    return "\n".join(lines)
+
+
+def format_reference_section(items: list) -> str:
+    """
+    Format INFO-level items for reference section.
+
+    These are CONTEXT ONLY - the LLM should NOT fix these unless 100% certain.
+    Uses emphatic formatting to prevent over-correction.
+    """
+    if not items:
+        return "[OK] No diagnostic information."
+
+    lines = []
+
+    # Emphatic reminder header
+    lines.append("+" + "-" * 65 + "+")
+    lines.append("| REMINDER: Below items are NORMAL in 80%+ of cases.              |")
+    lines.append("| DEFAULT ACTION: Confirm code is correct. DO NOT CHANGE.         |")
+    lines.append("+" + "-" * 65 + "+")
+    lines.append("")
+
+    for i, item in enumerate(items, 1):
+        layer = item.get("layer", "?")
+        check = item.get("check", "unknown")
+        message = item.get("message", "")
+
+        lines.append(f"{i}. [{layer}] {check}")
+        lines.append(f"   Observation: {message}")
+        lines.append(f"   Status: [OK] PROBABLY NORMAL (slack constraint, numerical artifact, etc.)")
+        lines.append(f"   Action: DO NOT FIX (unless you are 100% certain this is an error)")
+        lines.append("")
+
+    # Final reminder
+    lines.append("-" * 65)
+    lines.append("[!] FINAL REMINDER: If you're not 100% sure, DO NOT TOUCH.")
+    lines.append("    Wrong 'fixes' to normal behavior can break correct code.")
+    lines.append("-" * 65)
+
+    return "\n".join(lines)
