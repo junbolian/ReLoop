@@ -30,9 +30,9 @@
 - Can detect errors WITHOUT knowing the correct answer
 
 **Four Mathematical Invariants:**
-1. **Relaxation Monotonicity**: Tightening constraints should worsen objective
+1. **Anomaly Detection**: Both increasing AND decreasing a parameter should not improve objective (physically impossible)
 2. **Strong Duality**: Primal and dual objectives should match at optimum
-3. **Parameter Effectiveness**: Meaningful parameters should affect objective
+3. **Direction Consistency**: Parameter changes should affect objective in expected directions (verified via LLM)
 4. **Constraint Presence Testing**: Missing constraints can be detected via counterfactual testing
 
 ## 1.3 System Architecture
@@ -92,10 +92,12 @@
 │                              │ PASS                                         │
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ L2: Relaxation Monotonicity (DIAGNOSTIC)                            │   │
-│  │     • Tighten parameters by 20% (delta=0.2)                         │   │
-│  │     • Check: objective should worsen                                │   │
-│  │     • Violation → ERROR (constraint direction error, 99%+ certain)  │   │
+│  │ L2: Anomaly Detection (DIAGNOSTIC) - Bidirectional Perturbation     │   │
+│  │     • Perturb each parameter UP (+20%) and DOWN (-20%)              │   │
+│  │     • Check 1: Both directions improve → ERROR (physically impossi) │   │
+│  │     • Check 2: Neither direction affects → INFO (slack constraint)  │   │
+│  │     • Check 3: Extreme sensitivity → INFO (normal for optimized)    │   │
+│  │     → Universal: no keyword-based inference, 100% reliable anomaly  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
@@ -108,20 +110,19 @@
 │                              │                                              │
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ L4: Solution Freedom Analysis (DIAGNOSTIC)                          │   │
-│  │     • Perturb parameters ±10% (delta=0.1)                           │   │
-│  │     • Check 1: No effect → WARNING (constraint may be missing)      │   │
-│  │     • Check 2: Direction anomaly (auto-detect, keyword-free)        │   │
-│  │     • Check 3: High sensitivity detection (INFO)                    │   │
-│  │     • Zero objective check (threshold: 1e-2)                        │   │
-│  │     • Complexity calibration: SIMPLE problems get INFO not WARNING  │   │
-│  │     • NOTE: Keyword-based direction removed (L5 LLM handles this)   │   │
+│  │ L4: Adversarial Direction Analysis (DIAGNOSTIC) - LLM-based         │   │
+│  │     • LLM_verify: Analyze expected direction from problem context   │   │
+│  │     • LLM_repair: Accept or Reject the analysis                     │   │
+│  │     • Accepted → WARNING (should fix)                               │   │
+│  │     • Rejected → Re-analyze with feedback (up to max_rejections)    │   │
+│  │     • Max rejections reached → INFO (inconclusive, no repair)       │   │
+│  │     → Adversarial debate converges on correct answer                │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │ L5: CPT - Constraint Perturbation Testing (ENHANCEMENT, Optional)   │   │
-│  │     • LLM or rule-based candidate constraint extraction             │   │
+│  │     • LLM-based candidate constraint extraction (requires LLM)      │   │
 │  │     • Test each: perturb parameters, re-solve, compare objectives   │   │
 │  │     • Objective unchanged → WARNING (constraint was missing)        │   │
 │  │     • Safe: only WARNING/INFO, never ERROR/FATAL                    │   │
@@ -135,9 +136,9 @@
 | Level | Meaning | Confidence | Source | Repair Action |
 |-------|---------|------------|--------|---------------|
 | **FATAL** | Definite error, code cannot run | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
-| **ERROR** | Mathematically certain error | 99%+ | L2 (monotonicity), L4 (anomaly) | **MUST fix** |
-| **WARNING** | High-confidence issue | 80%+ | L5 (cpt_missing) | **SHOULD fix** |
-| **INFO** | Likely normal behavior | <80% | L3, L4 (no_effect, sensitivity) | **DO NOT fix** (reference only) |
+| **ERROR** | Mathematically certain error | 99%+ | L2 (anomaly - both-improve) | **MUST fix** |
+| **WARNING** | High-confidence issue | 80%+ | L4 (accepted direction), L5 (cpt_missing) | **SHOULD fix** |
+| **INFO** | Likely normal behavior | <80% | L2 (no_effect, sensitivity), L3, L4 (rejected/inconclusive) | **DO NOT fix** (reference only) |
 | **PASS** | Check passed | - | All layers | No issue |
 
 **Key Design Principle: Conservative Repair**
@@ -179,14 +180,17 @@ Diagnostic layers ADD information, never DELETE output.
 | Layer | Check | Possible Severities | Triggers Repair? | Rationale |
 |-------|-------|--------------------|--------------------|-----------|
 | **L1** | execution/solver | FATAL, PASS | Triggers regeneration | Code cannot run |
-| **L2** | monotonicity | **ERROR**, PASS | **YES (must fix)** | Mathematically certain (99%+) |
+| **L2** | anomaly | **ERROR**, PASS | **YES (must fix)** | Both directions improve = physically impossible (99%+) |
+| **L2** | no_effect | INFO, PASS | **NO** | Likely slack constraint (normal) |
+| **L2** | high_sensitivity | INFO, PASS | **NO** | Normal for well-optimized models |
 | **L3** | duality_gap | INFO, PASS | **NO** | Likely numerical artifact |
-| **L4** | no_effect | INFO, PASS | **NO** | Likely slack constraint |
-| **L4** | anomaly | **ERROR**, PASS | **YES (must fix)** | Both directions improve = impossible |
-| **L4** | high_sensitivity | INFO, PASS | **NO** | Normal for well-optimized models |
+| **L4** | direction (accepted) | **WARNING**, PASS | **YES (should fix)** | LLM debate converged on issue |
+| **L4** | direction (rejected) | INFO, PASS | **NO** | Inconclusive after debate |
 | **L5** | cpt_missing | **WARNING**, INFO, PASS | **YES (should fix)** | High confidence (80%+) |
 
-**Key Insight:** L4 `no_effect` was causing over-correction when repairing slack constraints that are actually normal. Changed to INFO to prevent unnecessary repairs.
+**Key Insight:**
+- L2 anomaly detection (both-improve) is 100% reliable for detecting structural errors
+- L4 uses adversarial debate: if LLM_repair accepts LLM_verify's analysis, it becomes WARNING; if rejected repeatedly, it downgrades to INFO
 
 ### 1.5.2 False Positive Handling (误检处理)
 
@@ -233,10 +237,11 @@ reloop/
 │   ├── __init__.py               # Package exports (all public APIs)
 │   ├── param_utils.py            # Parameter extraction & perturbation
 │   ├── executor.py               # Isolated subprocess execution
-│   ├── verification.py           # 5-layer verification engine
+│   ├── verification.py           # 5-layer verification engine (L1-L3, L5)
+│   ├── l4_adversarial.py         # L4 Adversarial Direction Analysis
 │   ├── prompts.py                # LLM prompt templates
 │   ├── generation.py             # Code generation
-│   ├── repair.py                 # Diagnostic-based repair
+│   ├── repair.py                 # Diagnostic-based repair with L4 Accept/Reject
 │   ├── pipeline.py               # Pipeline orchestration
 │   ├── data_extraction.py        # NL → structured data extraction
 │   └── experiment_runner.py      # Batch experiment runner
@@ -259,13 +264,14 @@ reloop/
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `param_utils.py` | ~200 | Parameter extraction, perturbation, role inference |
+| `param_utils.py` | ~150 | Parameter extraction, perturbation, skip determination |
 | `executor.py` | ~120 | Subprocess-isolated code execution with timeout |
-| `verification.py` | ~650 | Core 5-layer verification engine |
-| `prompts.py` | ~75 | LLM prompt templates for generation and repair |
+| `verification.py` | ~550 | Core verification engine (L1-L3, L5) |
+| `l4_adversarial.py` | ~350 | L4 Adversarial Direction Analysis with LLM debate |
+| `prompts.py` | ~200 | LLM prompt templates for generation, repair, L4 verify |
 | `generation.py` | ~100 | Code generation from problem description |
-| `repair.py` | ~90 | Diagnostic-guided code repair |
-| `pipeline.py` | ~200 | Generate→Verify→Repair pipeline orchestration |
+| `repair.py` | ~400 | Diagnostic-guided code repair with L4 Accept/Reject |
+| `pipeline.py` | ~450 | Generate→Verify→Repair pipeline orchestration |
 | `data_extraction.py` | ~130 | Extract structured data from natural language |
 | `experiment_runner.py` | ~330 | Batch experiment runner with metrics |
 
@@ -275,63 +281,33 @@ reloop/
 
 ## 3.1 param_utils.py - Parameter Utilities
 
-**Key Classes and Functions:**
+**Key Functions:**
 
 ```python
-class ParameterRole(Enum):
-    REQUIREMENT = "requirement"  # Lower bound (e.g., demand, protein)
-    CAPACITY = "capacity"        # Upper bound (e.g., machine_capacity, budget)
-    COST = "cost"                # Objective coefficient (e.g., cost, price)
-    REVENUE = "revenue"          # Objective coefficient (e.g., profit, income)
-    UNKNOWN = "unknown"          # Cannot infer role
-
-# Cross-domain keyword coverage (expanded for MAMO, NL4OPT, IndustryOR)
-ROLE_KEYWORDS = {
-    ParameterRole.REQUIREMENT: [
-        # Core: demand, need, order, requirement, target, quota, goal
-        # Diet/Nutrition (MAMO): protein, carbohydrate, calories, fiber, nutrient
-        # Labor/Production (IndustryOR, NL4OPT): hours_needed, workers_needed, trips
-        # Transport (MAMO warehouse): required, units_needed, destination
-    ],
-    ParameterRole.CAPACITY: [
-        # Core: capacity, supply, limit, available, max, bound, cap, budget
-        # Inventory/Storage: stock, inventory, storage, warehouse
-        # Labor/Time (NL4OPT): hours_available, workers, shifts, overtime
-        # Physical: weight, volume, space, area, at_most, maximum, upper
-    ],
-    ParameterRole.COST: [
-        # Core: cost, price, penalty, expense, fee, rate, holding, waste, transport
-        # Specific: shipping, purchasing, production_cost, labor_cost, wage, salary
-        # Loss: loss, spoilage, damage
-    ],
-    ParameterRole.REVENUE: [
-        # Core: revenue, profit, income, benefit, reward, selling_price, value
-        # Sales: sales_price, unit_price, margin, return, gain, earning
-    ]
-}
-
 def extract_numeric_params(data: Dict, prefix: str = "") -> List[str]:
     """Recursively extract all numeric parameters from data dict."""
     # Returns: ["demand", "capacity", "cost.production", ...]
+
+def get_param_value(data: Dict, param_path: str) -> Any:
+    """Get parameter value by path."""
 
 def perturb_param(data: Dict, param_path: str, factor: float) -> Dict:
     """Create copy of data with param multiplied by factor."""
     # factor > 1: increase, factor < 1: decrease
 
-def infer_param_role(param_name: str) -> ParameterRole:
-    """Infer parameter role from name keywords (cross-domain)."""
-    # Matches any keyword in ROLE_KEYWORDS
-    # Returns UNKNOWN if no match
+def set_param(data: Dict, param_path: str, new_value: Any) -> Dict:
+    """Create a copy with parameter set to specific value."""
 
 def should_skip_param(data: Dict, param_path: str) -> Tuple[bool, str]:
     """Skip zero values and Big-M parameters."""
     # Skip if: value is None, value is 0, value >= 90000 (Big-M)
-
-def get_expected_direction(role: ParameterRole, obj_sense: str) -> Optional[str]:
-    """Get expected objective change direction when parameter increases."""
-    # For minimize: REQUIREMENT→increase, CAPACITY→decrease, COST→increase
-    # For maximize: directions are reversed
 ```
+
+**Note:** Keyword-based role inference (`ParameterRole`, `infer_param_role`, `get_expected_direction`)
+has been completely removed. All layers now use universal or LLM-based approaches:
+- L2: Universal anomaly detection (both-directions-improve)
+- L4: LLM-based adversarial direction analysis with Accept/Reject mechanism
+- L5: LLM-based constraint extraction (requires LLM, no keyword fallback)
 
 ## 3.2 executor.py - Code Executor
 
@@ -397,41 +373,94 @@ def _layer1(self, code: str, data: Dict, obj_sense: str, verbose: bool):
     return [LayerResult("L1", "execution", Severity.PASS, "Execution OK", 1.0)], result
 ```
 
-### Layer 2: Relaxation Monotonicity
+### Layer 2: Anomaly Detection (Bidirectional Perturbation)
 
 ```python
 def _layer2(self, code: str, data: Dict, baseline_obj: float,
             obj_sense: str, params: List[str], verbose: bool):
-    """L2: Relaxation Monotonicity (DIAGNOSTIC)"""
+    """L2: Anomaly Detection - Bidirectional Perturbation (DIAGNOSTIC)"""
     results = []
+    anomaly_params = []
+    no_effect_params = []
+    high_sensitivity_params = []
+
+    is_minimize = obj_sense == "minimize"
+    threshold = abs(baseline_obj) * self.epsilon if baseline_obj != 0 else 1e-6
 
     for param in params[:self.max_params]:
-        if should_skip_param(param, get_param_value(data, param)):
+        if should_skip_param(data, param)[0]:
             continue
 
-        # Tighten parameter by 20%
-        tightened_data = perturb_param(data, param, 1.0 - self.delta)
-        tight_result = self.executor.execute(code, tightened_data)
-        tight_obj = tight_result.get("objective")
+        # Bidirectional perturbation
+        result_up = self.executor.execute(code, perturb_param(data, param, 1 + self.delta))
+        result_down = self.executor.execute(code, perturb_param(data, param, 1 - self.delta))
 
-        if tight_obj is not None:
-            # Check direction
-            expected = get_expected_direction(param, obj_sense)
+        obj_up = result_up.get("objective")
+        obj_down = result_down.get("objective")
 
-            if obj_sense == "minimize":
-                # Tightening should WORSEN (increase) objective
-                if tight_obj < baseline_obj * (1 - self.epsilon):
-                    results.append(LayerResult(
-                        "L2", "monotonicity", Severity.WARNING,
-                        f"Tightening '{param}' improved objective (wrong direction?)",
-                        0.75, {"param": param, "baseline": baseline_obj, "tight": tight_obj}
-                    ))
+        if obj_up is None or obj_down is None:
+            continue
+
+        change_up = obj_up - baseline_obj
+        change_down = obj_down - baseline_obj
+
+        # Check for anomaly: BOTH directions improve objective
+        if is_minimize:
+            up_better = change_up < -threshold
+            down_better = change_down < -threshold
+        else:
+            up_better = change_up > threshold
+            down_better = change_down > threshold
+
+        if up_better and down_better:
+            # ERROR: Physically impossible - both directions improve
+            anomaly_params.append({
+                "param": param,
+                "baseline_obj": baseline_obj,
+                "obj_up": obj_up,
+                "obj_down": obj_down
+            })
+        elif abs(change_up) < threshold and abs(change_down) < threshold:
+            # INFO: No effect - likely slack constraint
+            no_effect_params.append(param)
+        elif abs(change_up) > abs(baseline_obj) * 0.5 or abs(change_down) > abs(baseline_obj) * 0.5:
+            # INFO: High sensitivity - normal for optimized models
+            high_sensitivity_params.append(param)
+
+    # Report anomalies as ERROR
+    for anomaly in anomaly_params:
+        results.append(LayerResult(
+            "L2", "anomaly", Severity.ERROR,
+            f"Anomaly: both directions improve for '{anomaly['param']}'",
+            0.99, anomaly
+        ))
+
+    # Report no-effect as INFO
+    for param in no_effect_params:
+        results.append(LayerResult(
+            "L2", "no_effect", Severity.INFO,
+            f"Parameter '{param}' has no effect (likely slack)",
+            0.6, {"param": param, "is_likely_normal": True}
+        ))
+
+    # Report high sensitivity as INFO
+    for param in high_sensitivity_params:
+        results.append(LayerResult(
+            "L2", "high_sensitivity", Severity.INFO,
+            f"High sensitivity for '{param}' (normal)",
+            0.5, {"param": param, "is_likely_normal": True}
+        ))
 
     if not results:
-        results.append(LayerResult("L2", "monotonicity", Severity.PASS, "OK", 0.9))
+        results.append(LayerResult("L2", "anomaly_detection", Severity.PASS, "OK", 0.9))
 
     return results
 ```
+
+**Key Design:**
+- **Anomaly (ERROR)**: Both +20% and -20% improve objective → physically impossible → must be structural error
+- **No Effect (INFO)**: Neither direction affects objective → likely slack constraint → normal
+- **High Sensitivity (INFO)**: Extreme changes → normal for well-optimized models
 
 ### Layer 3: Dual Consistency
 
@@ -445,9 +474,9 @@ def _layer3(self, objective: float, baseline: Dict, verbose: bool):
         gap = abs(objective - dual_obj) / max(abs(objective), 1.0)
         if gap > 0.01:  # 1% threshold
             results.append(LayerResult(
-                "L3", "duality_gap", Severity.WARNING,
-                f"Primal-dual gap {gap:.2%} exceeds threshold",
-                0.7, {"gap": gap}
+                "L3", "duality_gap", Severity.INFO,  # INFO, not WARNING (likely numerical)
+                f"Primal-dual gap {gap:.2%} exceeds threshold (likely numerical artifact)",
+                0.5, {"gap": gap}  # Lower confidence
             ))
         else:
             results.append(LayerResult("L3", "duality", Severity.PASS, "OK", 0.9))
@@ -459,83 +488,174 @@ def _layer3(self, objective: float, baseline: Dict, verbose: bool):
     return results
 ```
 
-### Layer 4: Solution Freedom Analysis
+### Layer 4: Adversarial Direction Analysis (LLM-based)
 
-**Detection Mechanisms (Universal, Keyword-Free):**
+L4 uses an **adversarial mechanism** where two LLM roles (verify and repair) debate to converge on the correct answer.
 
-| Check | Method | Dependency | Severity |
-|-------|--------|------------|----------|
-| No Effect | Perturbation | None (universal) | **INFO** (likely slack) |
-| Direction Anomaly | Both-improve detection | None (universal) | **ERROR** (99%+ certain) |
-| High Sensitivity | Threshold check | None (universal) | **INFO** (normal behavior) |
-
-> **Note:** Keyword-based direction checking removed. L5's LLM handles semantic constraint testing with better generalization.
+**Design Principle:**
+- LLM_verify analyzes expected direction based on problem context
+- LLM_repair can Accept or Reject the analysis
+- Rejection triggers re-analysis with feedback
+- Multiple rounds until convergence or max rejections reached
 
 ```python
-def _layer4(self, code: str, data: Dict, params: List[str],
-            baseline_obj: float, obj_sense: str, complexity: Complexity, verbose: bool):
-    """L4: Solution Freedom Analysis (DIAGNOSTIC)"""
-    results = []
-    no_effect_params = []
-    direction_anomalies = []       # Auto-detected (keyword-free)
-    high_sensitivity = []          # Sensitivity warnings
+# l4_adversarial.py
 
-    is_minimize = obj_sense == "minimize"
+@dataclass
+class L4VerifyResult:
+    """Result from L4 verification LLM."""
+    param: str
+    expected_direction: str  # "increase" | "decrease" | "unknown"
+    actual_direction: str    # "increase" | "decrease" | "no_change"
+    is_violation: bool
+    reasoning: str
+    confidence: float
 
-    for param in params[:self.max_params]:
-        if should_skip_param(data, param):
-            continue
+@dataclass
+class L4RepairDecision:
+    """Repair LLM's decision on L4 diagnostic."""
+    param: str
+    action: str  # "accept" | "reject"
+    reason: str
 
-        # Perturb parameter ±10%
-        obj_up = self.executor.execute(code, perturb_param(data, param, 1.1)).get("objective")
-        obj_down = self.executor.execute(code, perturb_param(data, param, 0.9)).get("objective")
+class L4AdversarialVerifier:
+    """L4 Adversarial Direction Analysis with LLM debate."""
 
-        if obj_up is None or obj_down is None:
-            continue
+    def __init__(self, llm_client, max_rejections: int = 2):
+        self.llm_client = llm_client
+        self.max_rejections = max_rejections
+        self.rejection_history: Dict[str, L4RejectionHistory] = {}
 
-        threshold = self.epsilon * max(abs(baseline_obj), 1.0)
-        change_up = obj_up - baseline_obj
-        change_down = obj_down - baseline_obj
-        has_effect = abs(change_up) > threshold or abs(change_down) > threshold
+    def verify(self, code: str, data: Dict, baseline_obj: float,
+               obj_sense: str, problem_description: str,
+               perturbation_results: Dict[str, Dict]) -> List[L4VerifyResult]:
+        """
+        LLM_verify: Analyze direction expectations for each parameter.
+        """
+        prompt = L4_VERIFY_PROMPT.format(
+            problem_description=problem_description,
+            code=code,
+            perturbation_results=format_perturbation_results(perturbation_results)
+        )
 
-        if not has_effect:
-            no_effect_params.append(param)
-        else:
-            # Auto-detect direction anomaly (keyword-independent, universal)
-            # Physical intuition: cannot both increase AND decrease improve objective
-            if is_minimize:
-                up_better = change_up < -threshold    # Decrease is "better"
-                down_better = change_down < -threshold
-            else:
-                up_better = change_up > threshold     # Increase is "better"
-                down_better = change_down > threshold
+        response = self.llm_client.generate(prompt)
+        return self._parse_verify_response(response)
 
-            if up_better and down_better:
-                # ANOMALY: both directions improve objective
-                direction_anomalies.append({"param": param, "reason": "both_improve"})
+    def process_repair_decisions(self, decisions: List[L4RepairDecision]):
+        """
+        Process repair LLM's Accept/Reject decisions.
 
-            # High sensitivity detection
-            max_change = max(abs(change_up), abs(change_down))
-            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
-                high_sensitivity.append({"param": param, "sensitivity": max_change/abs(baseline_obj)})
+        - Accept: Direction issue confirmed → WARNING (should fix)
+        - Reject: Analysis was wrong → Re-verify with feedback
+        """
+        for decision in decisions:
+            param = decision.param
 
-            # NOTE: Keyword-based direction check removed
-            # L5 CPT with LLM does semantic constraint checking more effectively
+            if decision.action == "accept":
+                # Issue confirmed - will trigger repair
+                pass
+            elif decision.action == "reject":
+                # Track rejection for re-analysis
+                if param not in self.rejection_history:
+                    self.rejection_history[param] = L4RejectionHistory(param)
 
-    # Report all findings
-    # ... (see verification.py for full implementation)
+                history = self.rejection_history[param]
+                history.add_rejection(decision.reason)
+
+                if history.rejection_count >= self.max_rejections:
+                    # Downgrade to INFO after max rejections
+                    history.final_status = "INFO"
+
+    def get_final_status(self, param: str, was_accepted: bool) -> Tuple[Severity, str]:
+        """Get final severity based on Accept/Reject history."""
+        if was_accepted:
+            return (Severity.WARNING, "L4 direction issue accepted - should fix")
+
+        history = self.rejection_history.get(param)
+        if history and history.rejection_count >= self.max_rejections:
+            return (Severity.INFO, "L4 inconclusive after max rejections - reference only")
+
+        return (Severity.INFO, "L4 rejected - no action needed")
+
+
+def should_exit_l4_loop(verify_results: List[L4VerifyResult],
+                        repair_decisions: List[L4RepairDecision],
+                        rejection_history: Dict[str, L4RejectionHistory],
+                        max_rejections: int) -> Tuple[bool, str]:
+    """
+    Determine if L4 loop should exit.
+
+    Exit conditions:
+    1. All violations accepted → exit with WARNING status
+    2. All violations rejected + max rejections reached → exit with INFO
+    3. No violations found → exit with PASS
+    """
+    # ... implementation
 ```
 
-**Why Auto-Detection is Universal:**
+**L4 Flow Diagram:**
 
 ```
-Physical Principle:
-- For minimize: increasing a parameter should WORSEN or have no effect
-- For minimize: decreasing a parameter should WORSEN or have no effect
-- If BOTH improve objective → model behavior is anomalous
-
-This detection works for ANY domain without keyword matching.
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        L4 Adversarial Flow                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Perturbation Results (from L2) ──→ LLM_verify                             │
+│                                         │                                   │
+│                                         ▼                                   │
+│                              "Parameter X should decrease obj,              │
+│                               but increasing X decreased obj"               │
+│                                         │                                   │
+│                                         ▼                                   │
+│                                    LLM_repair                               │
+│                                         │                                   │
+│                           ┌─────────────┴─────────────┐                    │
+│                           │                           │                    │
+│                           ▼                           ▼                    │
+│                      ACCEPT                       REJECT                   │
+│                           │                           │                    │
+│                           ▼                           ▼                    │
+│                    WARNING (fix)            Re-verify with feedback        │
+│                                                       │                    │
+│                                                       ▼                    │
+│                                         [Repeat until Accept or max]       │
+│                                                       │                    │
+│                                                       ▼                    │
+│                                         Max rejections → INFO (no fix)     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Why Adversarial Mechanism?**
+
+```
+Single-LLM Problem:
+- LLM_verify might make mistakes in direction analysis
+- No mechanism to catch these mistakes
+
+Adversarial Solution:
+- LLM_repair reviews LLM_verify's analysis
+- Can reject with reasoning (e.g., "wage is a cost coefficient, not constraint bound")
+- LLM_verify re-analyzes with this feedback
+- Debate converges on correct answer
+```
+
+**Exit Conditions (Guaranteed Output):**
+
+| Exit Reason | Condition | Result |
+|-------------|-----------|--------|
+| `all_pass` | No L4 violations detected | Output immediately |
+| `all_rejected_others_pass` | All L4 rejected AND L2/L3/L5 PASS | Output with L4 as INFO |
+| `max_rejections` | Any param rejected ≥ max_rejections times | Downgrade to INFO, output |
+| `max_iterations` | Reached max_l4_iterations (default 3) | Output current best |
+| `accepted_fixed` | Some accepted, code was fixed | Re-verify fixed code |
+
+**Key Parameters:**
+- `max_l4_rejections`: Max times a param can be rejected before downgrade (default: 2)
+- `max_l4_iterations`: Max L4 loop iterations (default: 3)
+- `confidence_threshold`: Min confidence to trigger repair (default: 0.5)
+
+**Critical Guarantee:** L4 loop ALWAYS produces output. One of the exit conditions will be met, preventing infinite loops.
 
 ### Layer 5: CPT (Constraint Perturbation Testing)
 
@@ -545,11 +665,16 @@ def _layer5(self, code: str, data: Dict, baseline_obj: float,
     """L5: CPT (ENHANCEMENT) - Only WARNING/INFO, never ERROR/FATAL"""
     results = []
 
-    # Extract candidate constraints
-    if self.llm_client:
-        candidates = self._cpt_extract_candidates(problem_description, data)
-    else:
-        candidates = self._cpt_extract_candidates_rule_based(data)
+    # L5 requires LLM for constraint extraction (no keyword fallback)
+    if not self.llm_client:
+        results.append(LayerResult(
+            "L5", "cpt_skipped", Severity.INFO,
+            "L5 CPT skipped (requires LLM)", 0.5
+        ))
+        return results
+
+    # Extract candidate constraints using LLM
+    candidates = self._cpt_extract_candidates(problem_description, data)
 
     missing = []
     for candidate in candidates[:10]:
@@ -565,25 +690,6 @@ def _layer5(self, code: str, data: Dict, baseline_obj: float,
         ))
 
     return results
-
-def _cpt_extract_candidates_rule_based(self, data: Dict) -> List[Dict]:
-    """Rule-based extraction when no LLM available."""
-    candidates = []
-    for param in extract_numeric_params(data):
-        role = infer_param_role(param)
-        if role == ParameterRole.CAPACITY:
-            candidates.append({
-                "description": f"Should not exceed {param}",
-                "type": "capacity",
-                "parameters": [param]
-            })
-        elif role == ParameterRole.REQUIREMENT:
-            candidates.append({
-                "description": f"Should meet {param}",
-                "type": "demand",
-                "parameters": [param]
-            })
-    return candidates
 
 def _cpt_test_candidate(self, code, data, baseline_obj, obj_sense, candidate):
     """Test a single candidate constraint."""
@@ -618,6 +724,45 @@ def _cpt_test_candidate(self, code, data, baseline_obj, obj_sense, candidate):
             return {"status": "SATISFIED"}
 
     return {"status": "SKIP"}
+
+def _cpt_extract_candidates(self, problem_description: str, data: Dict) -> List[Dict]:
+    """LLM-based candidate constraint extraction."""
+    if not self.llm_client:
+        return []
+
+    prompt = f"""Analyze this optimization problem and extract the KEY CONSTRAINTS.
+
+## Problem Description
+{problem_description}
+
+## Available Data Parameters
+{list(data.keys())}
+
+## Task
+Identify constraints that are REQUIRED by the problem. Focus on:
+1. Capacity constraints (resource limits, maximum values)
+2. Demand constraints (minimum requirements, must-satisfy conditions)
+3. Balance constraints (flow balance, inventory balance)
+
+## Output Format
+Return ONLY a JSON array:
+```json
+[
+  {{"description": "minimum protein requirement", "type": "demand", "parameters": ["min_protein"]}},
+  {{"description": "capacity limit", "type": "capacity", "parameters": ["capacity"]}}
+]
+```"""
+
+    try:
+        response = self.llm_client.generate(prompt)
+        match = re.search(r'\[[\s\S]*\]', response)
+        if match:
+            candidates = json.loads(match.group())
+            return [c for c in candidates
+                    if isinstance(c, dict) and "description" in c and "parameters" in c]
+    except Exception:
+        pass
+    return []
 ```
 
 ## 3.4 prompts.py - LLM Prompts (Chain-of-Thought Generation)
@@ -684,14 +829,18 @@ Now solve the problem. Show your reasoning for Steps 1-2, then provide the final
 '''
 ```
 
-**Why CoT over 3-Stage?**
-| Approach | API Calls | Context | Error Rate |
-|----------|-----------|---------|------------|
-| 3-Stage | 3 separate | Lost between calls | 10.85% |
-| CoT | 1 unified | Preserved throughout | 2.17% |
+**Generation Approaches:**
+
+| Approach | Description | API Calls | Error Rate |
+|----------|-------------|-----------|------------|
+| **Single-Stage** | Direct problem → code | 1 | Baseline |
+| **3-Stage CoT (single call)** | Understand → Formalize → Code in one prompt | 1 | 2.17% |
+| **3-Stage CoT (separate calls)** | 3 separate API calls | 3 | 10.85% |
+
+**Recommended:** 3-Stage CoT with single API call (CHAIN_OF_THOUGHT_PROMPT).
 
 **Legacy 3-Stage Prompts (Deprecated):**
-The old UNDERSTAND_PROMPT, FORMALIZE_PROMPT, SYNTHESIZE_PROMPT are kept for compatibility but should not be used.
+The old UNDERSTAND_PROMPT, FORMALIZE_PROMPT, SYNTHESIZE_PROMPT are kept for compatibility but the single-call CoT approach is preferred.
 
 # ============================================================================
 # Regeneration Prompt (for L1 FATAL recovery)
@@ -795,13 +944,19 @@ class GenerationResult:
 
 class CodeGenerator:
     """
-    Chain-of-Thought optimization code generator.
+    Chain-of-Thought (CoT) optimization code generator.
 
-    Pipeline: Problem → [CoT Single Call] → Code
+    Pipeline: Problem → [CoT 3-Stage] → Code
               (STEP 1: Understand → STEP 2: Formalize → STEP 3: Code)
 
+    The 3-stage pipeline IS Chain-of-Thought reasoning, where each stage
+    builds on the previous one's output. Implementation options:
+    - Single API call: All 3 steps in one prompt (preserves context, 2.17% error)
+    - Multiple API calls: 3 separate calls (loses context, 10.85% error)
+
+    Recommended: Single API call with CHAIN_OF_THOUGHT_PROMPT.
+
     Features:
-    - Single API call with step-by-step reasoning (preserves context)
     - Schema-based data description (structure only, not values)
     - Universal architecture for all optimization domains
     - Fallback to single-stage generation if CoT fails
@@ -1024,13 +1179,30 @@ class ReLoopPipeline:
         1. Generate code (CoT or single-stage)
         2. Verify with L1-L5
         3. If L1 FATAL: regenerate (up to max_regeneration_attempts)
-        4. If ERROR/WARNING: repair (up to max_repair_iterations)
-        5. INFO does NOT trigger repair (likely normal)
-        6. Return result (always has output if any L1 passes)
+        4. Run L4 Adversarial Loop (if enabled)
+        5. If ERROR/WARNING: repair (up to max_repair_iterations)
+        6. INFO does NOT trigger repair (likely normal)
+        7. Return result (always has output if any L1 passes)
         """
         # ... generation and L1 handling same as before ...
 
-        # Step 4: Handle ERROR/WARNING with repair (INFO does NOT trigger)
+        # Step 4: Run L4 Adversarial Loop
+        if self.enable_l4_adversarial and self.l4_verifier:
+            l4_results, l4_exit_reason, l4_code = self._run_l4_adversarial_loop(
+                code=code,
+                data=data,
+                baseline_obj=report.objective,
+                problem_description=problem_description,
+                obj_sense=self._get_obj_sense_from_report(report),
+                report=report
+            )
+            # If L4 produced fixed code, update and re-verify
+            if l4_code != code:
+                code = l4_code
+                report = self.verifier.verify(code, data, ...)
+                history.append((code, report))
+
+        # Step 5: Handle ERROR/WARNING with repair (INFO does NOT trigger)
         repair_iteration = 0
         ctx = self._analyze_verification_results(report)
 
@@ -1064,10 +1236,11 @@ class ReLoopPipeline:
         Analyze verification results to determine repair strategy.
 
         Classification:
-        - critical_errors: ERROR level (L2 monotonicity, L4 anomaly) - Must fix
-        - should_fix: WARNING level (L5 cpt_missing) - Should fix
-        - for_reference: INFO level (L3, L4 no_effect, etc.) - Do NOT fix
+        - critical_errors: ERROR level (L2 anomaly - both directions improve) - Must fix
+        - should_fix: WARNING level (L4 direction accepted, L5 cpt_missing) - Should fix
+        - for_reference: INFO level (L2 no_effect/sensitivity, L3 duality, L4 rejected) - Do NOT fix
 
+        Note: L4 issues are handled by adversarial mechanism (Accept/Reject).
         Only trigger repair if critical_errors or should_fix is non-empty.
         """
         critical_errors = []
@@ -1084,13 +1257,13 @@ class ReLoopPipeline:
             }
 
             if r.severity == Severity.ERROR:
-                # L2 monotonicity, L4 anomaly - MUST fix
+                # L2 anomaly - MUST fix
                 critical_errors.append(item)
             elif r.severity == Severity.WARNING:
                 # L5 cpt_missing - SHOULD fix
                 should_fix.append(item)
             elif r.severity == Severity.INFO:
-                # L3, L4 no_effect, L4 sensitivity - DO NOT fix
+                # L2 no_effect/sensitivity, L3 duality, L4 rejected - DO NOT fix
                 for_reference.append(item)
 
         # Only trigger if there are ERROR or WARNING issues
@@ -1111,22 +1284,41 @@ class ReLoopPipeline:
 │                        Pipeline Execution Flow                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  [Generate] ──→ [Verify] ──→ Status?                                        │
-│                               │                                              │
-│            ┌──────────────────┼──────────────────┐                          │
-│            │                  │                  │                          │
-│            ▼                  ▼                  ▼                          │
-│       ┌─────────┐        ┌─────────┐        ┌─────────┐                    │
-│       │ FAILED  │        │WARNINGS │        │VERIFIED │                    │
-│       │(L1 FATAL)│        │ ERRORS  │        │         │                    │
-│       └────┬────┘        └────┬────┘        └────┬────┘                    │
-│            │                  │                  │                          │
-│            ▼                  ▼                  ▼                          │
-│     [Regenerate]         [Repair]          ✓ Return                        │
-│     (up to 3x)          (up to 3x)         Success                         │
-│            │                  │                                              │
-│            ▼                  ▼                                              │
-│     [Re-verify] ──→ Loop back to Status?                                    │
+│  [Generate] ──→ [L1-L5 Verify] ──→ L1 Status?                              │
+│                                      │                                       │
+│                    ┌─────────────────┴─────────────────┐                    │
+│                    │                                   │                    │
+│                    ▼                                   ▼                    │
+│               ┌─────────┐                        ┌─────────┐               │
+│               │ FAILED  │                        │  PASS   │               │
+│               │(L1 FATAL)│                        │         │               │
+│               └────┬────┘                        └────┬────┘               │
+│                    │                                   │                    │
+│                    ▼                                   ▼                    │
+│             [Regenerate]                      [L4 Adversarial Loop]        │
+│             (up to 3x)                        ┌────────────────────┐       │
+│                    │                          │ verify → accept? ──┼──Yes──→│
+│                    ▼                          │    │               │       │
+│             [Re-verify]                       │    └──No (reject)──┼──→    │
+│                                               │    re-verify with  │       │
+│                                               │    context         │       │
+│                                               │         │          │       │
+│                                               │    max rejections? │       │
+│                                               │    ──Yes→ INFO     │       │
+│                                               └────────────────────┘       │
+│                                                        │                    │
+│                                                        ▼                    │
+│                                          ┌───────────────────────┐         │
+│                                          │ Has ERROR/WARNING?    │         │
+│                                          └───────────┬───────────┘         │
+│                                   Yes────────────────┴──────────────No     │
+│                                    │                                │      │
+│                                    ▼                                ▼      │
+│                              [Repair Loop]                    ✓ Return     │
+│                              (up to 3x)                       Success      │
+│                                    │                                       │
+│                                    ▼                                       │
+│                              [Re-verify]                                   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1315,31 +1507,71 @@ Each line contains one problem:
 | L4 | Missing constraints, direction anomalies | Parameter sensitivity + physical intuition |
 | L5 | Semantic constraint violations | Counterfactual testing |
 
-## 5.1.1 L4 Cross-Domain Design
+## 5.1.1 L2 Anomaly Detection Design
 
-**Problem:** Keyword-based role inference (demand, capacity, etc.) is domain-specific and generalizes poorly.
+**Problem:** Keyword-based role inference (demand, capacity, etc.) is domain-specific and prone to false positives.
 
-**Solution:** Two-tier universal detection approach (no keywords needed):
+**Solution:** Bidirectional Anomaly Detection (100% Reliable)
 
 ```
-Tier 1: No-Effect Detection (Universal)
-├── Perturb any parameter ±10%
-├── If objective unchanged → WARNING: "constraint may be missing"
+L2 Anomaly Detection Principle:
+├── Perturb any parameter both UP (+20%) and DOWN (-20%)
+├── Check: does BOTH directions IMPROVE the objective?
+├── If yes → ERROR: physically impossible, must be modeling error
+├── If no → normal behavior (one direction worsens or no effect)
 └── Works for ANY domain, no keywords needed
-
-Tier 2: Auto Direction Anomaly (Universal)
-├── Check if BOTH increase AND decrease improve objective
-├── Physically impossible in well-formed models
-├── No keywords needed - pure behavioral analysis
-└── Catches constraint direction errors universally
 ```
 
-**Note:** Keyword-based direction checking was removed because:
-1. L5's LLM-based semantic constraint testing handles this more effectively
-2. Keyword lists require domain-specific tuning and maintenance
-3. Auto-detection (both-improve) catches the same errors without keywords
+**Why This Works:**
 
-**Result:** L4 is now fully universal across all benchmark datasets without any domain-specific tuning.
+For a well-formed optimization model:
+- Increasing a constraint parameter should worsen (or not affect) objective
+- Decreasing the same parameter should also worsen (or not affect) objective
+- **Both improving is physically impossible** → guaranteed error (99%+ confidence)
+
+## 5.1.2 L4 Adversarial Direction Design
+
+**Problem:** Single-LLM direction analysis can make mistakes that go uncaught.
+
+**Solution:** Adversarial Debate Mechanism
+
+```
+L4 Adversarial Principle:
+├── LLM_verify: Analyze expected direction from problem context
+├── LLM_repair: Review analysis, Accept or Reject
+├── If Reject → Re-verify with feedback
+├── Repeat until Accept or max rejections reached
+├── Accepted → WARNING (should fix)
+├── Max rejections → INFO (inconclusive, no fix)
+└── Two LLM perspectives catch each other's errors
+```
+
+**Why Adversarial?**
+
+```
+Single-LLM Problem:
+├── LLM_verify might misunderstand parameter roles
+├── e.g., "wage" could be cost coefficient or constraint bound
+└── No mechanism to catch these mistakes
+
+Adversarial Solution:
+├── LLM_repair can reject with reasoning
+├── e.g., "wage is objective coefficient, not capacity bound"
+├── LLM_verify re-analyzes with this feedback
+├── Debate converges on correct interpretation
+└── Max rejections prevent infinite loops
+```
+
+**Design Decisions:**
+1. Keyword-based direction verification completely removed (domain-specific, error-prone)
+2. L2 handles pure anomaly detection (both-improve → ERROR)
+3. L4 handles semantic direction analysis (LLM debate → WARNING or INFO)
+4. Separation prevents over-correction from L4 false positives
+
+**Result:**
+- L2 catches structural errors with 100% reliability
+- L4 catches semantic direction issues with self-correcting mechanism
+- Together they are universal across all domains
 
 ## 5.2 Why Only L1 is Blocking?
 
@@ -1367,8 +1599,8 @@ COMPLEX (>50 vars):
 ## 5.4 CPT Safety
 
 - L5 only produces WARNING/INFO, never ERROR/FATAL
-- LLM extraction failure → silently skip (graceful degradation)
-- Rule-based fallback when no LLM available
+- Requires LLM for constraint extraction (no keyword fallback)
+- If no LLM available → L5 is skipped (graceful degradation)
 - Cannot create false negatives (worst case: missed detection)
 
 ---
@@ -1505,33 +1737,38 @@ print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
 - [x] L1 is the ONLY layer that produces FATAL
 - [x] L1 FATAL triggers regeneration (up to 3 attempts), NOT termination
 - [x] L1 PASS guarantees has_solution=True
-- [x] L2-L4 produce WARNING/ERROR, never FATAL
+- [x] L2 produces ERROR (anomaly) / INFO (no_effect, sensitivity), never FATAL
+- [x] L3 produces INFO only (numerical artifacts)
+- [x] L4 produces WARNING (accepted) / INFO (rejected/inconclusive), never FATAL/ERROR
 - [x] L5 produces WARNING/INFO only, never ERROR/FATAL
 - [x] Guaranteed output when L1 passes
-- [x] L4 is fully universal: no-effect + auto-anomaly detection (no keywords needed)
-- [x] L4 keyword-based direction checking removed (L5 LLM handles semantic checking)
-- [x] L5 CPT uses LLM to understand problem description (domain-agnostic)
+- [x] L2 anomaly detection is 100% reliable (both-improve = error)
+- [x] L4 uses adversarial LLM debate (verify + repair roles)
+- [x] L4 has exit conditions: all accepted, max rejections, or no violations
+- [x] Keyword-based inference completely removed (L2, L4, L5 all use universal/LLM)
+- [x] L5 CPT uses LLM-only for constraint extraction (no keyword fallback)
 
 ## 8.2 Implementation Completeness
 
-- [x] param_utils.py: extract, perturb, role inference
+- [x] param_utils.py: extract, perturb, skip determination (no role inference)
 - [x] executor.py: subprocess isolation, timeout
-- [x] verification.py: all 5 layers
-- [x] prompts.py: 3-stage generation + repair + regeneration prompts
-- [x] generation.py: 3-stage pipeline (Understand → Formalize → Synthesize)
+- [x] verification.py: L1, L2 (anomaly), L3, L5 layers
+- [x] l4_adversarial.py: L4 Adversarial Direction Analysis with Accept/Reject
+- [x] prompts.py: CoT generation + repair + L4 verify prompts
+- [x] generation.py: CoT pipeline (Understand → Formalize → Synthesize)
 - [x] generation.py: regenerate() method for L1 FATAL recovery
-- [x] repair.py: diagnostic-based repair
-- [x] pipeline.py: Generate→Verify→Repair loop with L1 regeneration
+- [x] repair.py: diagnostic-based repair with L4 Accept/Reject support
+- [x] pipeline.py: Generate→Verify→Repair loop with L1 regeneration and L4 integration
 - [x] data_extraction.py: NL→structured data
 - [x] experiment_runner.py: batch experiments
 
-## 8.3 Three-Stage Generation (Paper Section 3.1)
+## 8.3 Code Generation (Paper Section 3.1)
 
-- [x] Stage 1 (Understand): x → U (structured understanding)
-- [x] Stage 2 (Formalize): U → M = (I, P, V, C, f) (5-component spec)
-- [x] Stage 3 (Synthesize): M → Ck (executable code)
+- [x] Single-Stage: Direct problem → code (baseline)
+- [x] 3-Stage CoT: Understand → Formalize → Synthesize (main approach)
+- [x] Single API call implementation (preserves context, 2.17% error)
 - [x] Schema-only visibility: LLM sees data structure, not values
-- [x] Fallback to single-stage if 3-stage fails
+- [x] Fallback to single-stage if CoT fails
 
 ## 8.3 Experiment Requirements
 

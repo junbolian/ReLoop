@@ -298,6 +298,63 @@ REGENERATE_SYSTEM = '''You fix broken optimization code. Ensure the new code is 
 
 
 # ============================================================================
+# L2 Anomaly Repair Prompt
+# ============================================================================
+
+L2_ANOMALY_REPAIR_PROMPT = '''Fix the structural anomaly in this optimization code.
+
+## Problem
+{problem_description}
+
+## Data Structure
+{data_structure}
+
+## Current Code
+```python
+{code}
+```
+
+## CRITICAL ERROR - L2 Anomaly Detection
+
+**Parameter**: {param}
+**Baseline objective**: {z_baseline:.4f}
+**After {param} increased by {delta}%**: z = {z_plus:.4f}
+**After {param} decreased by {delta}%**: z = {z_minus:.4f}
+
+**Problem**: BOTH increasing AND decreasing '{param}' IMPROVE the objective.
+This is mathematically impossible for any valid optimization model.
+
+**Likely causes**:
+1. Constraint direction is wrong (>= should be <=, or vice versa)
+2. Parameter is used with wrong sign in constraint
+3. Parameter is applied to wrong constraint
+4. Parameter is multiplied where it should be divided (or vice versa)
+
+**Action Required**:
+Review all constraints and objective terms involving '{param}' and fix the structural error.
+
+## Instructions
+1. Find where '{param}' is used in the code
+2. Check if the constraint direction or sign is correct
+3. Fix the structural error
+4. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.**
+
+Return the COMPLETE fixed code in a ```python block.
+'''
+
+L2_ANOMALY_REPAIR_SYSTEM = '''You fix structural errors in optimization models.
+Focus on constraint directions (>= vs <=) and parameter signs.'''
+
+
+# ============================================================================
+# L4 Adversarial Direction Analysis Prompts
+# ============================================================================
+# Note: L4 prompts are defined in l4_adversarial.py to keep the module self-contained.
+# Import them from there if needed:
+#   from .l4_adversarial import L4_VERIFY_PROMPT, L4_REPAIR_PROMPT
+
+
+# ============================================================================
 # Helper functions
 # ============================================================================
 
@@ -368,9 +425,14 @@ def format_issues_for_repair(report) -> str:
         if r.severity.value in ['FATAL', 'ERROR', 'WARNING']:
             if r.severity.value == 'FATAL':
                 issues.append(f"EXECUTION ERROR: {r.message}")
+            elif r.check == 'anomaly':
+                # L2 Anomaly: both directions improve (physically impossible)
+                issues.append(f"STRUCTURAL ANOMALY: {r.message}")
+                if r.details and r.details.get("repair_hint"):
+                    issues.append(f"   Hint: {r.details['repair_hint']}")
             elif 'monotonicity' in r.check:
                 issues.append(f"CONSTRAINT DIRECTION ERROR: {r.message}")
-            elif 'param_effect' in r.check:
+            elif 'param_effect' in r.check or 'no_effect' in r.check:
                 issues.append(f"MISSING CONSTRAINT: {r.message}")
             elif 'direction_anomaly' in r.check:
                 issues.append(f"DIRECTION ANOMALY: {r.message}")

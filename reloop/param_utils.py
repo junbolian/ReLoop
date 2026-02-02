@@ -4,78 +4,18 @@ ReLoop Parameter Utilities
 Functions:
 - Extract numeric parameters
 - Parameter perturbation
-- Role inference
 - Skip determination
+
+Note: Keyword-based role inference (ParameterRole, infer_param_role,
+get_expected_direction) has been completely removed. All layers now use
+universal or LLM-based approaches:
+- L2: Universal anomaly detection (both-directions-improve)
+- L4: LLM-based adversarial direction analysis
+- L5: LLM-based constraint extraction (requires LLM)
 """
 
 import copy
-from typing import Dict, Any, List, Tuple, Optional
-from enum import Enum
-
-
-class ParameterRole(Enum):
-    """Parameter roles for sensitivity analysis"""
-    REQUIREMENT = "requirement"
-    CAPACITY = "capacity"
-    COST = "cost"
-    REVENUE = "revenue"
-    UNKNOWN = "unknown"
-
-
-ROLE_KEYWORDS = {
-    ParameterRole.REQUIREMENT: [
-        # Core
-        "demand", "need", "order", "request", "requirement",
-        "target", "quota", "goal",
-        # Diet/Nutrition (MAMO)
-        "protein", "carbohydrate", "carbs", "calorie", "calories",
-        "fiber", "nutrient", "minimum", "at_least", "min_",
-        # Labor/Production (IndustryOR, NL4OPT)
-        "hours_needed", "labor_required", "units_required",
-        "workers_needed", "trips", "deliveries",
-        # Transport (MAMO warehouse)
-        "required", "units_needed", "destination"
-    ],
-    ParameterRole.CAPACITY: [
-        # Core
-        "capacity", "supply", "limit", "available", "max",
-        "bound", "cap", "budget", "resource",
-        # Inventory/Storage
-        "stock", "inventory", "storage", "warehouse",
-        # Labor/Time (NL4OPT, IndustryOR)
-        "hours_available", "labor_cap", "time_limit",
-        "workers", "shifts", "overtime",
-        # Physical constraints
-        "weight", "volume", "space", "area",
-        "at_most", "maximum", "upper"
-    ],
-    ParameterRole.COST: [
-        # Core
-        "cost", "price", "penalty", "expense", "fee",
-        "rate", "holding", "waste", "transport",
-        # Specific costs
-        "shipping", "purchasing", "production_cost",
-        "labor_cost", "material", "raw_material",
-        "wage", "salary", "overtime_cost",
-        # Loss
-        "loss", "spoilage", "damage"
-    ],
-    ParameterRole.REVENUE: [
-        # Core
-        "revenue", "profit", "income", "benefit",
-        "reward", "selling_price", "value",
-        # Sales
-        "sales_price", "unit_price", "margin",
-        "return", "gain", "earning"
-    ]
-}
-
-EXPECTED_DIRECTION_MINIMIZE = {
-    ParameterRole.REQUIREMENT: "increase",
-    ParameterRole.CAPACITY: "decrease",
-    ParameterRole.COST: "increase",
-    ParameterRole.REVENUE: "decrease"
-}
+from typing import Dict, Any, List, Tuple
 
 
 def extract_numeric_params(data: Dict, prefix: str = "") -> List[str]:
@@ -117,36 +57,6 @@ def get_param_value(data: Dict, param_path: str) -> Any:
         else:
             return None
     return obj
-
-
-def infer_param_role(param_path: str) -> ParameterRole:
-    """Infer parameter role from name."""
-    name = param_path.split(".")[-1].lower()
-    full_path = param_path.lower()
-
-    for role, keywords in ROLE_KEYWORDS.items():
-        for kw in keywords:
-            if kw in name or kw in full_path:
-                return role
-
-    return ParameterRole.UNKNOWN
-
-
-def get_expected_direction(role: ParameterRole, obj_sense: str) -> Optional[str]:
-    """Get expected direction of objective change when parameter increases."""
-    if role == ParameterRole.UNKNOWN:
-        return None
-
-    direction = EXPECTED_DIRECTION_MINIMIZE.get(role)
-
-    # Reverse direction for maximization
-    if obj_sense == "maximize":
-        if direction == "increase":
-            return "decrease"
-        elif direction == "decrease":
-            return "increase"
-
-    return direction
 
 
 def perturb_param(data: Dict, param_path: str, factor: float) -> Dict:

@@ -3,16 +3,16 @@ ReLoop Core Verification Module - 5 Layer Architecture
 
 Layers:
 - L1: Execution & Solver (Blocking Layer) → FATAL
-- L2: Relaxation Monotonicity (Diagnostic Layer) → ERROR
+- L2: Anomaly Detection (Diagnostic Layer) → ERROR/INFO
 - L3: Dual Consistency (Diagnostic Layer) → INFO only
-- L4: Solution Freedom Analysis (Diagnostic Layer) → ERROR/INFO
+- L4: Adversarial Direction Analysis (Diagnostic Layer) → WARNING/INFO
 - L5: CPT (Enhancement Layer, Optional) → WARNING/INFO
 
 Severity Levels:
 - FATAL: Code cannot run (L1 only)
-- ERROR: Mathematically certain error, must fix (L2, L4 anomaly)
-- WARNING: High-confidence issue, should fix (L5 cpt_missing)
-- INFO: Likely normal, for reference only
+- ERROR: Mathematically certain error, must fix (L2 anomaly - both directions improve)
+- WARNING: High-confidence issue, should fix (L4 accepted, L5 cpt_missing)
+- INFO: Likely normal, for reference only (L2 no_effect, L3 duality, L4 rejected)
 - PASS: Check passed
 """
 
@@ -25,9 +25,8 @@ from enum import Enum
 
 from .executor import CodeExecutor
 from .param_utils import (
-    extract_numeric_params, get_param_value, infer_param_role,
-    get_expected_direction, perturb_param, set_param, should_skip_param,
-    ParameterRole
+    extract_numeric_params, get_param_value,
+    perturb_param, set_param, should_skip_param
 )
 
 
@@ -128,11 +127,17 @@ class ReLoopVerifier:
             print(f"\n[Complexity: {complexity.value}]")
             print(f"[Parameters: {len(params)} found]")
 
-        # L2: Relaxation Monotonicity
+        # L2: Anomaly Detection (bidirectional perturbation)
         if verbose:
-            print("\n[L2] Relaxation Monotonicity")
+            print("\n[L2] Anomaly Detection")
         l2_results = self._layer2(code, data, objective, obj_sense, params, verbose)
         layer_results.extend(l2_results)
+
+        # Extract L2 anomaly params to exclude from L4
+        l2_anomaly_params = [
+            r.details.get("param") for r in l2_results
+            if r.severity == Severity.ERROR and r.details and "param" in r.details
+        ]
 
         # L3: Dual Consistency
         if verbose:
@@ -140,10 +145,14 @@ class ReLoopVerifier:
         l3_results = self._layer3(objective, baseline, verbose)
         layer_results.extend(l3_results)
 
-        # L4: Solution Freedom Analysis
+        # L4: Adversarial Direction Analysis (LLM-based)
         if verbose:
-            print("\n[L4] Solution Freedom Analysis")
-        l4_results = self._layer4(code, data, params, objective, obj_sense, complexity, verbose)
+            print("\n[L4] Adversarial Direction Analysis")
+        l4_results = self._layer4(
+            code, data, params, objective, obj_sense, complexity, verbose,
+            problem_description=problem_description,
+            l2_anomaly_params=l2_anomaly_params
+        )
         layer_results.extend(l4_results)
 
         # L5: CPT (Optional)
@@ -241,7 +250,7 @@ class ReLoopVerifier:
         return results, baseline
 
     # =========================================================================
-    # L2: Relaxation Monotonicity (ERROR level)
+    # L2: Anomaly Detection (bidirectional perturbation)
     # =========================================================================
 
     def _layer2(
@@ -249,14 +258,21 @@ class ReLoopVerifier:
         obj_sense: str, params: List[str], verbose: bool
     ) -> List[LayerResult]:
         """
-        L2: Relaxation Monotonicity Detection.
+        L2: Anomaly Detection.
 
-        Theory: Tightening a constraint cannot improve the objective.
-        Violation: Objective improved after tightening → constraint direction is WRONG.
-        Severity: ERROR (mathematically certain error).
+        Detects physically impossible behavior through bidirectional perturbation:
+        - anomaly (both directions improve): ERROR (physically impossible)
+        - no_effect: INFO (likely slack constraint)
+        - high_sensitivity: INFO (for reference)
+
+        Theory: For any valid optimization model, it is impossible for both
+        increasing AND decreasing a parameter to improve the objective.
         """
         results = []
         tested = 0
+        anomaly_params = []
+        no_effect_params = []
+        high_sensitivity_params = []
         is_minimize = obj_sense == "minimize"
 
         for param in params[:self.max_params]:
@@ -264,46 +280,147 @@ class ReLoopVerifier:
             if skip:
                 continue
 
-            tightened = perturb_param(data, param, 1 - self.delta)
-            result = self.executor.execute(code, tightened)
-            tightened_obj = result.get("objective")
+            # Bidirectional perturbation
+            result_up = self.executor.execute(
+                code, perturb_param(data, param, 1 + self.delta)
+            )
+            result_down = self.executor.execute(
+                code, perturb_param(data, param, 1 - self.delta)
+            )
 
-            if tightened_obj is None:
+            obj_up = result_up.get("objective")
+            obj_down = result_down.get("objective")
+
+            # Handle infeasibility caused by perturbation
+            if obj_up is None or obj_down is None:
+                if verbose:
+                    print(f"  [INFO] Parameter '{param}' perturbation caused infeasibility")
+                results.append(LayerResult(
+                    "L2", "perturbation_infeasible", Severity.INFO,
+                    f"Parameter '{param}' perturbation caused infeasibility",
+                    0.5,
+                    {"param": param, "trigger_repair": False, "is_likely_normal": True}
+                ))
                 continue
 
             tested += 1
             threshold = self.epsilon * max(abs(baseline_obj), 1.0)
+            change_up = obj_up - baseline_obj
+            change_down = obj_down - baseline_obj
+            has_effect = abs(change_up) > threshold or abs(change_down) > threshold
 
-            # Check for monotonicity violation
+            # ────────────────────────────────────────────────────
+            # Check 1: No-effect → INFO (very likely normal)
+            # ────────────────────────────────────────────────────
+            if not has_effect:
+                no_effect_params.append({
+                    "param": param,
+                    "baseline": baseline_obj,
+                    "obj_up": obj_up,
+                    "obj_down": obj_down
+                })
+                continue
+
+            # ────────────────────────────────────────────────────
+            # Check 2: Anomaly (both directions improve) → ERROR
+            # ────────────────────────────────────────────────────
             if is_minimize:
-                violation = tightened_obj < baseline_obj - threshold
+                up_better = change_up < -threshold
+                down_better = change_down < -threshold
             else:
-                violation = tightened_obj > baseline_obj + threshold
+                up_better = change_up > threshold
+                down_better = change_down > threshold
 
-            if violation:
-                # ERROR: Mathematically certain that constraint direction is wrong
-                results.append(LayerResult(
-                    "L2", "monotonicity_violation", Severity.ERROR,
-                    f"Tightening '{param}' IMPROVED objective "
-                    f"({baseline_obj:.4f} -> {tightened_obj:.4f}). "
-                    f"Constraint direction is WRONG.",
-                    0.95,
-                    {
-                        "param": param,
-                        "baseline_obj": baseline_obj,
-                        "tightened_obj": tightened_obj,
-                        "trigger_repair": True,
-                        "is_likely_normal": False,
-                        "repair_hint": f"Check constraints involving '{param}'. "
-                                       f"Change '>=' to '<=' or vice versa."
-                    }
-                ))
+            if up_better and down_better:
+                # ERROR: Physically impossible
+                anomaly_params.append({
+                    "param": param,
+                    "baseline": baseline_obj,
+                    "obj_up": obj_up,
+                    "obj_down": obj_down,
+                    "change_up": change_up,
+                    "change_down": change_down
+                })
+                continue
 
-        if not any(r.severity == Severity.ERROR for r in results):
+            # ────────────────────────────────────────────────────
+            # Check 3: High sensitivity → INFO
+            # ────────────────────────────────────────────────────
+            max_change = max(abs(change_up), abs(change_down))
+            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
+                sensitivity = max_change / abs(baseline_obj)
+                high_sensitivity_params.append({
+                    "param": param,
+                    "sensitivity": sensitivity,
+                    "change_up": change_up,
+                    "change_down": change_down
+                })
+
+        # Report anomalies → ERROR
+        for item in anomaly_params:
             results.append(LayerResult(
-                "L2", "monotonicity_ok", Severity.PASS,
-                f"Monotonicity passed ({tested} parameters tested)", 0.9
+                "L2", "anomaly", Severity.ERROR,
+                f"ANOMALY: Both increasing AND decreasing '{item['param']}' "
+                f"IMPROVE the objective ({item['baseline']:.4f} -> "
+                f"{item['obj_up']:.4f} / {item['obj_down']:.4f}). "
+                f"This is physically impossible - model has structural error.",
+                0.95,
+                {
+                    "param": item["param"],
+                    "baseline_obj": item["baseline"],
+                    "obj_up": item["obj_up"],
+                    "obj_down": item["obj_down"],
+                    "change_up": item["change_up"],
+                    "change_down": item["change_down"],
+                    "trigger_repair": True,
+                    "is_likely_normal": False,
+                    "repair_hint": f"Parameter '{item['param']}' is used incorrectly. "
+                                   f"Check constraint signs, directions, and coefficients."
+                }
             ))
+
+        # Report no-effect parameters → INFO
+        for item in no_effect_params:
+            results.append(LayerResult(
+                "L2", "no_effect", Severity.INFO,
+                f"Parameter '{item['param']}' has no measurable effect on objective",
+                0.3,
+                {
+                    "param": item["param"],
+                    "baseline": item["baseline"],
+                    "obj_up": item["obj_up"],
+                    "obj_down": item["obj_down"],
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "VERY LIKELY NORMAL - slack constraints naturally have no effect."
+                }
+            ))
+
+        # Report high sensitivity → INFO
+        for item in high_sensitivity_params[:3]:
+            results.append(LayerResult(
+                "L2", "high_sensitivity", Severity.INFO,
+                f"Parameter '{item['param']}' shows high sensitivity: "
+                f"{item['sensitivity']:.1%} change in objective",
+                0.4,
+                {
+                    "param": item["param"],
+                    "sensitivity": item["sensitivity"],
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "High sensitivity is often normal for binding parameters"
+                }
+            ))
+
+        if not anomaly_params:
+            results.append(LayerResult(
+                "L2", "anomaly_ok", Severity.PASS,
+                f"Anomaly detection passed ({tested} parameters tested)", 0.9
+            ))
+
+        if verbose:
+            print(f"  Tested {tested} params: {len(anomaly_params)} anomalies, "
+                  f"{len(no_effect_params)} no-effect, {len(high_sensitivity_params)} high-sensitivity")
 
         return results
 
@@ -357,154 +474,65 @@ class ReLoopVerifier:
         return results
 
     # =========================================================================
-    # L4: Solution Freedom Analysis (ERROR for anomaly, INFO for others)
+    # L4: Adversarial Direction Analysis (LLM-based)
     # =========================================================================
 
     def _layer4(
         self, code: str, data: Dict, params: List[str],
         baseline_obj: float, obj_sense: str,
-        complexity: Complexity, verbose: bool
+        complexity: Complexity, verbose: bool,
+        problem_description: str = "",
+        l2_anomaly_params: Optional[List[str]] = None
     ) -> List[LayerResult]:
         """
-        L4: Solution Freedom Analysis.
+        L4: Adversarial Direction Analysis.
 
-        Three detection mechanisms (all keyword-free, universal):
-        - no_effect: INFO (very likely normal - slack constraints)
-        - anomaly (both improve): ERROR (physically impossible, must be error)
-        - high_sensitivity: INFO (for reference only)
+        Uses LLM to analyze parameter direction expectations and detect violations.
+        Features adversarial mechanism: Repair LLM can Accept or Reject diagnostics.
+
+        Note: This is a placeholder. Full implementation is in l4_adversarial.py
+        and is called from pipeline.py. When LLM client is not available,
+        L4 returns PASS (no analysis performed).
+
+        Args:
+            l2_anomaly_params: Parameters already flagged by L2 (excluded from L4)
         """
         results = []
-        no_effect_params = []
-        direction_anomalies = []
-        high_sensitivity = []
-        is_minimize = obj_sense == "minimize"
 
-        for param in params[:self.max_params]:
-            skip, reason = should_skip_param(data, param)
-            if skip:
-                continue
-
-            obj_up = self.executor.execute(
-                code, perturb_param(data, param, 1 + self.delta)
-            ).get("objective")
-
-            obj_down = self.executor.execute(
-                code, perturb_param(data, param, 1 - self.delta)
-            ).get("objective")
-
-            if obj_up is None or obj_down is None:
-                continue
-
-            threshold = self.epsilon * max(abs(baseline_obj), 1.0)
-            change_up = obj_up - baseline_obj
-            change_down = obj_down - baseline_obj
-            has_effect = abs(change_up) > threshold or abs(change_down) > threshold
-
-            # ────────────────────────────────────────────────────
-            # Mechanism 1: No-effect → INFO (very likely normal)
-            # ────────────────────────────────────────────────────
-            if not has_effect:
-                no_effect_params.append({
-                    "param": param,
-                    "baseline": baseline_obj,
-                    "obj_up": obj_up,
-                    "obj_down": obj_down
-                })
-                continue
-
-            # ────────────────────────────────────────────────────
-            # Mechanism 2: Anomaly (both directions improve) → ERROR
-            # ────────────────────────────────────────────────────
-            if is_minimize:
-                up_better = change_up < -threshold
-                down_better = change_down < -threshold
-            else:
-                up_better = change_up > threshold
-                down_better = change_down > threshold
-
-            if up_better and down_better:
-                # ERROR: Physically impossible, must be error
-                direction_anomalies.append({
-                    "param": param,
-                    "baseline": baseline_obj,
-                    "obj_up": obj_up,
-                    "obj_down": obj_down,
-                    "change_up": change_up,
-                    "change_down": change_down
-                })
-                continue
-
-            # ────────────────────────────────────────────────────
-            # Mechanism 3: High sensitivity → INFO
-            # ────────────────────────────────────────────────────
-            max_change = max(abs(change_up), abs(change_down))
-            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
-                sensitivity = max_change / abs(baseline_obj)
-                high_sensitivity.append({
-                    "param": param,
-                    "sensitivity": sensitivity,
-                    "change_up": change_up,
-                    "change_down": change_down
-                })
-
-        # Report no-effect parameters → INFO
-        for item in no_effect_params:
+        # If no LLM client, skip L4
+        if self.llm_client is None:
             results.append(LayerResult(
-                "L4", "no_effect", Severity.INFO,
-                f"Parameter '{item['param']}' has no measurable effect on objective",
-                0.3,
-                {
-                    "param": item["param"],
-                    "baseline": item["baseline"],
-                    "obj_up": item["obj_up"],
-                    "obj_down": item["obj_down"],
-                    "trigger_repair": False,
-                    "is_likely_normal": True,
-                    "note": "VERY LIKELY NORMAL - slack constraints naturally have no effect. "
-                            "Do NOT add constraints unless you are 100% certain."
-                }
+                "L4", "skipped", Severity.INFO,
+                "L4 Adversarial Direction Analysis skipped (no LLM client)",
+                0.5,
+                {"trigger_repair": False, "is_likely_normal": True}
             ))
+            return results
 
-        # Report direction anomalies → ERROR
-        for item in direction_anomalies:
-            results.append(LayerResult(
-                "L4", "anomaly", Severity.ERROR,
-                f"Parameter '{item['param']}': BOTH increasing AND decreasing "
-                f"IMPROVE the objective. This is PHYSICALLY IMPOSSIBLE.",
-                0.95,
-                {
-                    "param": item["param"],
-                    "baseline": item["baseline"],
-                    "obj_up": item["obj_up"],
-                    "obj_down": item["obj_down"],
-                    "trigger_repair": True,
-                    "is_likely_normal": False,
-                    "repair_hint": f"Parameter '{item['param']}' is used incorrectly. "
-                                   f"Check constraint signs and coefficients."
-                }
-            ))
+        # Exclude parameters already flagged by L2
+        l2_anomaly_params = l2_anomaly_params or []
+        params_to_analyze = [p for p in params if p not in l2_anomaly_params]
 
-        # Report high sensitivity → INFO
-        for item in high_sensitivity[:3]:
+        if not params_to_analyze:
             results.append(LayerResult(
-                "L4", "high_sensitivity", Severity.INFO,
-                f"Parameter '{item['param']}' shows high sensitivity: "
-                f"{item['sensitivity']:.1%} change in objective",
-                0.4,
-                {
-                    "param": item["param"],
-                    "sensitivity": item["sensitivity"],
-                    "trigger_repair": False,
-                    "is_likely_normal": True,
-                    "note": "High sensitivity is often normal for critical/binding parameters"
-                }
+                "L4", "no_params", Severity.PASS,
+                "No parameters to analyze (all handled by L2)",
+                0.9
             ))
+            return results
 
-        if not no_effect_params and not direction_anomalies:
-            results.append(LayerResult(
-                "L4", "solution_freedom_ok", Severity.PASS,
-                "Solution freedom analysis passed", 0.85
-            ))
+        # Full L4 analysis is handled by L4AdversarialVerifier in pipeline
+        # This placeholder returns PASS when called directly
+        results.append(LayerResult(
+            "L4", "placeholder", Severity.INFO,
+            f"L4 analysis deferred to pipeline ({len(params_to_analyze)} params pending)",
+            0.5,
+            {
+                "params_pending": params_to_analyze,
+                "trigger_repair": False,
+                "note": "Full L4 analysis with LLM is handled in pipeline.py"
+            }
+        ))
 
         return results
 
@@ -530,11 +558,16 @@ class ReLoopVerifier:
         results = []
 
         try:
-            # Extract candidates
-            if self.llm_client:
-                candidates = self._cpt_extract_candidates(problem_description, data)
-            else:
-                candidates = self._cpt_extract_candidates_rule_based(data)
+            # Extract candidates (LLM-only, no keyword fallback)
+            if not self.llm_client:
+                results.append(LayerResult(
+                    "L5", "cpt_skipped", Severity.INFO,
+                    "L5 CPT skipped (requires LLM for constraint extraction)", 0.5,
+                    {"trigger_repair": False, "is_likely_normal": True}
+                ))
+                return results
+
+            candidates = self._cpt_extract_candidates(problem_description, data)
 
             if not candidates:
                 results.append(LayerResult(
@@ -671,41 +704,60 @@ class ReLoopVerifier:
         if not self.llm_client:
             return []
 
-        prompt = f"""Extract ALL constraints from this optimization problem. Return JSON array only.
+        prompt = f"""Analyze this optimization problem and extract the KEY CONSTRAINTS that should be present in the model.
 
-Problem: {problem_description}
-Data keys: {list(data.keys())}
+## Problem Description
+{problem_description}
 
-Format: [{{"description": "...", "type": "capacity|demand|balance", "parameters": ["..."]}}]"""
+## Available Data Parameters
+{list(data.keys())}
+
+## Task
+Identify constraints that are REQUIRED by the problem. Focus on:
+1. Capacity constraints (resource limits, maximum values)
+2. Demand constraints (minimum requirements, must-satisfy conditions)
+3. Balance constraints (flow balance, inventory balance)
+
+## Output Format
+Return ONLY a JSON array with this exact format:
+```json
+[
+  {{"description": "minimum protein requirement", "type": "demand", "parameters": ["min_protein"]}},
+  {{"description": "capacity limit on production", "type": "capacity", "parameters": ["capacity"]}}
+]
+```
+
+Return ONLY the JSON array, no explanation."""
 
         try:
             response = self.llm_client.generate(prompt)
-            match = re.search(r'\[[\s\S]*?\]', response)
-            if match:
-                return [c for c in json.loads(match.group())
-                        if isinstance(c, dict) and "description" in c]
-        except Exception:
-            pass
-        return []
 
-    def _cpt_extract_candidates_rule_based(self, data: Dict) -> List[Dict]:
-        """Rule-based candidate extraction."""
-        candidates = []
-        for param in extract_numeric_params(data):
-            role = infer_param_role(param)
-            if role == ParameterRole.CAPACITY:
-                candidates.append({
-                    "description": f"Should not exceed {param}",
-                    "type": "capacity",
-                    "parameters": [param]
-                })
-            elif role == ParameterRole.REQUIREMENT:
-                candidates.append({
-                    "description": f"Should meet {param}",
-                    "type": "demand",
-                    "parameters": [param]
-                })
-        return candidates
+            # Try to find JSON array - use greedy match
+            match = re.search(r'\[[\s\S]*\]', response)
+            if match:
+                json_str = match.group()
+                candidates = json.loads(json_str)
+                valid = [c for c in candidates
+                        if isinstance(c, dict) and "description" in c and "parameters" in c]
+                return valid
+
+            # Try parsing entire response as JSON
+            try:
+                candidates = json.loads(response.strip())
+                if isinstance(candidates, list):
+                    return [c for c in candidates
+                            if isinstance(c, dict) and "description" in c]
+            except json.JSONDecodeError:
+                pass
+
+        except json.JSONDecodeError as e:
+            # JSON parsing failed - log but continue
+            pass
+        except Exception as e:
+            # Other error - log but continue
+            pass
+
+        return []
 
     # =========================================================================
     # Helper Methods
