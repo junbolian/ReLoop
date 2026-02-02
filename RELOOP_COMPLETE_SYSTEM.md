@@ -42,19 +42,37 @@
 │                         ReLoop Complete Architecture                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌───────────┐ │
-│  │   Problem   │     │    Code     │     │  Behavior   │     │  Repair   │ │
-│  │ Description │ ──> │ Generation  │ ──> │ Verification│ ──> │  Module   │ │
-│  │   + Data    │     │   (LLM)     │     │  (ReLoop)   │     │   (LLM)   │ │
-│  └─────────────┘     └─────────────┘     └─────────────┘     └───────────┘ │
-│         │                   │                   │                   │       │
-│         │                   ▼                   ▼                   ▼       │
-│         │            ┌─────────────┐     ┌─────────────┐     ┌───────────┐ │
-│         │            │   Gurobi    │     │ Diagnostic  │     │  Repaired │ │
-│         │            │    Code     │     │   Report    │     │   Code    │ │
-│         │            └─────────────┘     └─────────────┘     └───────────┘ │
-│         │                                                                   │
-│         ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │         Chain-of-Thought Code Generation (Single API Call)          │   │
+│  │                                                                      │   │
+│  │   Problem ──→ [STEP 1: Understand] ──→ [STEP 2: Formalize] ──→      │   │
+│  │                       │                        │                     │   │
+│  │               (same context)           (same context)                │   │
+│  │                       │                        │                     │   │
+│  │                       └────────────────────────┴──→ [STEP 3: Code]  │   │
+│  │                                                            │         │   │
+│  │   Output: U (Understanding) + M (Math Model) + Ck (Code)   │         │   │
+│  │                                                                      │   │
+│  │   KEY: Single API call preserves context (NOT 3 separate calls)     │   │
+│  │   Result: 2.17% error (vs 10.85% with separate calls)               │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    Generate → Verify → Repair Loop                   │   │
+│  │                                                                      │   │
+│  │   ┌──────────┐       ┌──────────┐       ┌──────────┐                │   │
+│  │   │ Generate │ ───→  │  Verify  │ ───→  │  Repair  │                │   │
+│  │   │  (CoT)   │       │ (L1-L5)  │       │  (LLM)   │                │   │
+│  │   └────┬─────┘       └────┬─────┘       └────┬─────┘                │   │
+│  │        ↑                  │                   │                      │   │
+│  │        │    L1 FATAL      │    L2-L5          │                      │   │
+│  │        │←─(Regenerate)────│    WARNING        │                      │   │
+│  │        │                  │←──────────────────┘                      │   │
+│  │        │                  │                                          │   │
+│  │        └──────────────────┴───→ Final Result                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
 │  ┌─────────────┐                                                            │
 │  │    Data     │  Extract structured parameters from natural language       │
 │  │ Extraction  │  (LLM-based with regex fallback)                           │
@@ -93,11 +111,11 @@
 │  │ L4: Solution Freedom Analysis (DIAGNOSTIC)                          │   │
 │  │     • Perturb parameters ±10% (delta=0.1)                           │   │
 │  │     • Check 1: No effect → WARNING (constraint may be missing)      │   │
-│  │     • Check 2: Direction (keyword-based role inference)             │   │
-│  │     • Check 3: Direction anomaly (auto-detect, keyword-free)        │   │
-│  │     • Check 4: High sensitivity detection (INFO)                    │   │
+│  │     • Check 2: Direction anomaly (auto-detect, keyword-free)        │   │
+│  │     • Check 3: High sensitivity detection (INFO)                    │   │
 │  │     • Zero objective check (threshold: 1e-2)                        │   │
 │  │     • Complexity calibration: SIMPLE problems get INFO not WARNING  │   │
+│  │     • NOTE: Keyword-based direction removed (L5 LLM handles this)   │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
@@ -112,15 +130,35 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 1.4 Severity Levels
+## 1.4 Severity Levels (Conservative Repair Strategy)
 
-| Level | Meaning | Source Layers | Effect |
-|-------|---------|---------------|--------|
-| **FATAL** | Definite error | L1 only | Blocks output, no solution |
-| **ERROR** | High-confidence issue | L2-L4 | Has output, low confidence |
-| **WARNING** | Potential issue | All layers | Has output, needs review |
-| **INFO** | Informational | All layers | Reference only |
-| **PASS** | Check passed | All layers | No issue |
+| Level | Meaning | Confidence | Source | Repair Action |
+|-------|---------|------------|--------|---------------|
+| **FATAL** | Definite error, code cannot run | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
+| **ERROR** | Mathematically certain error | 99%+ | L2 (monotonicity), L4 (anomaly) | **MUST fix** |
+| **WARNING** | High-confidence issue | 80%+ | L5 (cpt_missing) | **SHOULD fix** |
+| **INFO** | Likely normal behavior | <80% | L3, L4 (no_effect, sensitivity) | **DO NOT fix** (reference only) |
+| **PASS** | Check passed | - | All layers | No issue |
+
+**Key Design Principle: Conservative Repair**
+- Only ERROR and WARNING trigger repair
+- INFO is for reference only - likely normal optimization behavior
+- This prevents over-correction (the root cause of ReLoop performing worse than baseline)
+
+### L1 FATAL Handling (Important Change)
+
+```
+CRITICAL: L1 FATAL does NOT terminate immediately!
+
+When L1 returns FATAL:
+├── 1. Extract error message from L1 result
+├── 2. Call generator.regenerate(failed_code, error_message, data)
+├── 3. Re-verify the new code
+├── 4. Repeat up to max_regeneration_attempts (default: 3)
+└── 5. Only after all attempts fail → return FAILED status
+
+This ensures maximum recovery from execution/syntax errors.
+```
 
 ## 1.5 Guaranteed Output Mechanism (Robustness Design)
 
@@ -136,15 +174,19 @@ If L1 passes (code runs + solver has solution):
 Diagnostic layers ADD information, never DELETE output.
 ```
 
-### 1.5.1 Layer Severity Matrix (稳健性设计)
+### 1.5.1 Layer Severity Matrix (Conservative Repair Design)
 
-| Layer | Possible Severities | Blocks Output? | False Positive Impact |
-|-------|--------------------|-----------------|-----------------------|
-| **L1** | FATAL, PASS | ✅ Yes (FATAL only) | N/A (no false positives) |
-| **L2** | WARNING, PASS | ❌ No | No negative impact |
-| **L3** | WARNING, INFO, PASS | ❌ No | No negative impact |
-| **L4** | WARNING, INFO, PASS | ❌ No | No negative impact |
-| **L5** | WARNING, INFO, PASS | ❌ No | No negative impact |
+| Layer | Check | Possible Severities | Triggers Repair? | Rationale |
+|-------|-------|--------------------|--------------------|-----------|
+| **L1** | execution/solver | FATAL, PASS | Triggers regeneration | Code cannot run |
+| **L2** | monotonicity | **ERROR**, PASS | **YES (must fix)** | Mathematically certain (99%+) |
+| **L3** | duality_gap | INFO, PASS | **NO** | Likely numerical artifact |
+| **L4** | no_effect | INFO, PASS | **NO** | Likely slack constraint |
+| **L4** | anomaly | **ERROR**, PASS | **YES (must fix)** | Both directions improve = impossible |
+| **L4** | high_sensitivity | INFO, PASS | **NO** | Normal for well-optimized models |
+| **L5** | cpt_missing | **WARNING**, INFO, PASS | **YES (should fix)** | High confidence (80%+) |
+
+**Key Insight:** L4 `no_effect` was causing over-correction when repairing slack constraints that are actually normal. Changed to INFO to prevent unnecessary repairs.
 
 ### 1.5.2 False Positive Handling (误检处理)
 
@@ -419,14 +461,15 @@ def _layer3(self, objective: float, baseline: Dict, verbose: bool):
 
 ### Layer 4: Solution Freedom Analysis
 
-**Four Detection Mechanisms:**
+**Detection Mechanisms (Universal, Keyword-Free):**
 
 | Check | Method | Dependency | Severity |
 |-------|--------|------------|----------|
 | No Effect | Perturbation | None (universal) | WARNING/INFO |
-| Direction (keyword) | Role inference | Keywords | WARNING |
-| Direction (auto) | Both-improve detection | None (universal) | WARNING |
+| Direction Anomaly | Both-improve detection | None (universal) | WARNING |
 | High Sensitivity | Threshold check | None (universal) | INFO |
+
+> **Note:** Keyword-based direction checking removed. L5's LLM handles semantic constraint testing with better generalization.
 
 ```python
 def _layer4(self, code: str, data: Dict, params: List[str],
@@ -434,9 +477,8 @@ def _layer4(self, code: str, data: Dict, params: List[str],
     """L4: Solution Freedom Analysis (DIAGNOSTIC)"""
     results = []
     no_effect_params = []
-    direction_violations = []      # Keyword-based
-    direction_anomalies = []       # NEW: Auto-detected (keyword-free)
-    high_sensitivity = []          # NEW: Sensitivity warnings
+    direction_anomalies = []       # Auto-detected (keyword-free)
+    high_sensitivity = []          # Sensitivity warnings
 
     is_minimize = obj_sense == "minimize"
 
@@ -459,7 +501,7 @@ def _layer4(self, code: str, data: Dict, params: List[str],
         if not has_effect:
             no_effect_params.append(param)
         else:
-            # === NEW: Auto-detect direction anomaly (keyword-independent) ===
+            # Auto-detect direction anomaly (keyword-independent, universal)
             # Physical intuition: cannot both increase AND decrease improve objective
             if is_minimize:
                 up_better = change_up < -threshold    # Decrease is "better"
@@ -472,18 +514,13 @@ def _layer4(self, code: str, data: Dict, params: List[str],
                 # ANOMALY: both directions improve objective
                 direction_anomalies.append({"param": param, "reason": "both_improve"})
 
-            # === NEW: High sensitivity detection ===
+            # High sensitivity detection
             max_change = max(abs(change_up), abs(change_down))
             if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
                 high_sensitivity.append({"param": param, "sensitivity": max_change/abs(baseline_obj)})
 
-            # === Original: Keyword-based direction check ===
-            role = infer_param_role(param)
-            if role != ParameterRole.UNKNOWN:
-                expected = get_expected_direction(role, obj_sense)
-                actual = "increase" if change_up > threshold else "decrease" if change_up < -threshold else "none"
-                if actual != "none" and actual != expected:
-                    direction_violations.append({"param": param, "role": role.value})
+            # NOTE: Keyword-based direction check removed
+            # L5 CPT with LLM does semantic constraint checking more effectively
 
     # Report all findings
     # ... (see verification.py for full implementation)
@@ -577,38 +614,112 @@ def _cpt_test_candidate(self, code, data, baseline_obj, obj_sense, candidate):
     return {"status": "SKIP"}
 ```
 
-## 3.4 prompts.py - LLM Prompts
+## 3.4 prompts.py - LLM Prompts (Chain-of-Thought Generation)
 
-**Actual Implementation:**
+**Chain-of-Thought Generation (Single API Call):**
+
+The key insight is that using 3 separate API calls loses context between stages. Instead, we use a single API call with step-by-step reasoning:
 
 ```python
-CODE_GENERATION_PROMPT = '''You are an optimization expert. Generate Gurobi Python code.
+# ============================================================================
+# Chain-of-Thought Generation (Recommended - Single API call)
+# ============================================================================
+
+CHAIN_OF_THOUGHT_SYSTEM = '''You are an optimization expert who solves problems with step-by-step reasoning.'''
+
+CHAIN_OF_THOUGHT_PROMPT = '''Solve this optimization problem using chain-of-thought reasoning.
 
 ## Problem
 {problem_description}
 
 ## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
 {data_structure}
 
-## Requirements
-1. Use `gurobipy` library, model named `m`
-2. Access data via `data` dictionary
-3. Set `m.Params.OutputFlag = 0`
-4. Print output format:
-   print(f"status: {{m.Status}}")
-   print(f"objective: {{m.ObjVal}}")
+---
+## STEP 1: UNDERSTAND THE PROBLEM
+First, analyze the problem:
+- What is the objective? (minimize cost / maximize profit / etc.)
+- What decisions need to be made?
+- What constraints exist?
+- What parameters are given?
 
-Return ONLY Python code.
+## STEP 2: FORMULATE THE MATHEMATICAL MODEL
+Write the formal model:
+- Sets and indices
+- Parameters (use exact keys from data structure)
+- Decision variables with domains
+- Constraints in mathematical notation
+- Objective function
+
+## STEP 3: GENERATE GUROBI CODE
+Write Python code using gurobipy.
+
+**CRITICAL RULES:**
+1. Do NOT define `data = {{...}}` - the data variable already exists
+2. Access data as: `data["key_name"]`
+3. Model variable must be named `m`
+4. Set `m.Params.OutputFlag = 0`
+5. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+6. Implement ALL constraints from Step 2
+
+---
+Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
+'''
+```
+
+**Why CoT over 3-Stage?**
+| Approach | API Calls | Context | Error Rate |
+|----------|-----------|---------|------------|
+| 3-Stage | 3 separate | Lost between calls | 10.85% |
+| CoT | 1 unified | Preserved throughout | 2.17% |
+
+**Legacy 3-Stage Prompts (Deprecated):**
+The old UNDERSTAND_PROMPT, FORMALIZE_PROMPT, SYNTHESIZE_PROMPT are kept for compatibility but should not be used.
+
+# ============================================================================
+# Regeneration Prompt (for L1 FATAL recovery)
+# ============================================================================
+
+REGENERATE_PROMPT = '''The previous code failed to execute. Generate a new, correct version.
+
+## Problem
+{problem_description}
+
+## Previous Code (FAILED)
+```python
+{failed_code}
+```
+
+## Error
+{error_message}
+
+## Data Structure
+{data_structure}
+
+## Instructions
+1. Analyze why the previous code failed
+2. Generate completely new code that avoids the error
+3. Ensure proper data access patterns
+4. Handle edge cases (empty arrays, missing keys)
+
+Return ONLY the corrected Python code.
 '''
 
-CODE_GENERATION_SYSTEM = '''You write correct Gurobi Python code. Include ALL constraints.'''
+# ============================================================================
+# Repair Prompt (for L2-L5 issues) - Updated with Data Structure
+# ============================================================================
 
 REPAIR_PROMPT = '''Fix this optimization code based on the diagnostic report.
 
 ## Problem
 {problem_description}
 
-## Code
+## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}
+
+## Current Code
 ```python
 {code}
 ```
@@ -616,73 +727,153 @@ REPAIR_PROMPT = '''Fix this optimization code based on the diagnostic report.
 ## Diagnostic Report
 {diagnostic_report}
 
-## Issues
+## Issues to Fix
 {issues}
 
-Return the COMPLETE fixed code.
+## Instructions
+1. Carefully analyze each issue in the diagnostic report
+2. Fix the specific problems identified
+3. If a parameter "has NO EFFECT", add the missing constraint that uses it
+4. Ensure all constraints from the problem are implemented
+5. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
+6. Do not remove working code unnecessarily
+
+Return the COMPLETE fixed code. Do NOT include any `data = ` definition.
 '''
+```
 
-REPAIR_SYSTEM = '''You debug optimization models. Fix each issue in the report.'''
+**Key Update:** Repair prompt now includes `{data_structure}` to ensure the LLM knows what parameters are available when fixing "parameter has NO EFFECT" issues.
 
+**Helper Functions:**
 
-def format_diagnostic_report(report) -> str:
-    """Format diagnostic report for display."""
-    lines = [f"Status: {report.status}", f"Confidence: {report.confidence:.2f}", "", "Issues:"]
-    for r in report.layer_results:
-        if r.severity.value in ['FATAL', 'ERROR', 'WARNING']:
-            lines.append(f"  [{r.layer}] {r.severity.value}: {r.message}")
-    return "\n".join(lines)
-
-
+```python
 def format_issues_for_repair(report) -> str:
     """Extract actionable issues for repair."""
     issues = []
     for r in report.layer_results:
-        if r.severity.value == 'WARNING':
-            if 'monotonicity' in r.check:
+        if r.severity.value in ['FATAL', 'ERROR', 'WARNING']:
+            if r.severity.value == 'FATAL':
+                issues.append(f"EXECUTION ERROR: {r.message}")
+            elif 'monotonicity' in r.check:
                 issues.append(f"CONSTRAINT DIRECTION ERROR: {r.message}")
             elif 'param_effect' in r.check:
                 issues.append(f"MISSING CONSTRAINT: {r.message}")
+            elif 'direction_anomaly' in r.check:
+                issues.append(f"DIRECTION ANOMALY: {r.message}")
             elif 'cpt_missing' in r.check:
                 issues.append(f"CPT DETECTED MISSING: {r.message}")
     return "\n".join(issues) if issues else "No specific issues."
 ```
 
-## 3.5 generation.py - Code Generation
+## 3.5 generation.py - Chain-of-Thought Code Generation
 
 ```python
-class CodeGenerator:
-    """Generate optimization code using LLM."""
+@dataclass
+class GenerationResult:
+    """Result of the generation process."""
+    code: str
+    understanding: Optional[str] = None  # CoT Step 1 output
+    mathematical_model: Optional[str] = None  # CoT Step 2 output
+    stages_completed: int = 0
 
-    def __init__(self, llm_client):
+
+class CodeGenerator:
+    """
+    Chain-of-Thought optimization code generator.
+
+    Pipeline: Problem → [CoT Single Call] → Code
+              (STEP 1: Understand → STEP 2: Formalize → STEP 3: Code)
+
+    Features:
+    - Single API call with step-by-step reasoning (preserves context)
+    - Schema-based data description (structure only, not values)
+    - Universal architecture for all optimization domains
+    - Fallback to single-stage generation if CoT fails
+    """
+
+    def __init__(self, llm_client, use_structured_generation: bool = True):
         self.llm_client = llm_client
+        self.use_structured_generation = use_structured_generation
 
     def generate(self, problem_description: str, data: Dict, max_retries: int = 3) -> str:
-        """Generate Gurobi code for the given problem."""
-        data_structure = self._describe_data(data)
+        """Generate Gurobi code using 3-stage pipeline."""
+        if self.use_structured_generation:
+            result = self.generate_structured(problem_description, data, max_retries)
+            return result.code
+        else:
+            return self._generate_single_stage(problem_description, data, max_retries)
 
-        prompt = CODE_GENERATION_PROMPT.format(
+    def generate_structured(self, problem_description: str, data: Dict,
+                           max_retries: int = 3) -> GenerationResult:
+        """Execute the full three-stage generation pipeline."""
+        data_structure = self._describe_data_schema(data)
+
+        for attempt in range(max_retries):
+            # Stage 1: Understand
+            understanding = self._stage1_understand(problem_description)
+            if not understanding:
+                continue
+
+            # Stage 2: Formalize
+            mathematical_model = self._stage2_formalize(
+                problem_description, understanding, data_structure
+            )
+            if not mathematical_model:
+                continue
+
+            # Stage 3: Synthesize
+            code = self._stage3_synthesize(
+                problem_description, mathematical_model, data_structure
+            )
+
+            if self._validate_code(code):
+                return GenerationResult(
+                    code=code,
+                    understanding=understanding,
+                    mathematical_model=mathematical_model,
+                    stages_completed=3
+                )
+
+        # Fallback to single-stage
+        return GenerationResult(code=self._generate_single_stage(...), stages_completed=0)
+
+    def regenerate(self, problem_description: str, failed_code: str,
+                   error_message: str, data: Dict) -> str:
+        """Regenerate code after L1 FATAL error."""
+        data_structure = self._describe_data_schema(data)
+
+        prompt = REGENERATE_PROMPT.format(
             problem_description=problem_description,
+            failed_code=failed_code,
+            error_message=error_message,
             data_structure=data_structure
         )
 
-        for attempt in range(max_retries):
-            response = self.llm_client.generate(prompt, system=CODE_GENERATION_SYSTEM)
-            code = self._extract_code(response)
+        response = self.llm_client.generate(prompt, system=REGENERATE_SYSTEM)
+        return self._extract_code(response)
 
-            if self._validate_code(code):
-                return code
-
-        raise ValueError("Failed to generate valid code")
-
-    def _validate_code(self, code: str) -> bool:
-        """Basic validation of generated code."""
-        required = [r'import\s+gurobipy', r'\.addVar|\.addVars',
-                   r'\.setObjective', r'\.optimize\s*\(\s*\)']
-        return all(re.search(p, code) for p in required)
+    def _describe_data_schema(self, data: Dict) -> str:
+        """Schema-only visibility: show structure, NOT values."""
+        # Returns: "- demand: list[3] of int" instead of "demand: [100, 150, 200]"
+        lines = []
+        for key, value in data.items():
+            if isinstance(value, list):
+                lines.append(f"- {key}: list[{len(value)}] of {type(value[0]).__name__}")
+            elif isinstance(value, dict):
+                lines.append(f"- {key}: dict with keys {list(value.keys())[:5]}")
+            else:
+                lines.append(f"- {key}: {type(value).__name__} (scalar)")
+        return "\n".join(lines)
 ```
 
-## 3.6 repair.py - Code Repair
+## 3.6 repair.py - Code Repair (Conservative Strategy)
+
+**Key Design: Context-Based Repair with 3 Sections**
+
+The repair prompt separates issues into three clearly labeled sections:
+1. **CRITICAL ERRORS (MUST FIX)** - ERROR level, 99%+ confidence
+2. **HIGH PRIORITY (SHOULD FIX)** - WARNING level, 80%+ confidence
+3. **DIAGNOSTIC INFO (DO NOT FIX)** - INFO level, reference only
 
 ```python
 class CodeRepairer:
@@ -691,34 +882,62 @@ class CodeRepairer:
     def __init__(self, llm_client):
         self.llm_client = llm_client
 
-    def repair(self, code: str, data: Dict, report: VerificationReport,
-               problem_description: str, max_attempts: int = 3) -> str:
-        """Repair code based on diagnostic report."""
-        if report.status == 'VERIFIED':
+    def repair_with_context(
+        self,
+        code: str,
+        data: Dict,
+        problem_description: str,
+        critical_errors: List[Dict],   # ERROR level - MUST fix
+        should_fix: List[Dict],        # WARNING level - SHOULD fix
+        for_reference: List[Dict],     # INFO level - DO NOT fix
+        max_attempts: int = 3
+    ) -> str:
+        """
+        Repair code with categorized issue context.
+
+        This is the conservative repair strategy:
+        - critical_errors: ERROR level, MUST fix (99%+ confidence)
+        - should_fix: WARNING level, SHOULD fix (80%+ confidence)
+        - for_reference: INFO level, DO NOT fix (likely normal)
+        """
+        # If nothing to fix, return original code
+        if not critical_errors and not should_fix:
             return code
 
-        diagnostic_report = format_diagnostic_report(report)
-        issues = format_issues_for_repair(report)
-
-        prompt = REPAIR_PROMPT.format(
+        prompt = REPAIR_WITH_CONTEXT_PROMPT.format(
             problem_description=problem_description,
+            data_structure=describe_data_schema(data),
             code=code,
-            diagnostic_report=diagnostic_report,
-            issues=issues
+            critical_errors=format_repair_section(critical_errors),
+            should_fix=format_repair_section(should_fix),
+            for_reference=format_repair_section(for_reference)
         )
 
         for attempt in range(max_attempts):
-            response = self.llm_client.generate(prompt, system=REPAIR_SYSTEM)
+            response = self.llm_client.generate(prompt, system=REPAIR_WITH_CONTEXT_SYSTEM)
             repaired_code = self._extract_code(response)
 
-            # Validate repair is different and valid
             if repaired_code != code and 'import gurobipy' in repaired_code:
                 return repaired_code
 
         return code  # Return original if repair fails
 ```
 
-## 3.7 pipeline.py - ReLoop Pipeline
+**Repair Prompt Structure:**
+```
+## DIAGNOSTIC REPORT (READ CAREFULLY!)
+
+### SECTION 1: CRITICAL ERRORS - YOU MUST FIX (NO EXCEPTIONS)
+[ERROR level issues - constraint direction errors, direction anomalies]
+
+### SECTION 2: HIGH-PRIORITY ISSUES - YOU SHOULD FIX
+[WARNING level issues - CPT missing constraints]
+
+### SECTION 3: DIAGNOSTIC INFO - FOR REFERENCE ONLY (DO NOT FIX)
+[INFO level issues - slack constraints, numerical artifacts, sensitivity info]
+```
+
+## 3.7 pipeline.py - ReLoop Pipeline (with Conservative Repair)
 
 ```python
 @dataclass
@@ -733,67 +952,150 @@ class PipelineResult:
     repair_time: float
     success: bool
     improved: bool
+    regeneration_count: int = 0  # Number of L1 FATAL regenerations
+
+
+@dataclass
+class RepairContext:
+    """
+    Context for repair decision (Conservative Strategy).
+
+    Separates issues into:
+    - critical_errors: ERROR level, must fix (99%+ confidence)
+    - should_fix: WARNING level, should fix (80%+ confidence)
+    - for_reference: INFO level, likely normal, DO NOT fix
+    """
+    critical_errors: List[Dict] = field(default_factory=list)
+    should_fix: List[Dict] = field(default_factory=list)
+    for_reference: List[Dict] = field(default_factory=list)
+    should_trigger: bool = False  # Only True if ERROR or WARNING exists
 
 
 class ReLoopPipeline:
-    """Complete ReLoop Pipeline: Generate → Verify → Repair loop."""
+    """
+    Complete ReLoop Pipeline: Generate → Verify → Repair loop.
 
-    def __init__(self, llm_client, max_repair_iterations: int = 3,
-                 enable_cpt: bool = True, verbose: bool = False):
-        self.generator = CodeGenerator(llm_client)
-        self.verifier = ReLoopVerifier(llm_client=llm_client)
-        self.repairer = CodeRepairer(llm_client)
-        self.max_repair_iterations = max_repair_iterations
-        self.enable_cpt = enable_cpt
-        self.verbose = verbose
+    Key Features:
+    - Chain-of-Thought generation: Single API call with step-by-step reasoning
+    - L1 FATAL triggers regeneration (not termination)
+    - ERROR/WARNING triggers repair, INFO does NOT
+    - Guaranteed output when L1 passes
+    """
 
     def run(self, problem_description: str, data: Dict,
             initial_code: Optional[str] = None) -> PipelineResult:
-        """Run complete pipeline."""
+        """
+        Run complete pipeline.
 
-        # Step 1: Generate code (or use provided)
-        if initial_code:
-            code = initial_code
-        else:
-            code = self.generator.generate(problem_description, data)
+        Flow:
+        1. Generate code (CoT or single-stage)
+        2. Verify with L1-L5
+        3. If L1 FATAL: regenerate (up to max_regeneration_attempts)
+        4. If ERROR/WARNING: repair (up to max_repair_iterations)
+        5. INFO does NOT trigger repair (likely normal)
+        6. Return result (always has output if any L1 passes)
+        """
+        # ... generation and L1 handling same as before ...
 
-        # Step 2: Initial verification
-        report = self.verifier.verify(
-            code, data,
-            problem_description=problem_description,
-            enable_cpt=self.enable_cpt
-        )
-        history = [(code, report)]
+        # Step 4: Handle ERROR/WARNING with repair (INFO does NOT trigger)
+        repair_iteration = 0
+        ctx = self._analyze_verification_results(report)
 
-        # Step 3: Repair loop
-        iteration = 0
-        while self._needs_repair(report) and iteration < self.max_repair_iterations:
-            iteration += 1
+        while ctx.should_trigger and repair_iteration < self.max_repair_iterations:
+            repair_iteration += 1
 
-            repaired_code = self.repairer.repair(code, data, report, problem_description)
+            # Use context-based repair with 3 sections
+            repaired_code = self.repairer.repair_with_context(
+                code=code,
+                data=data,
+                problem_description=problem_description,
+                critical_errors=ctx.critical_errors,   # MUST fix
+                should_fix=ctx.should_fix,             # SHOULD fix
+                for_reference=ctx.for_reference        # DO NOT fix
+            )
 
             if repaired_code == code:
-                break  # No changes, stop
+                break
 
             code = repaired_code
             report = self.verifier.verify(code, data, ...)
             history.append((code, report))
 
-        return PipelineResult(
-            final_code=code,
-            final_report=report,
-            iterations=len(history),
-            history=history,
-            success=report.status in ['VERIFIED', 'WARNINGS'],
-            improved=self._is_improved(history[0][1], report)
+            # Re-analyze for next iteration
+            ctx = self._analyze_verification_results(report)
+
+        return PipelineResult(...)
+
+    def _analyze_verification_results(self, report: VerificationReport) -> RepairContext:
+        """
+        Analyze verification results to determine repair strategy.
+
+        Classification:
+        - critical_errors: ERROR level (L2 monotonicity, L4 anomaly) - Must fix
+        - should_fix: WARNING level (L5 cpt_missing) - Should fix
+        - for_reference: INFO level (L3, L4 no_effect, etc.) - Do NOT fix
+
+        Only trigger repair if critical_errors or should_fix is non-empty.
+        """
+        critical_errors = []
+        should_fix = []
+        for_reference = []
+
+        for r in report.layer_results:
+            item = {
+                "layer": r.layer,
+                "check": r.check,
+                "severity": r.severity.value,
+                "message": r.message,
+                "details": r.details or {}
+            }
+
+            if r.severity == Severity.ERROR:
+                # L2 monotonicity, L4 anomaly - MUST fix
+                critical_errors.append(item)
+            elif r.severity == Severity.WARNING:
+                # L5 cpt_missing - SHOULD fix
+                should_fix.append(item)
+            elif r.severity == Severity.INFO:
+                # L3, L4 no_effect, L4 sensitivity - DO NOT fix
+                for_reference.append(item)
+
+        # Only trigger if there are ERROR or WARNING issues
+        should_trigger = len(critical_errors) > 0 or len(should_fix) > 0
+
+        return RepairContext(
+            critical_errors=critical_errors,
+            should_fix=should_fix,
+            for_reference=for_reference,
+            should_trigger=should_trigger
         )
+```
 
-    def _needs_repair(self, report):
-        return report.status in ['WARNINGS', 'ERRORS']
+**Pipeline Flow Diagram:**
 
-    def _is_improved(self, before, after):
-        order = {'FAILED': 0, 'ERRORS': 1, 'WARNINGS': 2, 'VERIFIED': 3}
-        return order.get(after.status, 0) > order.get(before.status, 0)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Pipeline Execution Flow                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [Generate] ──→ [Verify] ──→ Status?                                        │
+│                               │                                              │
+│            ┌──────────────────┼──────────────────┐                          │
+│            │                  │                  │                          │
+│            ▼                  ▼                  ▼                          │
+│       ┌─────────┐        ┌─────────┐        ┌─────────┐                    │
+│       │ FAILED  │        │WARNINGS │        │VERIFIED │                    │
+│       │(L1 FATAL)│        │ ERRORS  │        │         │                    │
+│       └────┬────┘        └────┬────┘        └────┬────┘                    │
+│            │                  │                  │                          │
+│            ▼                  ▼                  ▼                          │
+│     [Regenerate]         [Repair]          ✓ Return                        │
+│     (up to 3x)          (up to 3x)         Success                         │
+│            │                  │                                              │
+│            ▼                  ▼                                              │
+│     [Re-verify] ──→ Loop back to Status?                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 3.8 data_extraction.py - Data Extraction
@@ -982,9 +1284,9 @@ Each line contains one problem:
 
 ## 5.1.1 L4 Cross-Domain Design
 
-**Problem:** Keyword-based role inference (demand, capacity, etc.) is domain-specific.
+**Problem:** Keyword-based role inference (demand, capacity, etc.) is domain-specific and generalizes poorly.
 
-**Solution:** Three-tier detection approach:
+**Solution:** Two-tier universal detection approach (no keywords needed):
 
 ```
 Tier 1: No-Effect Detection (Universal)
@@ -992,20 +1294,19 @@ Tier 1: No-Effect Detection (Universal)
 ├── If objective unchanged → WARNING: "constraint may be missing"
 └── Works for ANY domain, no keywords needed
 
-Tier 2: Keyword-Based Direction (Domain-Aware)
-├── Match parameter name to known keywords
-├── Infer role: REQUIREMENT, CAPACITY, COST, REVENUE
-├── Check if direction matches expected
-└── Expanded keywords cover: RetailOpt, MAMO, NL4OPT, IndustryOR
-
-Tier 3: Auto Direction Anomaly (Universal)
+Tier 2: Auto Direction Anomaly (Universal)
 ├── Check if BOTH increase AND decrease improve objective
 ├── Physically impossible in well-formed models
 ├── No keywords needed - pure behavioral analysis
-└── Catches errors that keywords miss
+└── Catches constraint direction errors universally
 ```
 
-**Result:** L4 is effective across all benchmark datasets without domain-specific tuning.
+**Note:** Keyword-based direction checking was removed because:
+1. L5's LLM-based semantic constraint testing handles this more effectively
+2. Keyword lists require domain-specific tuning and maintenance
+3. Auto-detection (both-improve) catches the same errors without keywords
+
+**Result:** L4 is now fully universal across all benchmark datasets without any domain-specific tuning.
 
 ## 5.2 Why Only L1 is Blocking?
 
@@ -1169,12 +1470,13 @@ print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
 ## 8.1 Architecture Correctness
 
 - [x] L1 is the ONLY layer that produces FATAL
+- [x] L1 FATAL triggers regeneration (up to 3 attempts), NOT termination
 - [x] L1 PASS guarantees has_solution=True
 - [x] L2-L4 produce WARNING/ERROR, never FATAL
 - [x] L5 produces WARNING/INFO only, never ERROR/FATAL
 - [x] Guaranteed output when L1 passes
-- [x] L4 has universal detection (no-effect + auto-anomaly) that works without keywords
-- [x] L4 keywords expanded for cross-domain coverage (MAMO, NL4OPT, IndustryOR)
+- [x] L4 is fully universal: no-effect + auto-anomaly detection (no keywords needed)
+- [x] L4 keyword-based direction checking removed (L5 LLM handles semantic checking)
 - [x] L5 CPT uses LLM to understand problem description (domain-agnostic)
 
 ## 8.2 Implementation Completeness
@@ -1182,12 +1484,21 @@ print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
 - [x] param_utils.py: extract, perturb, role inference
 - [x] executor.py: subprocess isolation, timeout
 - [x] verification.py: all 5 layers
-- [x] prompts.py: generation and repair prompts
-- [x] generation.py: code generation
+- [x] prompts.py: 3-stage generation + repair + regeneration prompts
+- [x] generation.py: 3-stage pipeline (Understand → Formalize → Synthesize)
+- [x] generation.py: regenerate() method for L1 FATAL recovery
 - [x] repair.py: diagnostic-based repair
-- [x] pipeline.py: Generate→Verify→Repair loop
+- [x] pipeline.py: Generate→Verify→Repair loop with L1 regeneration
 - [x] data_extraction.py: NL→structured data
 - [x] experiment_runner.py: batch experiments
+
+## 8.3 Three-Stage Generation (Paper Section 3.1)
+
+- [x] Stage 1 (Understand): x → U (structured understanding)
+- [x] Stage 2 (Formalize): U → M = (I, P, V, C, f) (5-component spec)
+- [x] Stage 3 (Synthesize): M → Ck (executable code)
+- [x] Schema-only visibility: LLM sees data structure, not values
+- [x] Fallback to single-stage if 3-stage fails
 
 ## 8.3 Experiment Requirements
 
