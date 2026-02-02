@@ -95,7 +95,7 @@
 │  │ L2: Relaxation Monotonicity (DIAGNOSTIC)                            │   │
 │  │     • Tighten parameters by 20% (delta=0.2)                         │   │
 │  │     • Check: objective should worsen                                │   │
-│  │     • Violation → WARNING (constraint direction error)              │   │
+│  │     • Violation → ERROR (constraint direction error, 99%+ certain)  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
@@ -103,7 +103,7 @@
 │  │ L3: Dual Consistency (DIAGNOSTIC)                                   │   │
 │  │     • Check primal-dual gap (threshold: 1%)                         │   │
 │  │     • Check shadow price signs                                      │   │
-│  │     • Large gap → WARNING (numerical or constraint issue)           │   │
+│  │     • Large gap → INFO (likely numerical artifact, no repair)       │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
@@ -465,9 +465,9 @@ def _layer3(self, objective: float, baseline: Dict, verbose: bool):
 
 | Check | Method | Dependency | Severity |
 |-------|--------|------------|----------|
-| No Effect | Perturbation | None (universal) | WARNING/INFO |
-| Direction Anomaly | Both-improve detection | None (universal) | WARNING |
-| High Sensitivity | Threshold check | None (universal) | INFO |
+| No Effect | Perturbation | None (universal) | **INFO** (likely slack) |
+| Direction Anomaly | Both-improve detection | None (universal) | **ERROR** (99%+ certain) |
+| High Sensitivity | Threshold check | None (universal) | **INFO** (normal behavior) |
 
 > **Note:** Keyword-based direction checking removed. L5's LLM handles semantic constraint testing with better generalization.
 
@@ -606,10 +606,16 @@ def _cpt_test_candidate(self, code, data, baseline_obj, obj_sense, candidate):
     new_obj = result.get("objective")
     if new_obj is not None:
         change_ratio = abs(new_obj - baseline_obj) / max(abs(baseline_obj), 1.0)
-        if change_ratio > 0.5:
-            return {"status": "SATISFIED"}
+        # Updated thresholds: 5% / 30%
+        if change_ratio < 0.05:
+            # < 5%: Constraint likely missing → WARNING (should fix)
+            return {"status": "MISSING", "severity": "WARNING", "description": candidate.get("description")}
+        elif change_ratio < 0.30:
+            # 5-30%: Uncertain → INFO (reference only)
+            return {"status": "UNCERTAIN", "severity": "INFO"}
         else:
-            return {"status": "MISSING", "description": candidate.get("description")}
+            # > 30%: Constraint present → PASS
+            return {"status": "SATISFIED"}
 
     return {"status": "SKIP"}
 ```
@@ -662,6 +668,16 @@ Write Python code using gurobipy.
 4. Set `m.Params.OutputFlag = 0`
 5. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
 6. Implement ALL constraints from Step 2
+
+**Big-M Guidelines (if using indicator/logical constraints):**
+- NEVER hardcode Big-M values like `M = 1e6`
+- ALWAYS compute M dynamically from data: `M = sum(data["demand"]) * 1.5`
+- Use problem-relevant parameters for M calculation
+
+**Edge Case Handling:**
+- Check array length before iteration: `if data["items"]: ...`
+- Avoid division by zero: `max(value, 1e-6)`
+- Use `.get()` for optional keys: `data.get("key", default)`
 
 ---
 Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
@@ -866,6 +882,23 @@ class CodeGenerator:
         return "\n".join(lines)
 ```
 
+**Schema-Only Visibility Design:**
+
+The LLM sees only the data schema (keys, types, dimensions), NOT actual values. This enables:
+1. **Prevents hardcoding**: LLM cannot embed specific values in generated code
+2. **Supports perturbation testing**: L2-L5 verification relies on modifying data values
+3. **Generalization**: Generated code works with any data conforming to the schema
+
+**Big-M Guidelines (for indicator/logical constraints):**
+- NEVER hardcode Big-M values like `M = 1e6`
+- ALWAYS compute M dynamically: `M = sum(data["demand"]) * 1.5`
+- Use problem-relevant parameters for M calculation
+
+**Edge Case Handling:**
+- Check array length: `if data["items"]: ...`
+- Avoid division by zero: `max(value, 1e-6)`
+- Use `.get()` for optional keys: `data.get("key", default)`
+
 ## 3.6 repair.py - Code Repair (Conservative Strategy)
 
 **Key Design: Context-Based Repair with 3 Sections**
@@ -910,7 +943,7 @@ class CodeRepairer:
             code=code,
             critical_errors=format_repair_section(critical_errors),
             should_fix=format_repair_section(should_fix),
-            for_reference=format_repair_section(for_reference)
+            for_reference=format_reference_section(for_reference)  # Special formatting for INFO
         )
 
         for attempt in range(max_attempts):
