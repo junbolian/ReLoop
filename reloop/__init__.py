@@ -12,10 +12,7 @@ from .verification import (
 from .executor import CodeExecutor
 
 from .param_utils import (
-    ParameterRole,
     extract_numeric_params,
-    infer_param_role,
-    get_expected_direction,
     perturb_param,
     set_param,
     should_skip_param,
@@ -24,9 +21,16 @@ from .param_utils import (
 
 from .generation import CodeGenerator, GenerationResult
 
-from .repair import CodeRepairer
+from .repair import CodeRepairer, RepairResult
 
-from .pipeline import ReLoopPipeline, PipelineResult, run_reloop
+from .l4_adversarial import (
+    L4AdversarialVerifier,
+    L4VerifyResult,
+    L4RepairDecision,
+    should_exit_l4_loop,
+)
+
+from .pipeline import ReLoopPipeline, PipelineResult, RepairContext, run_reloop
 
 from .data_extraction import DataExtractor, extract_data_from_question
 
@@ -49,10 +53,7 @@ __all__ = [
     # Executor
     "CodeExecutor",
     # Parameter utilities
-    "ParameterRole",
     "extract_numeric_params",
-    "infer_param_role",
-    "get_expected_direction",
     "perturb_param",
     "set_param",
     "should_skip_param",
@@ -62,9 +63,16 @@ __all__ = [
     "GenerationResult",
     # Repair
     "CodeRepairer",
+    "RepairResult",
+    # L4 Adversarial
+    "L4AdversarialVerifier",
+    "L4VerifyResult",
+    "L4RepairDecision",
+    "should_exit_l4_loop",
     # Pipeline
     "ReLoopPipeline",
     "PipelineResult",
+    "RepairContext",
     "run_reloop",
     # Data Extraction
     "DataExtractor",

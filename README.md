@@ -30,17 +30,88 @@ The **RetailOpt-190** benchmark is a key contribution of this paper, featuring:
 
 ## Overview
 
-ReLoop is a behavioral verification framework that detects **silent failures** in LLM-generated optimization code—code that executes successfully but produces incorrect results. Our key insight is that correct optimization models satisfy fundamental mathematical invariants (relaxation monotonicity, strong duality, solution freedom) that can be tested without ground truth.
+ReLoop is a behavioral verification framework that detects **silent failures** in LLM-generated optimization code—code that executes successfully but produces incorrect results. Our key insight is that correct optimization models satisfy fundamental mathematical invariants (anomaly detection, dual consistency, direction analysis, constraint presence) that can be tested without ground truth.
 
 **Key Results:**
 - 94% detection rate for silent failures
 - 3% false positive rate on correct code
 - No ground truth required for verification
 
-**Key Features:**
-- **Three-Stage Structured Generation**: Understand → Formalize → Synthesize pipeline
-- **L1 FATAL Recovery**: Automatic regeneration on execution errors (up to 3 attempts)
-- **Cross-Domain Universal**: Works on all benchmark datasets without domain-specific tuning
+---
+
+## Framework Architecture
+
+> 📄 **Full architecture diagram:** [fig/Reloop_framework.pdf](fig/Reloop_framework.pdf)
+>
+> *Download the PDF for the complete visual architecture used in the paper.*
+
+### Pipeline Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           ReLoop Pipeline                                     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    GENERATION (Chain-of-Thought)                     │    │
+│  │  Problem → [Understand] → [Formalize] → [Synthesize] → Gurobi Code  │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    5-LAYER VERIFICATION                              │    │
+│  │                                                                      │    │
+│  │  L1: Execution & Solver ─────────────────────────────┐              │    │
+│  │      (Blocking: FATAL → Regenerate up to 3x)         │              │    │
+│  │                                                       ▼              │    │
+│  │  L2: Anomaly Detection ──────────────────────────────┤              │    │
+│  │      (Both ↑↓ improve → ERROR)                        │              │    │
+│  │                                                       ▼              │    │
+│  │  L3: Dual Consistency ───────────────────────────────┤              │    │
+│  │      (Primal-dual gap → INFO)                         │              │    │
+│  │                                                       ▼              │    │
+│  │  L4: Adversarial Direction ──────────────────────────┤              │    │
+│  │      (LLM debate: verify ↔ repair → Accept/Reject)    │              │    │
+│  │                                                       ▼              │    │
+│  │  L5: Constraint Presence Test ───────────────────────┘              │    │
+│  │      (LLM-based CPT → WARNING/INFO)                                 │    │
+│  │                                                                      │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    DIAGNOSTIC-BASED REPAIR                           │    │
+│  │                                                                      │    │
+│  │  ERROR (L2 anomaly) ─────────────────────→ MUST fix                 │    │
+│  │  WARNING (L4 accepted, L5 missing) ──────→ SHOULD fix               │    │
+│  │  INFO (L2 no_effect, L3, L4 rejected) ───→ Reference only           │    │
+│  │                                                                      │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 ▼                                            │
+│                          [Verified Code]                                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+| Component | Description |
+|-----------|-------------|
+| **Chain-of-Thought Generation** | 3-stage structured generation: Understand → Formalize → Synthesize |
+| **L1 Execution & Solver** | Syntax, runtime, and solver status checks (FATAL → regeneration) |
+| **L2 Anomaly Detection** | Bidirectional perturbation: if both ↑ and ↓ improve objective → ERROR |
+| **L3 Dual Consistency** | Primal-dual gap verification (numerical tolerance: 1e-4) |
+| **L4 Adversarial Direction** | LLM-based debate between verify and repair roles with Accept/Reject |
+| **L5 Constraint Presence Test** | LLM-based verification of expected constraints in generated code |
+| **Diagnostic-Based Repair** | Conservative strategy: only ERROR/WARNING trigger repair, INFO is reference only |
+
+### Design Principles
+
+1. **Universal Verification**: All checks work without ground truth or domain-specific rules
+2. **Conservative Repair**: Only high-confidence issues (ERROR/WARNING) trigger repairs
+3. **Robustness Guarantee**: L1 FATAL triggers regeneration; L2-L5 are diagnostic only
+4. **LLM-Only Analysis**: No keyword-based heuristics; all semantic analysis uses LLM
 
 ---
 
@@ -134,14 +205,17 @@ reloop/
 │   ├── __init__.py               # Public API exports
 │   ├── param_utils.py            # Parameter extraction & perturbation
 │   ├── executor.py               # Isolated subprocess execution
-│   ├── verification.py           # 5-layer verification engine
+│   ├── verification.py           # 5-layer verification engine (L1-L3, L5)
+│   ├── l4_adversarial.py         # L4 Adversarial Direction Analysis
 │   ├── prompts.py                # LLM prompt templates
 │   ├── generation.py             # Code generation
-│   ├── repair.py                 # Diagnostic-based repair
+│   ├── repair.py                 # Diagnostic-based repair with L4 Accept/Reject
 │   ├── pipeline.py               # Pipeline orchestration
 │   ├── data_extraction.py        # NL → structured data extraction
 │   └── experiment_runner.py      # Batch experiment runner
 ├── data/                         # Benchmark datasets (JSONL)
+├── fig/                          # Architecture diagrams
+│   └── Reloop_framework.pdf      # System architecture diagram
 ├── requirements.txt              # Python dependencies
 ├── pyproject.toml                # Project configuration
 ├── LICENSE                       # MIT License
@@ -157,8 +231,9 @@ reloop/
 | Class | Description |
 |-------|-------------|
 | `ReLoopVerifier` | 5-layer verification engine |
+| `L4AdversarialVerifier` | L4 Adversarial Direction Analysis with LLM debate |
 | `CodeGenerator` | Generate Gurobi code from problem description |
-| `CodeRepairer` | Repair code based on diagnostics |
+| `CodeRepairer` | Repair code based on diagnostics (with L4 Accept/Reject) |
 | `ReLoopPipeline` | Complete generate→verify→repair pipeline |
 | `DataExtractor` | Extract structured data from natural language |
 | `ExperimentRunner` | Run batch experiments on datasets |
@@ -196,7 +271,9 @@ pipeline = ReLoopPipeline(
     llm_client,
     max_repair_iterations=3,        # L2-L5 repair attempts
     max_regeneration_attempts=3,    # L1 FATAL regeneration attempts
+    max_l4_rejections=2,            # Max rejections per param before L4 → INFO
     enable_cpt=True,                # Enable L5 CPT layer
+    enable_l4_adversarial=True,     # Enable L4 Adversarial Direction Analysis
     use_structured_generation=True  # Use 3-stage pipeline
 )
 result = pipeline.run(problem_description, data)
@@ -253,7 +330,7 @@ summary.by_difficulty  # Dict[str, Dict]
 
 ## Chain-of-Thought Code Generation
 
-ReLoop uses **Chain-of-Thought (CoT)** generation in a single API call:
+ReLoop uses **Chain-of-Thought (CoT)** 3-stage generation:
 
 ```
 Problem → [STEP 1: Understand] → [STEP 2: Formalize] → [STEP 3: Code] → Output
@@ -261,14 +338,15 @@ Problem → [STEP 1: Understand] → [STEP 2: Formalize] → [STEP 3: Code] → 
               (same context)      (same context)      (same context)
 ```
 
-**Key Design:**
-- Single API call with step-by-step reasoning (NOT 3 separate calls)
-- LLM maintains context throughout all reasoning steps
-- Produces: Understanding (U) → Mathematical Model (M) → Executable Code (Ck)
+**Generation Approaches:**
 
-**Why CoT?**
-- Separate API calls lose context between stages (tested: 10.85% error)
-- Single CoT call preserves reasoning chain (tested: 2.17% error)
+| Approach | Description | Error Rate |
+|----------|-------------|------------|
+| Single-Stage | Direct problem → code (baseline) | - |
+| 3-Stage CoT (single call) | All steps in one prompt | 2.17% |
+| 3-Stage CoT (separate calls) | 3 API calls (loses context) | 10.85% |
+
+**Recommended:** 3-Stage CoT with single API call (preserves reasoning chain)
 
 ---
 
@@ -322,9 +400,9 @@ A key architectural principle is that generated code uses **schema-only visibili
 | Layer | Name | Type | Description |
 |-------|------|------|-------------|
 | L1 | Execution & Solver | Blocking | Syntax, runtime, solver status → triggers regeneration on FATAL |
-| L2 | Relaxation Monotonicity | Diagnostic | Constraint direction verification (ERROR level) |
+| L2 | Anomaly Detection | Diagnostic | Bidirectional perturbation: both-improve → ERROR |
 | L3 | Dual Consistency | Diagnostic | Primal-dual gap (INFO level - likely numerical) |
-| L4 | Solution Freedom | Diagnostic | Parameter effect (INFO), direction anomaly (ERROR), sensitivity (INFO) |
+| L4 | Adversarial Direction Analysis | Diagnostic | LLM-based direction verification with Accept/Reject |
 | L5 | CPT | Enhancement | LLM-based constraint testing (WARNING/INFO) |
 
 **Severity Levels (Conservative Repair Strategy):**
@@ -332,9 +410,9 @@ A key architectural principle is that generated code uses **schema-only visibili
 | Severity | Confidence | Source | Repair Action |
 |----------|------------|--------|---------------|
 | `FATAL` | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
-| `ERROR` | 99%+ | L2 monotonicity, L4 anomaly | **MUST fix** |
-| `WARNING` | 80%+ | L5 cpt_missing | **SHOULD fix** |
-| `INFO` | <80% | L3 duality, L4 no_effect, L4 sensitivity | **DO NOT fix** (reference only) |
+| `ERROR` | 99%+ | L2 anomaly | **MUST fix** |
+| `WARNING` | 80%+ | L4 direction (accepted), L5 cpt_missing | **SHOULD fix** |
+| `INFO` | <80% | L2 no_effect, L2 sensitivity, L3 duality, L4 (rejected/inconclusive) | **DO NOT fix** (reference only) |
 | `PASS` | - | All layers | No action needed |
 
 **Key Design Principle:**
@@ -342,21 +420,119 @@ A key architectural principle is that generated code uses **schema-only visibili
 - INFO is for reference only - likely normal optimization behavior (slack constraints, numerical artifacts)
 - This prevents over-correction that was causing ReLoop to perform worse than baseline
 
-**L4 Detection Mechanisms (Cross-Domain Universal):**
+### L2: Anomaly Detection (Bidirectional Perturbation)
+
+L2 uses **bidirectional perturbation** to detect physically impossible behavior:
 
 | Check | Severity | Method | Rationale |
 |-------|----------|--------|-----------|
-| No Effect | INFO | Parameter perturbation | Likely slack constraint (normal) |
-| Direction Anomaly | ERROR | Both-improve detection | Physically impossible (99%+ confidence) |
-| High Sensitivity | INFO | Threshold check | Normal for well-optimized models |
+| **Anomaly** | **ERROR** | Both ↑ and ↓ improve objective | Physically impossible (99%+ confidence) |
+| No Effect | INFO | Neither direction affects objective | Likely slack constraint (normal) |
+| High Sensitivity | INFO | Extreme sensitivity to perturbation | Normal for well-optimized models |
 
-> **Note:** L4 `no_effect` changed from WARNING to INFO because slack constraints are normal optimization behavior.
+```
+Anomaly Detection Principle:
+├── Perturb parameter UP (+20%) → measure objective change
+├── Perturb parameter DOWN (-20%) → measure objective change
+├── If BOTH directions IMPROVE objective → ERROR (impossible)
+├── If one improves, one worsens → normal (monotonic)
+├── If neither affects → INFO (slack constraint)
+└── Works for ANY domain without keyword matching
+```
+
+### L4: Adversarial Direction Analysis (LLM-based)
+
+L4 uses an **adversarial mechanism** where two LLM roles debate to converge on the correct analysis:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 L4 Adversarial Flow                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  LLM_verify ──→ "Parameter X should decrease objective"     │
+│       │                                                     │
+│       ▼                                                     │
+│  LLM_repair ──→ Accept? ──→ YES ──→ WARNING (should fix)   │
+│       │              │                                      │
+│       │              └──→ NO (Reject) ──→ Re-analyze        │
+│       │                        │                            │
+│       │                        ▼                            │
+│       │              LLM_verify (with rejection feedback)   │
+│       │                        │                            │
+│       │                        ▼                            │
+│       │              [Repeat until Accept or max rejections]│
+│       │                                                     │
+│       └──→ Max rejections reached ──→ INFO (inconclusive)  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Exit Conditions (forces output):**
+1. `all_pass`: No violations found → output
+2. `all_rejected_others_pass`: All L4 rejected + L2/L3/L5 PASS → output (INFO level)
+3. `max_rejections`: Max rejections per param reached (default 2) → downgrade to INFO → output
+4. `max_iterations`: Reached max L4 iterations (default 3) → output
+5. `accepted_fixed`: Some accepted, code fixed → re-verify and continue
+
+**Key Parameters:**
+- `max_l4_rejections`: Max times a param can be rejected before downgrade (default: 2)
+- `max_l4_iterations`: Max L4 loop iterations (default: 3)
+
+> **Design Principle:** The adversarial mechanism allows two LLM perspectives to debate.
+> This is more reliable than single-LLM analysis because errors get caught by the other role.
+> Keyword-based direction verification has been completely removed.
 
 **Robustness Guarantee:**
 - L1 `FATAL` triggers regeneration, not immediate termination
 - L2-L5 are diagnostic only: never block output
+- L4 loop always exits with output (one of the exit conditions will be met)
 - False positives don't affect result values (objective/solution always returned if L1 passes)
 - INFO-level issues do NOT trigger repair (prevents over-correction)
+
+### L5: CPT (Constraint Presence Testing)
+
+L5 uses **LLM-based constraint extraction** to identify expected constraints, then tests if they are present in the generated code:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 L5 CPT Flow                                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Problem Description ──→ LLM Extract Constraints            │
+│                              │                              │
+│                              ▼                              │
+│               Candidate Constraints List                    │
+│               [protein_min, carbs_min, ...]                 │
+│                              │                              │
+│                              ▼                              │
+│         For each constraint: Extreme Perturbation           │
+│         (e.g., scale demand 100x, capacity to 0.001)        │
+│                              │                              │
+│                              ▼                              │
+│         Measure Objective Change Ratio                      │
+│              < 5%  → WARNING (likely missing)               │
+│            5-30%   → INFO (uncertain)                       │
+│              > 30% → PASS (constraint present)              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Threshold-Based Detection:**
+
+| Change Ratio | Severity | Interpretation |
+|--------------|----------|----------------|
+| < 5% | **WARNING** | Constraint likely missing - extreme perturbation had no effect |
+| 5-30% | INFO | Uncertain - may be partially active |
+| > 30% | PASS | Constraint present - perturbation significantly affected objective |
+
+**Example Output:**
+```
+[L5] CPT
+  Extracted 3 candidates:
+  ├─ [MISSING] minimum protein requirement - 0.0% change ⚠️
+  ├─ [UNCERTAIN] minimum carbs requirement - 21.1% change
+  └─ [PRESENT] minimum calories requirement - 38.0% change ✅
+```
 
 ---
 
