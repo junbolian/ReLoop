@@ -158,44 +158,57 @@ class ReLoopPipeline:
         regeneration_count = 0
 
         # Step 1: Generate initial code (or use provided)
+        report = None
+        code = None
         if initial_code:
             code = initial_code
             if self.verbose:
                 print("[Pipeline] Using provided initial code")
         else:
-            gen_start = time.time()
-            code = self.generator.generate(problem_description, data)
-            gen_time = time.time() - gen_start
+            try:
+                gen_start = time.time()
+                code = self.generator.generate(problem_description, data)
+                gen_time = time.time() - gen_start
+                if self.verbose:
+                    print(f"[Pipeline] Generated code in {gen_time:.2f}s")
+            except Exception as e:
+                if self.verbose:
+                    print(f"[Pipeline] Generation failed: {e}")
+                code = ""
+                # Leave report=None to trigger regeneration loop
+
+        # Step 2: Initial verification (only if we have code and generation succeeded)
+        if report is None and code:
+            verify_start = time.time()
+            report = self.verifier.verify(
+                code, data,
+                problem_description=problem_description,
+                enable_cpt=self.enable_cpt,
+                verbose=self.verbose
+            )
+            verify_time += time.time() - verify_start
+            history.append((code, report))
+
             if self.verbose:
-                print(f"[Pipeline] Generated code in {gen_time:.2f}s")
-
-        # Step 2: Initial verification
-        verify_start = time.time()
-        report = self.verifier.verify(
-            code, data,
-            problem_description=problem_description,
-            enable_cpt=self.enable_cpt,
-            verbose=self.verbose
-        )
-        verify_time += time.time() - verify_start
-        history.append((code, report))
-
-        if self.verbose:
-            print(f"[Pipeline] Initial verification: {report.status}")
+                print(f"[Pipeline] Initial verification: {report.status}")
 
         # Step 3: Handle L1 FATAL with regeneration
-        while report.status == 'FAILED' and regeneration_count < self.max_regeneration_attempts:
+        error_message = None
+        while (report is None or report.status == 'FAILED') and regeneration_count < self.max_regeneration_attempts:
             regeneration_count += 1
             if self.verbose:
-                print(f"[Pipeline] L1 FATAL - Regeneration attempt {regeneration_count}")
+                print(f"[Pipeline] L1 FATAL/Generation failure - Regeneration attempt {regeneration_count}")
 
-            error_message = self._get_l1_error(report)
+            if report is not None:
+                error_message = self._get_l1_error(report)
+            elif error_message is None:
+                error_message = "Initial generation failed"
 
             gen_start = time.time()
             try:
                 code = self.generator.regenerate(
                     problem_description=problem_description,
-                    failed_code=code,
+                    failed_code=code or "",
                     error_message=error_message,
                     data=data
                 )
@@ -226,14 +239,12 @@ class ReLoopPipeline:
 
             l4_start = time.time()
             baseline_obj = report.objective or 0.0
-            obj_sense = self._get_obj_sense_from_report(report)
 
             l4_results, l4_exit_reason, l4_code = self._run_l4_adversarial_loop(
                 code=code,
                 data=data,
                 baseline_obj=baseline_obj,
                 problem_description=problem_description,
-                obj_sense=obj_sense,
                 report=report,
                 max_l4_iterations=3
             )
@@ -286,9 +297,18 @@ class ReLoopPipeline:
                 break
             repair_time += time.time() - repair_start
 
+            # Stop if code unchanged OR verification result unchanged OR objective unchanged
             if repaired_code == code:
                 if self.verbose:
-                    print("[Pipeline] Repair produced no changes, stopping")
+                    print("[Pipeline] Repair produced no code changes, stopping")
+                break
+            if history and history[-1][1].status == report.status:
+                if self.verbose:
+                    print("[Pipeline] Repair did not change verification status, stopping")
+                break
+            if history and history[-1][1].objective == report.objective:
+                if self.verbose:
+                    print("[Pipeline] Repair did not change objective, stopping")
                 break
 
             code = repaired_code
@@ -457,7 +477,6 @@ class ReLoopPipeline:
         data: Dict[str, Any],
         baseline_obj: float,
         problem_description: str,
-        obj_sense: str,
         report: VerificationReport,
         max_l4_iterations: int = 3
     ) -> Tuple[List[L4VerifyResult], str, str]:
@@ -469,7 +488,6 @@ class ReLoopPipeline:
             data: Problem data
             baseline_obj: Baseline objective value
             problem_description: Problem description
-            obj_sense: "minimize" or "maximize"
             report: Current verification report
             max_l4_iterations: Max iterations for L4 loop
 
@@ -496,6 +514,9 @@ class ReLoopPipeline:
 
         current_code = code
         l4_results = []
+        # After first iteration, constrain future analyses to only the originally
+        # flagged parameters (or their rejected subset) to avoid surfacing new issues.
+        allowed_params: Optional[List[str]] = None
 
         for l4_iter in range(max_l4_iterations):
             if self.verbose:
@@ -507,7 +528,7 @@ class ReLoopPipeline:
                 data=data,
                 baseline_obj=baseline_obj,
                 problem_description=problem_description,
-                obj_sense=obj_sense,
+                params=allowed_params,
                 exclude_params=l2_error_params,
                 executor=self.verifier.executor
             )
@@ -517,6 +538,14 @@ class ReLoopPipeline:
                 r for r in l4_results
                 if r.is_violation and r.confidence >= self.l4_verifier.confidence_threshold
             ]
+
+            # Freeze the parameter set after first pass to prevent new params
+            # from appearing in subsequent iterations.
+            if allowed_params is None:
+                allowed_params = [v.param for v in violations]
+            else:
+                # Keep only violations within the locked set
+                violations = [v for v in violations if v.param in allowed_params]
 
             if not violations:
                 if self.verbose:
@@ -550,6 +579,9 @@ class ReLoopPipeline:
 
             accepted = decision_result["accepted"]
             rejected = decision_result["rejected"]
+            # Limit any further L4_VERIFY runs to only the still-rejected params
+            # so new parameters/issues cannot appear in later iterations.
+            allowed_params = [d.param for d in rejected]
 
             if self.verbose:
                 print(f"  [L4] Accepted: {len(accepted)}, Rejected: {len(rejected)}")
@@ -572,6 +604,8 @@ class ReLoopPipeline:
                 if decision_result["should_reverify"]:
                     if self.verbose:
                         print("  [L4] All rejected, re-verifying with context")
+                    # Next round only reconsider rejected params
+                    allowed_params = [d.param for d in rejected if d.param in (allowed_params or [])]
                     continue
 
                 # Check if other layers pass
@@ -646,16 +680,6 @@ class ReLoopPipeline:
             if r.severity in [Severity.ERROR, Severity.WARNING]:
                 return False
         return True
-
-    def _get_obj_sense_from_report(self, report: VerificationReport) -> str:
-        """Extract optimization sense from report."""
-        for r in report.layer_results:
-            if r.layer == "L1" and r.details:
-                sense = r.details.get("obj_sense")
-                if sense:
-                    return sense
-        return "minimize"  # Default
-
 
 def run_reloop(
     problem_description: str,
