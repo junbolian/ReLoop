@@ -15,7 +15,6 @@ from dataclasses import dataclass
 
 from .prompts import (
     CHAIN_OF_THOUGHT_PROMPT, CHAIN_OF_THOUGHT_SYSTEM,
-    CODE_GENERATION_PROMPT, CODE_GENERATION_SYSTEM,
     UNDERSTAND_PROMPT, UNDERSTAND_SYSTEM,
     FORMALIZE_PROMPT, FORMALIZE_SYSTEM,
     SYNTHESIZE_PROMPT, SYNTHESIZE_SYSTEM,
@@ -60,7 +59,7 @@ class CodeGenerator:
         self,
         problem_description: str,
         data: Dict[str, Any],
-        max_retries: int = 3
+        max_retries: int = 1  # kept for backward compatibility, ignored
     ) -> str:
         """
         Generate Gurobi code for the given problem.
@@ -73,17 +72,14 @@ class CodeGenerator:
         Returns:
             Generated Python code string
         """
-        if self.use_structured_generation:
-            # Use Chain-of-Thought (single API call with reasoning)
-            return self._generate_chain_of_thought(problem_description, data, max_retries)
-        else:
-            return self._generate_single_stage(problem_description, data, max_retries)
+        # Always do a single CoT generation attempt. We intentionally ignore
+        # max_retries here to avoid repeated CoT prompts.
+        return self._generate_chain_of_thought(problem_description, data)
 
     def _generate_chain_of_thought(
         self,
         problem_description: str,
-        data: Dict[str, Any],
-        max_retries: int = 3
+        data: Dict[str, Any]
     ) -> str:
         """
         Chain-of-Thought generation: Single API call with step-by-step reasoning.
@@ -101,17 +97,12 @@ class CodeGenerator:
             data_structure=data_structure
         )
 
-        for _ in range(max_retries):
-            try:
-                response = self.llm_client.generate(prompt, system=CHAIN_OF_THOUGHT_SYSTEM)
-                code = self._extract_code(response)
-                if self._validate_code(code):
-                    return code
-            except Exception:
-                continue
-
-        # Fallback to simple single-stage
-        return self._generate_single_stage(problem_description, data, max_retries=1)
+        response = self.llm_client.generate(prompt, system=CHAIN_OF_THOUGHT_SYSTEM)
+        code = self._extract_code(response)
+        # Even if validation would fail, return the extracted code for L1 to attempt/repair.
+        if not code or not code.strip():
+            raise ValueError("Chain-of-Thought generation produced no code block")
+        return code
 
     def generate_structured(
         self,
@@ -206,20 +197,20 @@ class CodeGenerator:
                     )
 
             except Exception:
-                if attempt == max_retries - 1:
-                    # Fallback to single-stage generation
-                    fallback_code = self._generate_single_stage(
-                        problem_description, data, max_retries=1
-                    )
-                    return GenerationResult(
-                        code=fallback_code,
-                        stages_completed=0,
-                        stage_logs=stage_logs
-                    )
+                continue
 
-        # Fallback
-        fallback_code = self._generate_single_stage(problem_description, data, max_retries=1)
-        return GenerationResult(code=fallback_code, stages_completed=0, stage_logs=stage_logs)
+        raise ValueError("Chain-of-Thought generation failed")
+
+    def _generate_single_stage(
+        self,
+        problem_description: str,
+        data: Dict[str, Any],
+        max_retries: int = 1
+    ) -> str:
+        """
+        Legacy placeholder: reuse single-attempt CoT generation.
+        """
+        return self._generate_chain_of_thought(problem_description, data)
 
     def _stage1_understand(self, problem_description: str) -> Optional[str]:
         """
@@ -292,30 +283,6 @@ class CodeGenerator:
 
         response = self.llm_client.generate(prompt, system=SYNTHESIZE_SYSTEM)
         return self._extract_code(response)
-
-    def _generate_single_stage(
-        self,
-        problem_description: str,
-        data: Dict[str, Any],
-        max_retries: int = 3
-    ) -> str:
-        """Single-stage generation (legacy/fallback method)."""
-        data_structure = self._describe_data_schema(data)
-        prompt = CODE_GENERATION_PROMPT.format(
-            problem_description=problem_description,
-            data_structure=data_structure
-        )
-
-        for _ in range(max_retries):
-            try:
-                response = self.llm_client.generate(prompt, system=CODE_GENERATION_SYSTEM)
-                code = self._extract_code(response)
-                if self._validate_code(code):
-                    return code
-            except Exception:
-                continue
-
-        raise ValueError("Failed to generate valid code after retries")
 
     def regenerate(
         self,

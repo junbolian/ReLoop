@@ -244,7 +244,7 @@ reloop/
 from reloop import ReLoopVerifier, verify_code
 
 # Quick verification
-report = verify_code(code, data, obj_sense="minimize")
+report = verify_code(code, data)
 
 # With CPT (requires LLM)
 verifier = ReLoopVerifier(llm_client=llm)

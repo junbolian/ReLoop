@@ -73,6 +73,7 @@ claude-opus-4.5-result-round2/
 outputs/
 results/
 logs/
+experiment_results/
 
 # ----------------------------
 # Test files (not for commit)

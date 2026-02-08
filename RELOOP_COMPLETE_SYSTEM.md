@@ -350,7 +350,7 @@ class CodeExecutor:
 ### Layer 1: Execution & Solver
 
 ```python
-def _layer1(self, code: str, data: Dict, obj_sense: str, verbose: bool):
+def _layer1(self, code: str, data: Dict, verbose: bool):
     """L1: Execution & Solver Status (BLOCKING)"""
 
     # 1.1 Syntax check
@@ -377,14 +377,14 @@ def _layer1(self, code: str, data: Dict, obj_sense: str, verbose: bool):
 
 ```python
 def _layer2(self, code: str, data: Dict, baseline_obj: float,
-            obj_sense: str, params: List[str], verbose: bool):
+            params: List[str], verbose: bool):
     """L2: Anomaly Detection - Bidirectional Perturbation (DIAGNOSTIC)"""
     results = []
     anomaly_params = []
     no_effect_params = []
     high_sensitivity_params = []
 
-    is_minimize = obj_sense == "minimize"
+    is_minimize = True
     threshold = abs(baseline_obj) * self.epsilon if baseline_obj != 0 else 1e-6
 
     for param in params[:self.max_params]:
@@ -527,7 +527,7 @@ class L4AdversarialVerifier:
         self.rejection_history: Dict[str, L4RejectionHistory] = {}
 
     def verify(self, code: str, data: Dict, baseline_obj: float,
-               obj_sense: str, problem_description: str,
+               problem_description: str,
                perturbation_results: Dict[str, Dict]) -> List[L4VerifyResult]:
         """
         LLM_verify: Analyze direction expectations for each parameter.
@@ -661,7 +661,7 @@ Adversarial Solution:
 
 ```python
 def _layer5(self, code: str, data: Dict, baseline_obj: float,
-            obj_sense: str, problem_description: str, verbose: bool):
+            problem_description: str, verbose: bool):
     """L5: CPT (ENHANCEMENT) - Only WARNING/INFO, never ERROR/FATAL"""
     results = []
 
@@ -678,7 +678,7 @@ def _layer5(self, code: str, data: Dict, baseline_obj: float,
 
     missing = []
     for candidate in candidates[:10]:
-        test_result = self._cpt_test_candidate(code, data, baseline_obj, obj_sense, candidate)
+        test_result = self._cpt_test_candidate(code, data, baseline_obj, candidate)
         if test_result["status"] == "MISSING":
             missing.append(test_result)
 
@@ -691,7 +691,7 @@ def _layer5(self, code: str, data: Dict, baseline_obj: float,
 
     return results
 
-def _cpt_test_candidate(self, code, data, baseline_obj, obj_sense, candidate):
+def _cpt_test_candidate(self, code, data, baseline_obj, candidate):
     """Test a single candidate constraint."""
     params = candidate.get("parameters", [])
     ctype = candidate.get("type", "other")
@@ -1193,7 +1193,6 @@ class ReLoopPipeline:
                 data=data,
                 baseline_obj=report.objective,
                 problem_description=problem_description,
-                obj_sense=self._get_obj_sense_from_report(report),
                 report=report
             )
             # If L4 produced fixed code, update and re-verify
@@ -1673,7 +1672,7 @@ print(f"objective: {m.ObjVal}")
 """
 
 data = {"min_x": 100, "min_y": 80, "max_total": 250}
-report = verify_code(code, data, obj_sense="minimize", verbose=True)
+report = verify_code(code, data, verbose=True)
 print(f"Status: {report.status}")
 ```
 

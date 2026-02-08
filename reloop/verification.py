@@ -87,7 +87,6 @@ class ReLoopVerifier:
         self,
         code: str,
         data: Dict[str, Any],
-        obj_sense: str = "minimize",
         problem_description: str = "",
         enable_cpt: bool = False,
         verbose: bool = False
@@ -104,7 +103,7 @@ class ReLoopVerifier:
         # L1: Execution & Solver
         if verbose:
             print("\n[L1] Execution & Solver")
-        l1_results, baseline = self._layer1(code, data, obj_sense, verbose)
+        l1_results, baseline = self._layer1(code, data, verbose)
         layer_results.extend(l1_results)
 
         if any(r.severity == Severity.FATAL for r in l1_results):
@@ -130,7 +129,7 @@ class ReLoopVerifier:
         # L2: Anomaly Detection (bidirectional perturbation)
         if verbose:
             print("\n[L2] Anomaly Detection")
-        l2_results = self._layer2(code, data, objective, obj_sense, params, verbose)
+        l2_results = self._layer2(code, data, objective, params, verbose)
         layer_results.extend(l2_results)
 
         # Extract L2 anomaly params to exclude from L4
@@ -149,7 +148,7 @@ class ReLoopVerifier:
         if verbose:
             print("\n[L4] Adversarial Direction Analysis")
         l4_results = self._layer4(
-            code, data, params, objective, obj_sense, complexity, verbose,
+            code, data, params, objective, complexity, verbose,
             problem_description=problem_description,
             l2_anomaly_params=l2_anomaly_params
         )
@@ -159,7 +158,7 @@ class ReLoopVerifier:
         if enable_cpt and problem_description:
             if verbose:
                 print("\n[L5] CPT")
-            l5_results = self._layer5(code, data, objective, obj_sense, problem_description, verbose)
+            l5_results = self._layer5(code, data, objective, problem_description, verbose)
             layer_results.extend(l5_results)
 
         return self._aggregate(layer_results, objective, solution, complexity, start_time, verbose)
@@ -169,7 +168,7 @@ class ReLoopVerifier:
     # =========================================================================
 
     def _layer1(
-        self, code: str, data: Dict, obj_sense: str, verbose: bool
+        self, code: str, data: Dict, verbose: bool
     ) -> Tuple[List[LayerResult], Dict]:
         """L1: Execution and solver status check."""
         results = []
@@ -232,13 +231,6 @@ class ReLoopVerifier:
             ))
             return results, baseline
 
-        if objective is not None and obj_sense == "minimize" and objective < -self.epsilon:
-            results.append(LayerResult(
-                "L1", "objective_sign", Severity.INFO,
-                f"Negative objective ({objective:.4f}) in minimization", 0.7,
-                {"trigger_repair": False, "is_likely_normal": True}
-            ))
-
         results.append(LayerResult(
             "L1", "solver_status", Severity.PASS,
             f"Solver returned {status} with objective {objective}", 1.0
@@ -255,7 +247,7 @@ class ReLoopVerifier:
 
     def _layer2(
         self, code: str, data: Dict, baseline_obj: float,
-        obj_sense: str, params: List[str], verbose: bool
+        params: List[str], verbose: bool
     ) -> List[LayerResult]:
         """
         L2: Anomaly Detection.
@@ -273,7 +265,7 @@ class ReLoopVerifier:
         anomaly_params = []
         no_effect_params = []
         high_sensitivity_params = []
-        is_minimize = obj_sense == "minimize"
+        is_minimize = True
 
         for param in params[:self.max_params]:
             skip, reason = should_skip_param(data, param)
@@ -479,7 +471,7 @@ class ReLoopVerifier:
 
     def _layer4(
         self, code: str, data: Dict, params: List[str],
-        baseline_obj: float, obj_sense: str,
+        baseline_obj: float,
         complexity: Complexity, verbose: bool,
         problem_description: str = "",
         l2_anomaly_params: Optional[List[str]] = None
@@ -542,7 +534,7 @@ class ReLoopVerifier:
 
     def _layer5(
         self, code: str, data: Dict, baseline_obj: float,
-        obj_sense: str, problem_description: str, verbose: bool
+        problem_description: str, verbose: bool
     ) -> List[LayerResult]:
         """
         L5: CPT (Constraint Perturbation Testing).
@@ -583,7 +575,7 @@ class ReLoopVerifier:
             for candidate in candidates[:10]:
                 try:
                     test_result = self._cpt_test_candidate_v2(
-                        code, data, baseline_obj, obj_sense, candidate, verbose
+                        code, data, baseline_obj, candidate, verbose
                     )
                     if test_result:
                         results.append(test_result)
@@ -601,7 +593,7 @@ class ReLoopVerifier:
 
     def _cpt_test_candidate_v2(
         self, code: str, data: Dict, baseline_obj: float,
-        obj_sense: str, candidate: Dict, verbose: bool
+        candidate: Dict, verbose: bool
     ) -> Optional[LayerResult]:
         """Test a single candidate constraint with new thresholds."""
         params = candidate.get("parameters", [])
@@ -849,8 +841,7 @@ Return ONLY the JSON array, no explanation."""
 def verify_code(
     code: str,
     data: Dict[str, Any],
-    obj_sense: str = "minimize",
     verbose: bool = False
 ) -> VerificationReport:
     """Convenience verification function."""
-    return ReLoopVerifier().verify(code, data, obj_sense, verbose=verbose)
+    return ReLoopVerifier().verify(code, data, verbose=verbose)

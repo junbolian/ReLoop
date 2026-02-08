@@ -84,30 +84,16 @@ L4_VERIFY_PROMPT = '''Analyze the parameter behavior in this optimization proble
 {code}
 ```
 
-## Parameter to Analyze
-**Parameter name**: {param}
-**Current value**: {param_value}
+## Parameters to Analyze (batched)
+For EACH entry below, first reason about the expected direction, then decide violation.
 
-## Perturbation Test Results
-- Baseline objective: {z_baseline:.4f}
-- After {param} increased by {delta_pct}%: z = {z_plus:.4f} (change: {change_plus:+.2f}%)
-- After {param} decreased by {delta_pct}%: z = {z_minus:.4f} (change: {change_minus:+.2f}%)
-
-{rejection_context}
-
-## Your Task
-Analyze what behavior we SHOULD expect from this parameter, and whether the observed behavior matches.
-
-Think step by step:
-1. What role does '{param}' play in this problem? (constraint bound? objective coefficient? other?)
-2. Based on the problem description and optimization sense ({sense}), what should happen to the objective when '{param}' increases?
-3. Does the observed behavior match this expectation?
+{param_block}
 
 ## Important Notes
 - For MINIMIZATION: increasing a cost coefficient -> objective INCREASES (worse)
 - For MAXIMIZATION: increasing a revenue coefficient -> objective INCREASES (better)
-- Constraint bounds vs objective coefficients behave differently!
-- Consider whether the parameter appears in constraints or the objective function
+- Constraint bounds vs objective coefficients behave differently.
+- Consider whether the parameter appears in constraints or the objective function.
 
 ## Confidence Guidelines
 - 0.9+: Very certain (clear constraint bound or objective coefficient)
@@ -115,20 +101,23 @@ Think step by step:
 - 0.5-0.7: Uncertain (ambiguous role)
 - <0.5: Low confidence (don't trigger repair based on this)
 
-Return your analysis as JSON only (no other text):
+Return ONLY JSON (no text) in this format:
 ```json
-{{
+[
+  {{
+    "param": "param_name",
     "param_role": "constraint_bound" | "objective_coef" | "other",
-    "role_explanation": "Why you classified it this way",
+    "role_explanation": "...",
     "expected_direction": "increase" | "decrease" | "no_effect" | "uncertain",
-    "direction_explanation": "Expected relationship between {param} and objective",
-    "actual_behavior": "What the test results show",
+    "direction_explanation": "...",
     "is_violation": true | false,
-    "violation_explanation": "If violation, what's wrong. If not, why behavior is correct.",
+    "violation_explanation": "...",
     "confidence": 0.0 to 1.0,
-    "suggested_fix": "If violation, what might be wrong in the code"
-}}
+    "suggested_fix": "..."
+  }}
+]
 ```
+Include one object per parameter, in the same order.
 '''
 
 L4_REJECTION_CONTEXT = """
@@ -233,20 +222,18 @@ class L4AdversarialVerifier:
         data: Dict,
         baseline_obj: float,
         problem_description: str,
-        obj_sense: str = "minimize",
         params: Optional[List[str]] = None,
         exclude_params: Optional[List[str]] = None,
         executor=None
     ) -> List[L4VerifyResult]:
         """
-        Verify parameter directions using LLM analysis.
+        Verify parameter directions using a single batched LLM analysis call.
 
         Args:
             code: Generated optimization code
             data: Problem data dictionary
             baseline_obj: Baseline objective value
             problem_description: Natural language problem description
-            obj_sense: "minimize" or "maximize"
             params: Parameters to analyze (if None, extract from data)
             exclude_params: Parameters to skip (e.g., already flagged by L2)
             executor: Code executor (for perturbation tests)
@@ -254,46 +241,53 @@ class L4AdversarialVerifier:
         Returns:
             List of L4VerifyResult for each analyzed parameter
         """
-        results = []
-
         # Get parameters to analyze
         if params is None:
             params = extract_numeric_params(data)
 
         exclude_params = exclude_params or []
+        # Analyze all numeric params (excluding those flagged elsewhere)
         params_to_analyze = [p for p in params if p not in exclude_params]
 
-        for param in params_to_analyze[:10]:  # Limit to 10 params
-            skip, reason = should_skip_param(data, param)
+        param_entries = []
+        for param in params_to_analyze:
+            skip, _ = should_skip_param(data, param)
             if skip:
                 continue
 
-            # Get perturbation results
-            if executor:
-                z_plus, z_minus = self._perturb_and_solve(
-                    executor, code, data, param
-                )
-            else:
-                # If no executor, we can't do perturbation tests
+            if executor is None:
                 continue
 
+            z_plus, z_minus = self._perturb_and_solve(executor, code, data, param)
             if z_plus is None or z_minus is None:
                 continue
 
-            # Build rejection context if this param was previously rejected
-            rejection_ctx = self._build_rejection_context(param)
+            change_plus = ((z_plus - baseline_obj) / abs(baseline_obj) * 100
+                           if abs(baseline_obj) > 1e-6 else z_plus - baseline_obj)
+            change_minus = ((z_minus - baseline_obj) / abs(baseline_obj) * 100
+                            if abs(baseline_obj) > 1e-6 else z_minus - baseline_obj)
 
-            # Call LLM for analysis
-            result = self._analyze_param(
-                code, data, param, baseline_obj,
-                z_plus, z_minus, problem_description,
-                obj_sense, rejection_ctx
-            )
+            param_entries.append({
+                "param": param,
+                "value": self._get_param_value(data, param),
+                "z_plus": z_plus,
+                "z_minus": z_minus,
+                "change_plus": change_plus,
+                "change_minus": change_minus,
+                "rejection_context": self._build_rejection_context(param)
+            })
 
-            if result:
-                results.append(result)
+        if not param_entries:
+            return []
 
-        return results
+        analyses = self._analyze_params_batch(
+            code=code,
+            problem_description=problem_description,
+            baseline_obj=baseline_obj,
+            param_entries=param_entries
+        )
+
+        return analyses
 
     def _perturb_and_solve(
         self, executor, code: str, data: Dict, param: str
@@ -318,69 +312,66 @@ class L4AdversarialVerifier:
             rejection_reason=latest.rejection_reason
         )
 
-    def _analyze_param(
+    def _analyze_params_batch(
         self,
         code: str,
-        data: Dict,
-        param: str,
-        baseline_obj: float,
-        z_plus: float,
-        z_minus: float,
         problem_description: str,
-        obj_sense: str,
-        rejection_ctx: str
-    ) -> Optional[L4VerifyResult]:
-        """Analyze a single parameter using LLM."""
-        # Calculate changes
-        change_plus = ((z_plus - baseline_obj) / abs(baseline_obj) * 100
-                       if abs(baseline_obj) > 1e-6 else z_plus - baseline_obj)
-        change_minus = ((z_minus - baseline_obj) / abs(baseline_obj) * 100
-                        if abs(baseline_obj) > 1e-6 else z_minus - baseline_obj)
-
-        # Get param value for context
-        param_value = self._get_param_value(data, param)
+        baseline_obj: float,
+        param_entries: List[Dict[str, Any]]
+    ) -> List[L4VerifyResult]:
+        """Analyze multiple parameters in one LLM call."""
+        lines = []
+        for i, p in enumerate(param_entries, 1):
+            lines.append(
+                f"""### Param {i}: {p['param']}
+- Current value: {p['value']}
+- Baseline objective: {baseline_obj:.4f}
+- +{int(self.delta*100)}% => {p['z_plus']:.4f} (change: {p['change_plus']:+.2f}%)
+- -{int(self.delta*100)}% => {p['z_minus']:.4f} (change: {p['change_minus']:+.2f}%)
+{p['rejection_context']}
+"""
+            )
+        param_block = "\n".join(lines)
 
         prompt = L4_VERIFY_PROMPT.format(
             problem_description=problem_description,
-            sense=obj_sense,
+            sense="minimize",
             code=code,
-            param=param,
-            param_value=param_value,
-            z_baseline=baseline_obj,
-            z_plus=z_plus,
-            z_minus=z_minus,
-            delta_pct=int(self.delta * 100),
-            change_plus=change_plus,
-            change_minus=change_minus,
-            rejection_context=rejection_ctx
+            param_block=param_block
         )
 
         try:
             response = self.llm_client.generate(prompt, system=L4_VERIFY_SYSTEM)
-            analysis = self._parse_json_response(response)
+            analysis_list = self._parse_json_response(response)
+            if not analysis_list or not isinstance(analysis_list, list):
+                return []
 
-            if not analysis:
-                return None
+            results: List[L4VerifyResult] = []
+            for analysis in analysis_list:
+                param_name = analysis.get("param")
+                entry = next((p for p in param_entries if p["param"] == param_name), None)
+                if not entry:
+                    continue
 
-            # Determine actual direction
-            actual_direction = self._determine_actual_direction(
-                z_plus, z_minus, baseline_obj, obj_sense
-            )
+                actual_direction = self._determine_actual_direction(
+                    entry["z_plus"], entry["z_minus"], baseline_obj
+                )
 
-            return L4VerifyResult(
-                param=param,
-                param_role=analysis.get("param_role", "other"),
-                expected_direction=analysis.get("expected_direction", "uncertain"),
-                actual_direction=actual_direction,
-                is_violation=analysis.get("is_violation", False),
-                confidence=analysis.get("confidence", 0.5),
-                reason=analysis.get("direction_explanation", ""),
-                z_plus=z_plus,
-                z_minus=z_minus,
-                z_baseline=baseline_obj
-            )
-        except Exception as e:
-            return None
+                results.append(L4VerifyResult(
+                    param=param_name,
+                    param_role=analysis.get("param_role", "other"),
+                    expected_direction=analysis.get("expected_direction", "uncertain"),
+                    actual_direction=actual_direction,
+                    is_violation=analysis.get("is_violation", False),
+                    confidence=analysis.get("confidence", 0.5),
+                    reason=analysis.get("direction_explanation", ""),
+                    z_plus=entry["z_plus"],
+                    z_minus=entry["z_minus"],
+                    z_baseline=baseline_obj
+                ))
+            return results
+        except Exception:
+            return []
 
     def _get_param_value(self, data: Dict, param: str) -> Any:
         """Get parameter value from data."""
@@ -397,26 +388,18 @@ class L4AdversarialVerifier:
         self,
         z_plus: float,
         z_minus: float,
-        baseline: float,
-        sense: str
+        baseline: float
     ) -> str:
         """Determine actual objective direction from perturbation."""
         threshold = 1e-4 * max(abs(baseline), 1.0)
 
-        if sense == "minimize":
-            if z_plus < baseline - threshold:
-                return "decrease_on_increase"  # Improving when param increases
-            elif z_plus > baseline + threshold:
-                return "increase_on_increase"  # Worsening when param increases
-            else:
-                return "no_effect"
-        else:  # maximize
-            if z_plus > baseline + threshold:
-                return "increase_on_increase"  # Improving when param increases
-            elif z_plus < baseline - threshold:
-                return "decrease_on_increase"  # Worsening when param increases
-            else:
-                return "no_effect"
+        # Always minimize: lower objective is better
+        if z_plus < baseline - threshold:
+            return "decrease_on_increase"  # Improving when param increases
+        elif z_plus > baseline + threshold:
+            return "increase_on_increase"  # Worsening when param increases
+        else:
+            return "no_effect"
 
     def _parse_json_response(self, response: str) -> Optional[Dict]:
         """Extract JSON from LLM response."""
