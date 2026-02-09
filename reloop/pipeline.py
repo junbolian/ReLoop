@@ -6,20 +6,18 @@ Implements the complete Generate -> Verify -> Repair loop with:
 - L1 FATAL handling with regeneration (not termination)
 - L2 Direction Consistency Analysis (LLM-based with Accept/Reject)
 - L3 Constraint Presence Testing (optional)
-- L4 Specification Compliance Checking (optional, LLM-based white-box review)
 - Conservative repair strategy: only fix ERROR/WARNING, not INFO
 - Guaranteed output when possible
 
-Four-Layer Architecture:
+Three-Layer Architecture:
 - L1: Execution Verification (blocking) + duality check
 - L2: Direction Consistency Analysis (adversarial LLM debate)
 - L3: Constraint Presence Testing (CPT)
-- L4: Specification Compliance Checking (white-box code review)
 
 Repair Trigger Rules:
 - FATAL (L1): Triggers regeneration
-- ERROR (L2 direction accepted, L4 spec violation): Must fix
-- WARNING (L3 cpt_missing, L4 spec uncertain): Should fix / reference
+- ERROR (L2 direction accepted): Must fix
+- WARNING (L3 cpt_missing): Should fix / reference
 - INFO (L1 duality, L2 rejected): Do NOT trigger repair
 """
 
@@ -32,7 +30,6 @@ from .generation import CodeGenerator
 from .verification import (
     ReLoopVerifier, VerificationReport, Severity, Diagnostic,
     layer_results_to_diagnostics, l2_verify_results_to_diagnostics,
-    l4_verify_results_to_diagnostics,
 )
 from .repair import CodeRepairer, RepairResult
 from .prompts import (
@@ -40,7 +37,6 @@ from .prompts import (
     describe_data_schema,
 )
 from .repair_safety import validate_repair_code, SAFETY_RE_REPAIR_PROMPT
-from .specification import run_l4
 
 logger = logging.getLogger(__name__)
 from .l2_direction import (
@@ -95,11 +91,10 @@ class ReLoopPipeline:
     """
     Complete ReLoop Pipeline: Generate -> Verify -> Repair loop.
 
-    Four-Layer Architecture:
+    Three-Layer Architecture:
     - L1: Execution Verification (blocking) + duality check
     - L2: Direction Consistency Analysis (adversarial LLM debate)
     - L3: Constraint Presence Testing (CPT, optional)
-    - L4: Specification Compliance Checking (white-box code review, optional)
 
     Key Features:
     - Chain-of-Thought generation: Single API call with step-by-step reasoning
@@ -120,7 +115,6 @@ class ReLoopPipeline:
         max_l4_rejections: int = 2,
         enable_cpt: bool = True,
         enable_l4_adversarial: bool = True,
-        enable_l4_specification: bool = False,
         use_structured_generation: bool = True,
         verbose: bool = False
     ):
@@ -132,7 +126,6 @@ class ReLoopPipeline:
             max_l4_rejections: Max rejections per param before L2 downgrades to INFO
             enable_cpt: Enable L3 CPT layer
             enable_l4_adversarial: Enable L2 Direction Consistency Analysis
-            enable_l4_specification: Enable L4 Specification Compliance Checking
             use_structured_generation: Use CoT generation pipeline
             verbose: Print progress messages
         """
@@ -147,7 +140,6 @@ class ReLoopPipeline:
         self.max_regeneration_attempts = max_regeneration_attempts
         self.enable_cpt = enable_cpt
         self.enable_l2_direction = enable_l4_adversarial
-        self.enable_l4_specification = enable_l4_specification
         self.verbose = verbose
 
         # L2 Direction Consistency Verifier (adversarial)
@@ -310,49 +302,10 @@ class ReLoopPipeline:
                 if self.verbose:
                     print(f"[Pipeline] After L2 fix: {report.status}")
 
-        # Step 4.5: Run L4 Specification Compliance Check (if enabled)
-        # Collect L1-L3 diagnostics to provide as context to L4
-        l4_diagnostics: List[Diagnostic] = []
-        if self.enable_l4_specification and report.status != 'FAILED':
-            if self.verbose:
-                print("[Pipeline] Running L4 Specification Compliance Check")
-
-            # Gather L1-L3 diagnostics for cross-layer context
-            pre_l4_diagnostics = self._collect_diagnostics(
-                report, l2_results=last_l2_results
-            )
-            l1_diags = [d for d in pre_l4_diagnostics if d.layer == "L1"]
-            l2_diags = [d for d in pre_l4_diagnostics if d.layer == "L2"]
-            l3_diags = [d for d in pre_l4_diagnostics if d.layer == "L3"]
-
-            l4_result = run_l4(
-                code=code,
-                problem_desc=problem_description,
-                llm_fn=self._make_l4_llm_fn(),
-                z_base=report.objective,
-                l1_diagnostics=l1_diags,
-                l2_diagnostics=l2_diags,
-                l3_diagnostics=l3_diags,
-            )
-            l4_diagnostics = l4_result['diagnostics']
-
-            if self.verbose:
-                s = l4_result['summary']
-                print(f"  [L4] Specs: {s['total']}, "
-                      f"PASS={s['pass']}, FAIL={s['fail']}, "
-                      f"UNCERTAIN={s['uncertain']}")
-
-            if l4_result['summary']['fail'] > 0:
-                logger.warning(
-                    f"L4 Specification Check: {l4_result['summary']['fail']} "
-                    f"violations found out of {l4_result['summary']['total']} specs"
-                )
-
         # Step 5: Handle ERROR/WARNING with repair (INFO does NOT trigger)
         # Uses unified Diagnostic schema + build_repair_prompt()
         repair_iteration = 0
         all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
-        all_diagnostics.extend(l4_diagnostics)
 
         while (any(d.triggers_repair for d in all_diagnostics)
                and repair_iteration < self.max_repair_iterations):
@@ -412,9 +365,7 @@ class ReLoopPipeline:
             verify_time += time.time() - verify_start
             history.append((code, report))
 
-            # Re-collect diagnostics from updated report (L1/L2/L3 only).
-            # L4 is NOT re-run (too expensive); if L4 was the only source of
-            # triggers_repair=True, the loop will now exit correctly.
+            # Re-collect diagnostics from updated report.
             all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
 
             if self.verbose:
@@ -878,16 +829,6 @@ class ReLoopPipeline:
 
         return original_code
 
-    def _make_l4_llm_fn(self):
-        """Create LLM function adapter for L4 specification checking.
-
-        L4 expects llm_fn(system_prompt, user_prompt) -> str.
-        This wraps the project's llm_client.generate(prompt, system=...) interface.
-        """
-        def llm_fn(system_prompt: str, user_prompt: str) -> str:
-            return self.llm_client.generate(user_prompt, system=system_prompt)
-        return llm_fn
-
     def _check_other_layers_pass(self, report: VerificationReport) -> bool:
         """Check if L1, L3 all PASS or INFO (no ERROR/WARNING)."""
         for r in report.layer_results:
@@ -906,7 +847,6 @@ def run_reloop(
     max_iterations: int = 3,
     max_regenerations: int = 3,
     enable_cpt: bool = True,
-    enable_l4_specification: bool = False,
     use_structured_generation: bool = True,
     verbose: bool = False
 ) -> PipelineResult:
@@ -921,7 +861,6 @@ def run_reloop(
         max_iterations: Maximum repair iterations (for ERROR/WARNING issues)
         max_regenerations: Maximum regeneration attempts (for L1 FATAL)
         enable_cpt: Enable L3 CPT layer
-        enable_l4_specification: Enable L4 Specification Compliance Checking
         use_structured_generation: Use CoT generation pipeline
         verbose: Print progress messages
 
@@ -933,7 +872,6 @@ def run_reloop(
         max_repair_iterations=max_iterations,
         max_regeneration_attempts=max_regenerations,
         enable_cpt=enable_cpt,
-        enable_l4_specification=enable_l4_specification,
         use_structured_generation=use_structured_generation,
         verbose=verbose
     )

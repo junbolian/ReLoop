@@ -998,8 +998,6 @@ def l2_verify_results_to_diagnostics(
     return diagnostics
 
 
-# Keep old name as alias for backward compatibility
-l4_verify_results_to_diagnostics = l2_verify_results_to_diagnostics
 
 
 # =============================================================================

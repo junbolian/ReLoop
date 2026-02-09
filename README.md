@@ -59,7 +59,7 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 │                                 │                                            │
 │                                 ▼                                            │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    4-LAYER VERIFICATION                              │    │
+│  │                    3-LAYER VERIFICATION                              │    │
 │  │                                                                      │    │
 │  │  L1: Execution & Solver + Duality Check ───────────┐              │    │
 │  │      (Blocking: FATAL → Regenerate up to 3x)        │              │    │
@@ -68,19 +68,15 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 │  │  L2: Direction Consistency Analysis ───────────────┤              │    │
 │  │      (LLM debate: verify ↔ repair → Accept/Reject)  │              │    │
 │  │                                                       ▼              │    │
-│  │  L3: Constraint Presence Test (CPT) ───────────────┤              │    │
+│  │  L3: Constraint Presence Test (CPT) ───────────────┘              │    │
 │  │      (LLM-based CPT → WARNING/INFO)                  │              │    │
-│  │                                                       ▼              │    │
-│  │  L4: Specification Compliance Check ───────────────┘              │    │
-│  │      (White-box code review → ERROR/WARNING)                       │    │
-│  │                                                                      │    │
 │  └──────────────────────────────┬──────────────────────────────────────┘    │
 │                                 │                                            │
 │                                 ▼                                            │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    DIAGNOSTIC-BASED REPAIR                           │    │
 │  │                                                                      │    │
-│  │  ERROR (L2 accepted, L4 spec fail) ─────→ MUST fix                  │    │
+│  │  ERROR (L2 accepted) ─────→ MUST fix                  │    │
 │  │  WARNING (L3 cpt_missing) ──────────────→ SHOULD fix                │    │
 │  │  INFO (L1 duality, L2 rejected) ────────→ Reference only            │    │
 │  │                                                                      │    │
@@ -100,7 +96,6 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 | **L1 Execution & Solver** | Syntax, runtime, and solver status checks with IIS/unbounded diagnostics (FATAL → regeneration) + duality check (INFO) |
 | **L2 Direction Consistency** | LLM-based adversarial debate between verify and repair roles with Accept/Reject |
 | **L3 Constraint Presence Test** | LLM-based verification of expected constraints in generated code (CPT) |
-| **L4 Specification Compliance** | White-box code review: 6-category focused extraction + context-aware 3-step verification |
 | **Unified Diagnostic Schema** | All layers output `Diagnostic` objects; unified `build_repair_prompt()` assembles repair prompts |
 | **Diagnostic-Based Repair** | Conservative strategy: only ERROR/WARNING trigger repair, INFO is reference only |
 | **Repair Safety Guardrails** | Prevents repair LLM from modifying input data or introducing dangerous operations |
@@ -112,7 +107,6 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 3. **Robustness Guarantee**: L1 FATAL triggers regeneration; L2-L3 are diagnostic only
 4. **LLM-Only Analysis**: No keyword-based heuristics; all semantic analysis uses LLM
 5. **Repair Safety**: Repair code is validated before execution; data variable cannot be reassigned
-6. **Dual Verification**: Black-box behavioral testing (L1-L3) + white-box code review (L4)
 
 ---
 
@@ -207,9 +201,8 @@ reloop/
 │   ├── param_utils.py            # Parameter extraction & perturbation (data-dict)
 │   ├── perturbation.py           # Source-code level perturbation (AST-based) + mode detection
 │   ├── executor.py               # Isolated subprocess execution with IIS/unbounded diagnostics
-│   ├── verification.py           # 4-layer verification engine (L1-L3) + unified Diagnostic schema
+│   ├── verification.py           # 3-layer verification engine (L1-L3) + unified Diagnostic schema
 │   ├── l2_direction.py           # L2 Direction Consistency Analysis (adversarial LLM debate)
-│   ├── specification.py          # L4 Specification Compliance Checking (white-box code review)
 │   ├── prompts.py                # LLM prompt templates
 │   ├── generation.py             # Code generation
 │   ├── repair.py                 # Diagnostic-based repair with L2 Accept/Reject
@@ -221,7 +214,6 @@ reloop/
 │   ├── test_perturbation.py      # Unit tests for perturbation module
 │   ├── test_e2e_perturbation.py  # E2E tests for L2 perturbation modes
 │   ├── test_repair_safety.py     # Unit tests for repair safety guardrails
-│   └── test_specification.py    # Unit tests for L4 specification compliance
 ├── data/                         # Benchmark datasets (JSONL)
 ├── fig/                          # Architecture diagrams
 │   └── Reloop_framework.pdf      # System architecture diagram
@@ -281,10 +273,8 @@ pipeline = ReLoopPipeline(
     llm_client,
     max_repair_iterations=3,        # L2-L3 repair attempts
     max_regeneration_attempts=3,    # L1 FATAL regeneration attempts
-    max_l4_rejections=2,            # Max rejections per param before L2 → INFO
     enable_cpt=True,                # Enable L3 CPT layer
     enable_l4_adversarial=True,     # Enable L2 Direction Consistency Analysis
-    enable_l4_specification=False,  # Enable L4 Specification Compliance Check
     use_structured_generation=True  # Use 3-stage pipeline
 )
 result = pipeline.run(problem_description, data)
@@ -351,7 +341,7 @@ Problem → [STEP 1: Understand] → [STEP 2: Formalize] → [STEP 3: Code] → 
 
 **Formalization Stage — Variable Type Reasoning:**
 
-The formalization step explicitly prompts the LLM to determine variable types (CONTINUOUS, INTEGER, or BINARY) for each decision variable by analyzing physical context. For example, "number of trucks" implies integer, while "volume of liquid" implies continuous. This reduces downstream errors that L4 would otherwise need to catch.
+The formalization step explicitly prompts the LLM to determine variable types (CONTINUOUS, INTEGER, or BINARY) for each decision variable by analyzing physical context. For example, "number of trucks" implies integer, while "volume of liquid" implies continuous. This reduces downstream variable type errors.
 
 **Generation Approaches:**
 
@@ -410,22 +400,21 @@ A key architectural principle is that generated code uses **schema-only visibili
 
 ---
 
-## 4-Layer Verification Architecture
+## 3-Layer Verification Architecture
 
 | Layer | Name | Type | Description |
 |-------|------|------|-------------|
 | L1 | Execution & Solver + Duality | Blocking | Syntax, runtime, solver status with IIS/unbounded diagnostics → triggers regeneration on FATAL; duality check as add-on diagnostic (INFO) |
 | L2 | Direction Consistency Analysis | Diagnostic | LLM-based adversarial direction verification with Accept/Reject |
 | L3 | Constraint Presence Test (CPT) | Enhancement | LLM-based constraint testing (WARNING/INFO) |
-| L4 | Specification Compliance Check | Semantic | White-box code review: 6-category focused extraction with L1-L3 context-aware 3-step verification (ERROR/WARNING) |
 
 **Severity Levels (Conservative Repair Strategy):**
 
 | Severity | Confidence | Source | Repair Action |
 |----------|------------|--------|---------------|
 | `FATAL` | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
-| `ERROR` | 99%+ | L2 direction (accepted), L4 spec violation | **MUST fix** |
-| `WARNING` | 80%+ | L3 cpt_missing, L4 spec uncertain | **SHOULD fix** |
+| `ERROR` | 99%+ | L2 direction (accepted) | **MUST fix** |
+| `WARNING` | 80%+ | L3 cpt_missing | **SHOULD fix** |
 | `INFO` | <80% | L1 duality, L2 (rejected/inconclusive) | **DO NOT fix** (reference only) |
 | `PASS` | - | All layers | No action needed |
 
@@ -505,9 +494,8 @@ L2 uses an **adversarial mechanism** where two LLM roles debate to converge on t
 
 **Robustness Guarantee:**
 - L1 `FATAL` triggers regeneration, not immediate termination
-- L2-L4 are diagnostic only: never block output
+- L2-L3 are diagnostic only: never block output
 - L2 loop always exits with output (one of the exit conditions will be met)
-- L4 FAIL may not be true positive; repair budget N=3 naturally prevents infinite loops
 - False positives don't affect result values (objective/solution always returned if L1 passes)
 - INFO-level issues do NOT trigger repair (prevents over-correction)
 
@@ -556,69 +544,6 @@ L3 uses **LLM-based constraint extraction** to identify expected constraints, th
   └─ [PRESENT] minimum calories requirement - 38.0% change
 ```
 
-### L4: Specification Compliance Checking (White-Box)
-
-L4 takes a completely different approach from L1-L3. While L1-L3 perform **black-box behavioral testing** (perturbing inputs and observing outputs), L4 performs **white-box code review** — directly reading the code and comparing it against the problem description.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│         L4 Specification Compliance Flow (Enhanced)          │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  Phase 1: EXTRACT (6 Category-Specific Prompts)             │
-│  Problem Description                                        │
-│       ├──→ VARIABLE_TYPE prompt ──→ [specs]                 │
-│       ├──→ VARIABLE_SCOPE prompt ──→ [specs]                │
-│       ├──→ CONSTRAINT prompt ──→ [specs]                    │
-│       ├──→ OBJECTIVE prompt ──→ [specs]                     │
-│       ├──→ LOGICAL_CONDITION prompt ──→ [specs]             │
-│       └──→ DATA_MAPPING prompt ──→ [specs]                  │
-│                              │                              │
-│                              ▼                              │
-│        Merge + Deduplicate → Unified Checklist              │
-│                              │                              │
-│  Phase 2: VERIFY (3-Step Reasoning + L1-L3 Context)         │
-│                              ▼                              │
-│  Checklist + Code + L1-L3 Diagnostics                       │
-│       ──→ For each spec:                                    │
-│           1. STATE what requirement demands                  │
-│           2. FIND what code actually does (quote lines)      │
-│           3. COMPARE: match or mismatch?                     │
-│                              │                              │
-│                              ▼                              │
-│        Per-item Verdict:                                    │
-│              PASS → No action                               │
-│              FAIL → ERROR (triggers repair)                  │
-│              UNCERTAIN → WARNING (reference only)            │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Specification Categories:**
-
-| Category | What it checks | Example |
-|----------|---------------|---------|
-| `VARIABLE_TYPE` | Integer vs continuous vs binary | "number of trucks" → integer |
-| `VARIABLE_SCOPE` | Decision variable index ranges | "any region can ship to any region" → all pairs |
-| `CONSTRAINT` | Required constraints present | "protein >= minimum requirement" |
-| `OBJECTIVE` | Correct objective formulation | "minimize total transportation cost" |
-| `LOGICAL_CONDITION` | Conditional constraints | "if demand > supply, penalize" |
-| `DATA_MAPPING` | Parameter interpretation | "return rate 0.7 means total = 1.7x" |
-
-**Key Design Decisions:**
-- Phase 1 uses **6 category-specific prompts** (not one generic prompt) for higher recall
-- Phase 2 uses **3-step reasoning** (STATE → FIND → COMPARE) to prevent skipping code inspection
-- Phase 2 receives **L1-L3 execution context** (objective value, diagnostics) for cross-layer insight
-- Results are deduplicated across categories (exact-match on checkable_criterion)
-- FAIL → ERROR (triggers_repair=True), UNCERTAIN → WARNING (triggers_repair=False)
-- `max_specs=25` limits the number of specification items to control LLM cost
-- Temperature=0 for deterministic output
-
-**What L4 catches that L1-L3 cannot:**
-- Variable type errors (continuous variables that should be integer)
-- Model scope errors (restricted routing instead of general transshipment)
-- Coefficient interpretation errors (rate vs total return)
-
 ### L1: IIS and Unbounded Diagnostics
 
 When the solver returns **INFEASIBLE**, L1 automatically computes the **Irreducible Inconsistent Subsystem (IIS)** using Gurobi, identifying the minimal set of conflicting constraints:
@@ -650,7 +575,7 @@ All verification layers output results in a unified `Diagnostic` format:
 ```python
 @dataclass
 class Diagnostic:
-    layer: str          # "L1", "L2", "L3", "L4"
+    layer: str          # "L1", "L2", "L3"
     issue_type: str     # "INFEASIBLE", "DIRECTION_VIOLATION", "MISSING_CONSTRAINT", "SPEC_VIOLATION", etc.
     severity: str       # "ERROR", "WARNING", "INFO"
     target_name: str    # Which parameter/constraint

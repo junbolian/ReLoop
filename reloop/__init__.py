@@ -10,8 +10,6 @@ from .verification import (
     verify_code,
     layer_results_to_diagnostics,
     l2_verify_results_to_diagnostics,
-    # Backward compatibility alias
-    l4_verify_results_to_diagnostics,
 )
 
 from .executor import CodeExecutor
@@ -50,13 +48,6 @@ from .l2_direction import (
 
 from .pipeline import ReLoopPipeline, PipelineResult, RepairContext, run_reloop
 
-from .specification import (
-    run_l4,
-    extract_specification,
-    verify_specification,
-    results_to_diagnostics as l4_results_to_diagnostics,
-)
-
 from .data_extraction import DataExtractor, extract_data_from_question
 
 from .experiment_runner import (
@@ -78,7 +69,6 @@ __all__ = [
     "verify_code",
     "layer_results_to_diagnostics",
     "l2_verify_results_to_diagnostics",
-    "l4_verify_results_to_diagnostics",  # backward compat alias
     # Executor
     "CodeExecutor",
     # Parameter utilities
@@ -114,11 +104,6 @@ __all__ = [
     "PipelineResult",
     "RepairContext",
     "run_reloop",
-    # L4 Specification Compliance
-    "run_l4",
-    "extract_specification",
-    "verify_specification",
-    "l4_results_to_diagnostics",
     # Data Extraction
     "DataExtractor",
     "extract_data_from_question",

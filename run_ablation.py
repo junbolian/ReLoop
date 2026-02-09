@@ -5,8 +5,7 @@ Dataset ablation runner.
 For each record:
 1) Generate CoT code.
 2) Evaluate baseline execution (CoT only).
-3) Run L1, L1+L2 (direction analysis), final L1+L2+L3 (with CPT),
-   and optionally L4 (specification compliance).
+3) Run L1, L1+L2 (direction analysis), final L1+L2+L3 (with CPT).
 4) Record objective per stage and pass/fail vs ground truth with tolerance.
 5) Accumulate token usage and runtime. Concurrency = 20.
 6) Save summary CSV and chat logs JSONL.
@@ -125,7 +124,6 @@ class RecordResult:
     l1: StageResult
     l2: StageResult
     final: StageResult
-    l4: StageResult       # L1+L2+L3+L4 (specification compliance)
     runtime: float
     prompt_tokens: int
     completion_tokens: int
@@ -189,7 +187,6 @@ def run_item(
     base_url: Optional[str],
     tol: float,
     enable_cpt: bool,
-    enable_l4: bool = False,
     verbose: bool = False,
 ) -> RecordResult:
     started = time.time()
@@ -278,32 +275,6 @@ def run_item(
         if verbose:
             print(f"[ablation] idx={idx} final status={final_status}, obj={final_obj}")
 
-        # Stage 4: L4 Specification Compliance (L1+L2+L3+L4)
-        # Runs pipeline with L4 enabled on the final code.
-        # Skips L2/L3 re-run to save LLM calls (already done in final stage).
-        l4_obj = final_obj
-        l4_status = final_status
-        if enable_l4 and final_result.final_code:
-            if verbose:
-                print(f"[ablation] idx={idx} running L4 specification check")
-            pipeline_l4 = ReLoopPipeline(
-                llm_client=llm,
-                enable_cpt=False,               # Already ran in final stage
-                enable_l4_adversarial=False,     # Already ran
-                enable_l4_specification=True,    # This is what we're testing
-                max_repair_iterations=3,
-                verbose=verbose,
-            )
-            l4_pipe_result = pipeline_l4.run(
-                problem_description=problem,
-                data=data,
-                initial_code=final_result.final_code,
-            )
-            l4_obj = l4_pipe_result.final_report.objective
-            l4_status = l4_pipe_result.final_report.status
-            if verbose:
-                print(f"[ablation] idx={idx} L4 status={l4_status}, obj={l4_obj}")
-
         runtime = time.time() - started
         prompt_tokens = llm.total_prompt_tokens
         completion_tokens = llm.total_completion_tokens
@@ -317,7 +288,6 @@ def run_item(
             l1=StageResult(l1_obj, l1_status, pass_check(l1_obj, ground_truth, tol)),
             l2=StageResult(l2_obj, l2_status, pass_check(l2_obj, ground_truth, tol)),
             final=StageResult(final_obj, final_status, pass_check(final_obj, ground_truth, tol)),
-            l4=StageResult(l4_obj, l4_status, pass_check(l4_obj, ground_truth, tol)),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -339,7 +309,6 @@ def run_item(
             l1=StageResult(None, "FAILED", False),
             l2=StageResult(None, "FAILED", False),
             final=StageResult(None, "FAILED", False),
-            l4=StageResult(None, "FAILED", False),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -360,7 +329,6 @@ def main():
     parser.add_argument("--base-url", default=None, help="Optional OpenAI-compatible base URL.")
     parser.add_argument("--tol", type=float, default=1e-6, help="Pass tolerance for objective error.")
     parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
-    parser.add_argument("--enable-l4", action="store_true", help="Enable L4 specification compliance checking.")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging to stdout.")
     args = parser.parse_args()
@@ -378,7 +346,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(run_item, idx, item, args.model, args.base_url, args.tol, args.enable_cpt, args.enable_l4, args.verbose): idx
+            ex.submit(run_item, idx, item, args.model, args.base_url, args.tol, args.enable_cpt, args.verbose): idx
             for idx, item in enumerate(records)
         }
         for fut in as_completed(futures):
@@ -409,8 +377,6 @@ def main():
             "l2_pass",
             "final_obj",
             "final_pass",
-            "l4_obj",
-            "l4_pass",
             "runtime_s",
             "prompt_tokens",
             "completion_tokens",
@@ -430,8 +396,6 @@ def main():
                 r.l2.passed,
                 r.final.objective,
                 r.final.passed,
-                r.l4.objective,
-                r.l4.passed,
                 f"{r.runtime:.3f}",
                 r.prompt_tokens,
                 r.completion_tokens,
