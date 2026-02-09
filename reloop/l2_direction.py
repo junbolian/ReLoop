@@ -1,5 +1,5 @@
 """
-ReLoop L4: Adversarial Direction Analysis
+ReLoop L2: Direction Consistency Analysis (Adversarial)
 
 LLM-based parameter direction verification with adversarial rejection mechanism.
 
@@ -15,7 +15,11 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .param_utils import extract_numeric_params, perturb_param, should_skip_param
+from .param_utils import extract_numeric_params, perturb_param, should_skip_param, get_param_value
+from .perturbation import (
+    get_source_code_param_names, extract_perturbable_params,
+    perturb_code, _match_param,
+)
 
 
 # =============================================================================
@@ -23,8 +27,8 @@ from .param_utils import extract_numeric_params, perturb_param, should_skip_para
 # =============================================================================
 
 @dataclass
-class L4VerifyResult:
-    """Result of L4 verification for a single parameter."""
+class L2VerifyResult:
+    """Result of L2 direction verification for a single parameter."""
     param: str
     param_role: str              # "constraint_bound" | "objective_coef" | "other"
     expected_direction: str      # "increase" | "decrease" | "no_effect" | "uncertain"
@@ -38,7 +42,7 @@ class L4VerifyResult:
 
 
 @dataclass
-class L4RepairDecision:
+class L2RepairDecision:
     """Decision from repair LLM for a single parameter."""
     param: str
     action: str                  # "accept" | "reject"
@@ -47,7 +51,7 @@ class L4RepairDecision:
 
 
 @dataclass
-class L4RejectionHistory:
+class L2RejectionHistory:
     """History of rejections for re-analysis context."""
     param: str
     round: int
@@ -56,22 +60,29 @@ class L4RejectionHistory:
 
 
 @dataclass
-class L4Result:
-    """Aggregated L4 result."""
+class L2Result:
+    """Aggregated L2 direction analysis result."""
     status: str                  # "PASS" | "ISSUES" | "INFO"
-    verify_results: List[L4VerifyResult]
-    decisions: List[L4RepairDecision]
-    rejection_history: Dict[str, List[L4RejectionHistory]]
+    verify_results: List[L2VerifyResult]
+    decisions: List[L2RepairDecision]
+    rejection_history: Dict[str, List[L2RejectionHistory]]
+
+
+# Backward compatibility aliases
+L4VerifyResult = L2VerifyResult
+L4RepairDecision = L2RepairDecision
+L4RejectionHistory = L2RejectionHistory
+L4Result = L2Result
 
 
 # =============================================================================
 # Prompts
 # =============================================================================
 
-L4_VERIFY_SYSTEM = """You are an optimization expert analyzing parameter behavior in mathematical models.
+L2_VERIFY_SYSTEM = """You are an optimization expert analyzing parameter behavior in mathematical models.
 Your task is to determine what behavior we SHOULD expect from each parameter, and whether the observed behavior matches."""
 
-L4_VERIFY_PROMPT = '''Analyze the parameter behavior in this optimization problem.
+L2_VERIFY_PROMPT = '''Analyze the parameter behavior in this optimization problem.
 
 ## Problem Description
 {problem_description}
@@ -120,7 +131,7 @@ Return ONLY JSON (no text) in this format:
 Include one object per parameter, in the same order.
 '''
 
-L4_REJECTION_CONTEXT = """
+L2_REJECTION_CONTEXT = """
 ## Previous Analysis Was Rejected
 **Your previous analysis**: {previous_reason}
 **Rejection reason from repair agent**: {rejection_reason}
@@ -130,7 +141,7 @@ If the rejection reason is valid, adjust your conclusion.
 If you still believe your original analysis was correct, provide stronger justification.
 """
 
-L4_REPAIR_PROMPT = '''Review these L4 direction analysis diagnostics and decide how to handle each.
+L2_REPAIR_PROMPT = '''Review these L2 direction analysis diagnostics and decide how to handle each.
 
 ## Problem Description
 {problem_description}
@@ -140,7 +151,7 @@ L4_REPAIR_PROMPT = '''Review these L4 direction analysis diagnostics and decide 
 {code}
 ```
 
-## L4 Diagnostics
+## L2 Diagnostics
 
 {l4_diagnostics}
 
@@ -163,6 +174,11 @@ Your rejection will trigger re-analysis with your feedback.
 2. The parameter role is correctly identified AND behavior violates expectation
 3. You cannot find a reason to reject the analysis
 
+**SAFETY RULES (violations will cause your repair to be rejected):**
+- Do NOT redefine the `data` variable. Data is provided externally.
+- Do NOT modify data contents (no `data[key] = new_value`).
+- Only modify the optimization model: variables, constraints, objective function.
+
 ## Response Format
 Return JSON only (no other text):
 ```json
@@ -171,7 +187,7 @@ Return JSON only (no other text):
         {{
             "param": "parameter_name",
             "action": "accept" | "reject",
-            "reason": "If reject: why L4 analysis is wrong. If accept: description of the fix needed"
+            "reason": "If reject: why L2 analysis is wrong. If accept: description of the fix needed"
         }}
     ],
     "fixed_code": "Complete fixed code if any accepts, otherwise null"
@@ -179,14 +195,20 @@ Return JSON only (no other text):
 ```
 '''
 
+# Backward compatibility aliases
+L4_VERIFY_SYSTEM = L2_VERIFY_SYSTEM
+L4_VERIFY_PROMPT = L2_VERIFY_PROMPT
+L4_REJECTION_CONTEXT = L2_REJECTION_CONTEXT
+L4_REPAIR_PROMPT = L2_REPAIR_PROMPT
+
 
 # =============================================================================
-# L4 Adversarial Verifier
+# L2 Direction Consistency Verifier (Adversarial)
 # =============================================================================
 
-class L4AdversarialVerifier:
+class L2DirectionVerifier:
     """
-    L4: Adversarial Direction Analysis
+    L2: Direction Consistency Analysis (Adversarial)
 
     Uses LLM to analyze parameter direction expectations.
     Features adversarial mechanism where repair LLM can reject diagnostics.
@@ -210,7 +232,7 @@ class L4AdversarialVerifier:
         self.delta = delta
         self.max_rejections = max_rejections
         self.confidence_threshold = confidence_threshold
-        self.rejection_history: Dict[str, List[L4RejectionHistory]] = {}
+        self.rejection_history: Dict[str, List[L2RejectionHistory]] = {}
 
     def reset(self):
         """Reset rejection history for new verification session."""
@@ -224,8 +246,9 @@ class L4AdversarialVerifier:
         problem_description: str,
         params: Optional[List[str]] = None,
         exclude_params: Optional[List[str]] = None,
-        executor=None
-    ) -> List[L4VerifyResult]:
+        executor=None,
+        mode: str = "data_dict"
+    ) -> List[L2VerifyResult]:
         """
         Verify parameter directions using a single batched LLM analysis call.
 
@@ -235,15 +258,22 @@ class L4AdversarialVerifier:
             baseline_obj: Baseline objective value
             problem_description: Natural language problem description
             params: Parameters to analyze (if None, extract from data)
-            exclude_params: Parameters to skip (e.g., already flagged by L2)
+            exclude_params: Parameters to skip (e.g., already flagged)
             executor: Code executor (for perturbation tests)
 
         Returns:
-            List of L4VerifyResult for each analyzed parameter
+            List of L2VerifyResult for each analyzed parameter
         """
         # Get parameters to analyze
         if params is None:
-            params = extract_numeric_params(data)
+            if mode == "source_code":
+                params = get_source_code_param_names(code)
+            elif mode == "hybrid":
+                data_params = extract_numeric_params(data)
+                code_params = get_source_code_param_names(code)
+                params = data_params + [p for p in code_params if p not in data_params]
+            else:
+                params = extract_numeric_params(data)
 
         exclude_params = exclude_params or []
         # Analyze all numeric params (excluding those flagged elsewhere)
@@ -251,14 +281,19 @@ class L4AdversarialVerifier:
 
         param_entries = []
         for param in params_to_analyze:
-            skip, _ = should_skip_param(data, param)
-            if skip:
-                continue
+            if mode != "source_code":
+                param_in_data = get_param_value(data, param) is not None
+                if param_in_data:
+                    skip, _ = should_skip_param(data, param)
+                    if skip:
+                        continue
 
             if executor is None:
                 continue
 
-            z_plus, z_minus = self._perturb_and_solve(executor, code, data, param)
+            z_plus, z_minus = self._perturb_and_solve(
+                executor, code, data, param, mode, baseline_obj
+            )
             if z_plus is None or z_minus is None:
                 continue
 
@@ -290,16 +325,47 @@ class L4AdversarialVerifier:
         return analyses
 
     def _perturb_and_solve(
-        self, executor, code: str, data: Dict, param: str
+        self, executor, code: str, data: Dict, param: str,
+        mode: str = "data_dict", baseline_obj: Optional[float] = None
     ) -> Tuple[Optional[float], Optional[float]]:
         """Perturb parameter and get objective values."""
-        data_plus = perturb_param(data, param, 1 + self.delta)
-        data_minus = perturb_param(data, param, 1 - self.delta)
+        if mode == "source_code":
+            code_params = extract_perturbable_params(code)
+            matched = _match_param(code_params, param)
+            if not matched:
+                return None, None
+            code_plus = perturb_code(code, matched['access_path'], 1 + self.delta)
+            code_minus = perturb_code(code, matched['access_path'], 1 - self.delta)
+            result_plus = executor.execute(code_plus, data)
+            result_minus = executor.execute(code_minus, data)
+        else:
+            # data_dict or hybrid
+            data_plus = perturb_param(data, param, 1 + self.delta)
+            data_minus = perturb_param(data, param, 1 - self.delta)
+            result_plus = executor.execute(code, data_plus)
+            result_minus = executor.execute(code, data_minus)
 
-        result_plus = executor.execute(code, data_plus)
-        result_minus = executor.execute(code, data_minus)
+        obj_plus = result_plus.get("objective")
+        obj_minus = result_minus.get("objective")
 
-        return result_plus.get("objective"), result_minus.get("objective")
+        # Hybrid fallback: if data perturbation had no effect, try source-code
+        if (mode == "hybrid" and baseline_obj is not None
+                and obj_plus is not None and obj_minus is not None):
+            threshold = 1e-4 * max(abs(baseline_obj), 1.0)
+            if (abs(obj_plus - baseline_obj) <= threshold
+                    and abs(obj_minus - baseline_obj) <= threshold):
+                code_params = extract_perturbable_params(code)
+                matched = _match_param(code_params, param)
+                if matched:
+                    code_plus = perturb_code(code, matched['access_path'], 1 + self.delta)
+                    code_minus = perturb_code(code, matched['access_path'], 1 - self.delta)
+                    if code_plus != code or code_minus != code:
+                        result_plus = executor.execute(code_plus, data)
+                        result_minus = executor.execute(code_minus, data)
+                        obj_plus = result_plus.get("objective")
+                        obj_minus = result_minus.get("objective")
+
+        return obj_plus, obj_minus
 
     def _build_rejection_context(self, param: str) -> str:
         """Build rejection context for re-analysis."""
@@ -307,7 +373,7 @@ class L4AdversarialVerifier:
             return ""
 
         latest = self.rejection_history[param][-1]
-        return L4_REJECTION_CONTEXT.format(
+        return L2_REJECTION_CONTEXT.format(
             previous_reason=latest.verify_reason,
             rejection_reason=latest.rejection_reason
         )
@@ -318,7 +384,7 @@ class L4AdversarialVerifier:
         problem_description: str,
         baseline_obj: float,
         param_entries: List[Dict[str, Any]]
-    ) -> List[L4VerifyResult]:
+    ) -> List[L2VerifyResult]:
         """Analyze multiple parameters in one LLM call."""
         lines = []
         for i, p in enumerate(param_entries, 1):
@@ -333,7 +399,7 @@ class L4AdversarialVerifier:
             )
         param_block = "\n".join(lines)
 
-        prompt = L4_VERIFY_PROMPT.format(
+        prompt = L2_VERIFY_PROMPT.format(
             problem_description=problem_description,
             sense="minimize",
             code=code,
@@ -341,12 +407,12 @@ class L4AdversarialVerifier:
         )
 
         try:
-            response = self.llm_client.generate(prompt, system=L4_VERIFY_SYSTEM)
+            response = self.llm_client.generate(prompt, system=L2_VERIFY_SYSTEM)
             analysis_list = self._parse_json_response(response)
             if not analysis_list or not isinstance(analysis_list, list):
                 return []
 
-            results: List[L4VerifyResult] = []
+            results: List[L2VerifyResult] = []
             for analysis in analysis_list:
                 param_name = analysis.get("param")
                 entry = next((p for p in param_entries if p["param"] == param_name), None)
@@ -357,7 +423,7 @@ class L4AdversarialVerifier:
                     entry["z_plus"], entry["z_minus"], baseline_obj
                 )
 
-                results.append(L4VerifyResult(
+                results.append(L2VerifyResult(
                     param=param_name,
                     param_role=analysis.get("param_role", "other"),
                     expected_direction=analysis.get("expected_direction", "uncertain"),
@@ -430,8 +496,8 @@ class L4AdversarialVerifier:
 
     def process_repair_decisions(
         self,
-        decisions: List[L4RepairDecision],
-        verify_results: List[L4VerifyResult]
+        decisions: List[L2RepairDecision],
+        verify_results: List[L2VerifyResult]
     ) -> Dict[str, Any]:
         """
         Process repair LLM's Accept/Reject decisions.
@@ -440,7 +506,7 @@ class L4AdversarialVerifier:
             {
                 "accepted": List of accepted decisions,
                 "rejected": List of rejected decisions,
-                "should_reverify": Whether to re-run L4 with rejection context
+                "should_reverify": Whether to re-run L2 with rejection context
             }
         """
         accepted = []
@@ -461,7 +527,7 @@ class L4AdversarialVerifier:
                 )
                 verify_reason = verify_result.reason if verify_result else ""
 
-                self.rejection_history[param].append(L4RejectionHistory(
+                self.rejection_history[param].append(L2RejectionHistory(
                     param=param,
                     round=len(self.rejection_history[param]) + 1,
                     verify_reason=verify_reason,
@@ -481,7 +547,7 @@ class L4AdversarialVerifier:
             "should_reverify": should_reverify
         }
 
-    def _all_max_rejections_reached(self, rejected: List[L4RepairDecision]) -> bool:
+    def _all_max_rejections_reached(self, rejected: List[L2RepairDecision]) -> bool:
         """Check if all rejected params have reached max rejection count."""
         for decision in rejected:
             history = self.rejection_history.get(decision.param, [])
@@ -489,9 +555,9 @@ class L4AdversarialVerifier:
                 return False
         return True
 
-    def get_final_status(self, verify_results: List[L4VerifyResult]) -> str:
+    def get_final_status(self, verify_results: List[L2VerifyResult]) -> str:
         """
-        Determine L4 final status.
+        Determine L2 final status.
 
         Returns:
             "PASS": No violations or all low confidence
@@ -519,9 +585,9 @@ class L4AdversarialVerifier:
 
     def format_diagnostics_for_repair(
         self,
-        verify_results: List[L4VerifyResult]
+        verify_results: List[L2VerifyResult]
     ) -> str:
-        """Format L4 results for repair prompt."""
+        """Format L2 results for repair prompt."""
         lines = []
 
         violations = [
@@ -547,7 +613,7 @@ class L4AdversarialVerifier:
 
         return "\n".join(lines)
 
-    def parse_repair_response(self, response: str) -> Tuple[List[L4RepairDecision], Optional[str]]:
+    def parse_repair_response(self, response: str) -> Tuple[List[L2RepairDecision], Optional[str]]:
         """Parse repair LLM response into decisions and fixed code."""
         parsed = self._parse_json_response(response)
 
@@ -556,7 +622,7 @@ class L4AdversarialVerifier:
 
         decisions = []
         for d in parsed.get("decisions", []):
-            decisions.append(L4RepairDecision(
+            decisions.append(L2RepairDecision(
                 param=d.get("param", ""),
                 action=d.get("action", "reject"),
                 rejection_reason=d.get("reason", "") if d.get("action") == "reject" else "",
@@ -568,23 +634,27 @@ class L4AdversarialVerifier:
         return decisions, fixed_code
 
 
+# Backward compatibility alias
+L4AdversarialVerifier = L2DirectionVerifier
+
+
 # =============================================================================
 # Convenience Functions
 # =============================================================================
 
-def should_exit_l4_loop(
-    l4_status: str,
-    decisions: List[L4RepairDecision],
+def should_exit_l2_loop(
+    l2_status: str,
+    decisions: List[L2RepairDecision],
     other_layers_status: Dict[str, str]
 ) -> Tuple[bool, str]:
     """
-    Determine if L4 loop should exit.
+    Determine if L2 adversarial loop should exit.
 
     Returns:
         (should_exit, reason)
     """
     # Condition 1: All PASS
-    if l4_status == "PASS":
+    if l2_status == "PASS":
         return True, "all_pass"
 
     # Condition 2: All violations rejected + other layers PASS
@@ -596,8 +666,12 @@ def should_exit_l4_loop(
     if all_rejected and other_pass:
         return True, "all_rejected_others_pass"
 
-    # Condition 3: L4 downgraded to INFO (max rejections reached)
-    if l4_status == "INFO":
+    # Condition 3: L2 downgraded to INFO (max rejections reached)
+    if l2_status == "INFO":
         return True, "downgraded_to_info"
 
     return False, "continue"
+
+
+# Backward compatibility alias
+should_exit_l4_loop = should_exit_l2_loop

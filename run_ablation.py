@@ -5,7 +5,8 @@ Dataset ablation runner.
 For each record:
 1) Generate CoT code.
 2) Evaluate baseline execution (CoT only).
-3) Run L1, L1+L2, L1+L2+L3, L1+L2+L3+L4 (adversarial), and final L1-5.
+3) Run L1, L1+L2 (direction analysis), final L1+L2+L3 (with CPT),
+   and optionally L4 (specification compliance).
 4) Record objective per stage and pass/fail vs ground truth with tolerance.
 5) Accumulate token usage and runtime. Concurrency = 20.
 6) Save summary CSV and chat logs JSONL.
@@ -29,7 +30,7 @@ from reloop import (
     CodeExecutor,
     Severity,
 )
-from reloop.param_utils import extract_numeric_params
+# param_utils no longer needed for ablation stages
 
 # Optional: OpenAI client for token accounting
 try:
@@ -43,7 +44,10 @@ except Exception:
 # --------------------------------------------------------------------------- #
 
 class UsageLLM:
-    """OpenAI-compatible LLM client with temperature=0, max_tokens=4096, usage & log tracking."""
+    """OpenAI-compatible LLM client with temperature=0, usage & log tracking."""
+
+    # Reasoning models that need max_completion_tokens instead of max_tokens
+    REASONING_MODELS = {"deepseek-r1", "deepseek-reasoner", "o1", "o1-preview", "o1-mini", "o3", "o3-mini"}
 
     def __init__(self, model: str, base_url: Optional[str] = None):
         if OpenAI is None:
@@ -55,6 +59,7 @@ class UsageLLM:
         kwargs = {"base_url": base_url} if base_url else {}
         self.client = OpenAI(**kwargs)
         self.model = model
+        self.is_reasoning = any(model.startswith(r) for r in self.REASONING_MODELS)
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.logs: List[Dict[str, Any]] = []
@@ -64,12 +69,22 @@ class UsageLLM:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0,
-            max_tokens=8192,
-        )
+
+        if self.is_reasoning:
+            # Reasoning models: use max_completion_tokens (covers thinking + output)
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_completion_tokens=16384,
+            )
+        else:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0,
+                seed=0,
+                max_tokens=8192,
+            )
         usage = resp.usage
         if usage:
             self.total_prompt_tokens += usage.prompt_tokens or 0
@@ -109,9 +124,8 @@ class RecordResult:
     cot: StageResult
     l1: StageResult
     l2: StageResult
-    l3: StageResult
-    l4: StageResult
     final: StageResult
+    l4: StageResult       # L1+L2+L3+L4 (specification compliance)
     runtime: float
     prompt_tokens: int
     completion_tokens: int
@@ -175,6 +189,7 @@ def run_item(
     base_url: Optional[str],
     tol: float,
     enable_cpt: bool,
+    enable_l4: bool = False,
     verbose: bool = False,
 ) -> RecordResult:
     started = time.time()
@@ -219,57 +234,40 @@ def run_item(
         if verbose:
             print(f"[ablation] idx={idx} code generated (len={len(code)})")
 
-        # Stage 1 + L1: run once, reuse baseline for CoT
+        # Stage 1: L1 execution verification (+ duality check)
         l1_results, l1_base = verifier._layer1(code, data, verbose=False)
         l1_obj = l1_base.get("objective") if isinstance(l1_base, dict) else None
         cot_obj = l1_obj
         cot_status = l1_base.get("status") or "UNKNOWN"
         l1_status = "FAILED" if any(r.severity == Severity.FATAL for r in l1_results) else "PASS"
 
-    # Stage 3: L1+L2
-        l2_obj = l1_obj
-        l2_status = l1_status
-        layer_results = list(l1_results)
-        if l1_status != "FAILED" and l1_obj is not None:
-            numeric_params = extract_numeric_params(data)
-            l2_results = verifier._layer2(code, data, l1_obj, numeric_params, verbose=False)
-            layer_results.extend(l2_results)
-            l2_status = "ERRORS" if any(r.severity == Severity.ERROR for r in l2_results) else "PASS"
-
-    # Stage 4: L1+L2+L3
-        l3_obj = l2_obj
-        l3_status = l2_status
-        if l2_status != "FAILED" and l1_obj is not None:
-            l3_results = verifier._layer3(l1_obj, l1_base, verbose=False)
-            layer_results.extend(l3_results)
-            l3_status = "ERRORS" if any(r.severity == Severity.ERROR for r in l3_results) else l2_status
-
-        # Stage 5: L1+L2+L3+L4 (adversarial loop, no CPT)
-        l4_obj = None
-        l4_status = "FAILED"
+        # Stage 2: L1+L2 direction analysis (adversarial loop, no CPT)
+        l2_obj = None
+        l2_status = "FAILED"
         if l1_obj is not None:
-            report_l3 = verifier._aggregate(
+            layer_results = list(l1_results)
+            report_l1 = verifier._aggregate(
                 layer_results, l1_obj, l1_base.get("solution"), verifier._estimate_complexity(code, data), 0, False
             )
-            l4_results, l4_exit, code_after_l4 = pipeline._run_l4_adversarial_loop(
+            l2_results, l2_exit, code_after_l2 = pipeline._run_l2_adversarial_loop(
                 code=code,
                 data=data,
                 baseline_obj=l1_obj,
                 problem_description=problem,
-                report=report_l3,
-                max_l4_iterations=3,
+                report=report_l1,
+                max_l2_iterations=3,
             )
             # Re-verify (without CPT) to get objective
-            report_after_l4 = verifier.verify(
-                code_after_l4, data, problem_description=problem, enable_cpt=False, verbose=False
+            report_after_l2 = verifier.verify(
+                code_after_l2, data, problem_description=problem, enable_cpt=False, verbose=False
             )
-            l4_obj = report_after_l4.objective
-            l4_status = report_after_l4.status
-            code = code_after_l4  # use for final stage
+            l2_obj = report_after_l2.objective
+            l2_status = report_after_l2.status
+            code = code_after_l2  # use for final stage
         if verbose:
-            print(f"[ablation] idx={idx} after L4 status={l4_status}")
+            print(f"[ablation] idx={idx} after L2 status={l2_status}")
 
-        # Stage 6: Final (L1-5)
+        # Stage 3: Final (L1+L2+L3 full pipeline with CPT)
         final_result = pipeline.run(
             problem_description=problem,
             data=data,
@@ -279,6 +277,32 @@ def run_item(
         final_status = final_result.final_report.status
         if verbose:
             print(f"[ablation] idx={idx} final status={final_status}, obj={final_obj}")
+
+        # Stage 4: L4 Specification Compliance (L1+L2+L3+L4)
+        # Runs pipeline with L4 enabled on the final code.
+        # Skips L2/L3 re-run to save LLM calls (already done in final stage).
+        l4_obj = final_obj
+        l4_status = final_status
+        if enable_l4 and final_result.final_code:
+            if verbose:
+                print(f"[ablation] idx={idx} running L4 specification check")
+            pipeline_l4 = ReLoopPipeline(
+                llm_client=llm,
+                enable_cpt=False,               # Already ran in final stage
+                enable_l4_adversarial=False,     # Already ran
+                enable_l4_specification=True,    # This is what we're testing
+                max_repair_iterations=3,
+                verbose=verbose,
+            )
+            l4_pipe_result = pipeline_l4.run(
+                problem_description=problem,
+                data=data,
+                initial_code=final_result.final_code,
+            )
+            l4_obj = l4_pipe_result.final_report.objective
+            l4_status = l4_pipe_result.final_report.status
+            if verbose:
+                print(f"[ablation] idx={idx} L4 status={l4_status}, obj={l4_obj}")
 
         runtime = time.time() - started
         prompt_tokens = llm.total_prompt_tokens
@@ -292,9 +316,8 @@ def run_item(
             cot=StageResult(cot_obj, cot_status, pass_check(cot_obj, ground_truth, tol)),
             l1=StageResult(l1_obj, l1_status, pass_check(l1_obj, ground_truth, tol)),
             l2=StageResult(l2_obj, l2_status, pass_check(l2_obj, ground_truth, tol)),
-            l3=StageResult(l3_obj, l3_status, pass_check(l3_obj, ground_truth, tol)),
-            l4=StageResult(l4_obj, l4_status, pass_check(l4_obj, ground_truth, tol)),
             final=StageResult(final_obj, final_status, pass_check(final_obj, ground_truth, tol)),
+            l4=StageResult(l4_obj, l4_status, pass_check(l4_obj, ground_truth, tol)),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -315,9 +338,8 @@ def run_item(
             cot=StageResult(None, "FAILED", False),
             l1=StageResult(None, "FAILED", False),
             l2=StageResult(None, "FAILED", False),
-            l3=StageResult(None, "FAILED", False),
-            l4=StageResult(None, "FAILED", False),
             final=StageResult(None, "FAILED", False),
+            l4=StageResult(None, "FAILED", False),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -337,7 +359,8 @@ def main():
     parser.add_argument("-m", "--model", default="gpt-4.1", help="OpenAI model name.")
     parser.add_argument("--base-url", default=None, help="Optional OpenAI-compatible base URL.")
     parser.add_argument("--tol", type=float, default=1e-6, help="Pass tolerance for objective error.")
-    parser.add_argument("--enable-cpt", action="store_true", help="Enable L5 CPT in final stage.")
+    parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
+    parser.add_argument("--enable-l4", action="store_true", help="Enable L4 specification compliance checking.")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging to stdout.")
     args = parser.parse_args()
@@ -355,7 +378,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(run_item, idx, item, args.model, args.base_url, args.tol, args.enable_cpt, args.verbose): idx
+            ex.submit(run_item, idx, item, args.model, args.base_url, args.tol, args.enable_cpt, args.enable_l4, args.verbose): idx
             for idx, item in enumerate(records)
         }
         for fut in as_completed(futures):
@@ -384,12 +407,10 @@ def main():
             "l1_pass",
             "l2_obj",
             "l2_pass",
-            "l3_obj",
-            "l3_pass",
-            "l4_obj",
-            "l4_pass",
             "final_obj",
             "final_pass",
+            "l4_obj",
+            "l4_pass",
             "runtime_s",
             "prompt_tokens",
             "completion_tokens",
@@ -407,12 +428,10 @@ def main():
                 r.l1.passed,
                 r.l2.objective,
                 r.l2.passed,
-                r.l3.objective,
-                r.l3.passed,
-                r.l4.objective,
-                r.l4.passed,
                 r.final.objective,
                 r.final.passed,
+                r.l4.objective,
+                r.l4.passed,
                 f"{r.runtime:.3f}",
                 r.prompt_tokens,
                 r.completion_tokens,
