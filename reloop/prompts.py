@@ -34,6 +34,10 @@ Write the formal model:
 - Sets and indices
 - Parameters (use exact keys from data structure)
 - Decision variables with domains
+  **Variable Type**: For each variable, explicitly decide CONTINUOUS, INTEGER, or BINARY.
+  Look for context where fractional values would be physically meaningless
+  (e.g., number of trucks, workers to hire, items to select).
+  State your choice and reasoning.
 - Constraints in mathematical notation
 - Objective function
 
@@ -161,6 +165,10 @@ Use exact keys from the data structure.
 
 ### S3: Decision Variables (V)
 Define decision variables with domains and bounds.
+**Variable Type**: For each variable, explicitly decide CONTINUOUS, INTEGER, or BINARY.
+Look for context where fractional values would be physically meaningless
+(e.g., number of trucks, workers to hire, items to select).
+State your choice and reasoning.
 
 ### S4: Constraints (C)
 Write each constraint in mathematical notation.
@@ -347,11 +355,11 @@ Focus on constraint directions (>= vs <=) and parameter signs.'''
 
 
 # ============================================================================
-# L4 Adversarial Direction Analysis Prompts
+# L2 Direction Consistency Analysis Prompts
 # ============================================================================
-# Note: L4 prompts are defined in l4_adversarial.py to keep the module self-contained.
+# Note: L2 prompts are defined in l2_direction.py to keep the module self-contained.
 # Import them from there if needed:
-#   from .l4_adversarial import L4_VERIFY_PROMPT, L4_REPAIR_PROMPT
+#   from .l2_direction import L2_VERIFY_PROMPT, L2_REPAIR_PROMPT
 
 
 # ============================================================================
@@ -502,6 +510,125 @@ The `data` variable is PRE-DEFINED with these keys:
 
 Return the COMPLETE fixed code in a ```python block.
 '''
+
+
+def build_repair_prompt(
+    diagnostics: list,
+    code: str,
+    problem_desc: str,
+    data_structure: str,
+    current_obj=None,
+):
+    """
+    Assemble repair prompt from unified Diagnostic objects.
+
+    Only includes diagnostics where triggers_repair=True.
+
+    Args:
+        diagnostics: List of Diagnostic objects
+        code: Current optimization code
+        problem_desc: Original problem description
+        data_structure: Data schema string (from describe_data_schema)
+        current_obj: Current objective value (None if model didn't solve)
+
+    Returns:
+        Formatted repair prompt string, or None if nothing to repair.
+    """
+    actionable = [d for d in diagnostics if d.triggers_repair]
+    if not actionable:
+        return None
+
+    # Build issues section
+    issues_lines = []
+    for i, d in enumerate(actionable, 1):
+        issues_lines.append(
+            f"=== Issue {i} [{d.layer}] [{d.severity}] ===\n"
+            f"Type: {d.issue_type}\n"
+            f"Target: {d.target_name}\n"
+            f"Evidence: {d.evidence}\n"
+        )
+    issues_text = "\n".join(issues_lines)
+
+    # Build reference section (non-actionable diagnostics)
+    info_items = [d for d in diagnostics if not d.triggers_repair]
+    if info_items:
+        ref_lines = [
+            "+" + "-" * 65 + "+",
+            "| Below items are NORMAL in 80%+ of cases.  DO NOT CHANGE.       |",
+            "+" + "-" * 65 + "+",
+            "",
+        ]
+        for j, d in enumerate(info_items, 1):
+            ref_lines.append(
+                f"{j}. [{d.layer}] {d.issue_type} — {d.target_name}\n"
+                f"   {d.evidence}\n"
+                f"   Action: DO NOT FIX (unless 100% certain this is an error)\n"
+            )
+        reference_text = "\n".join(ref_lines)
+    else:
+        reference_text = "[OK] No additional diagnostic information."
+
+    # Objective line
+    if current_obj is not None:
+        obj_line = f"Current objective value: {current_obj}"
+    else:
+        obj_line = "Model did not produce an objective value."
+
+    prompt = f"""Fix this optimization code based on the behavioral verification report.
+
+## Problem
+{problem_desc}
+
+## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}
+
+## Current Code
+```python
+{code}
+```
+
+## {obj_line}
+
+---
+## ISSUES DETECTED ({len(actionable)} actionable)
+
+{issues_text}
+
+---
+## REFERENCE ONLY (DO NOT FIX)
+
+{reference_text}
+
+---
+## REPAIR INSTRUCTIONS
+
+1. Read each Issue carefully, especially the Evidence field
+2. Identify the root cause in your code for each actionable issue
+3. Fix ALL actionable issues above
+4. DO NOT fix items in the REFERENCE section — they are likely normal
+5. **CRITICAL**: The `data` variable is PRE-DEFINED. Do NOT create `data = {{{{...}}}}`.
+6. Preserve all working code — only change what is broken
+
+**SAFETY RULES (violations will cause your repair to be rejected):**
+- Do NOT redefine the `data` variable. Data is provided externally.
+- Do NOT modify data contents (no `data[key] = new_value`).
+- Only modify the optimization model: variables, constraints, objective function.
+- Read data using `data["key"]` but never write to it.
+
+Return the COMPLETE fixed code in a ```python block."""
+
+    return prompt
+
+
+REPAIR_PROMPT_SYSTEM = """You are an optimization code repair expert.
+
+CRITICAL RULES:
+1. ONLY fix the actionable issues listed in the ISSUES DETECTED section
+2. Items in REFERENCE ONLY are for context — DO NOT modify code based on them
+3. Be conservative — only make changes that are clearly necessary
+4. Preserve all working code — only change what is broken
+5. NEVER redefine or modify the `data` variable — it is provided externally"""
 
 
 def format_repair_section(items: list, empty_message: str = "None") -> str:

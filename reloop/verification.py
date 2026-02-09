@@ -1,18 +1,16 @@
 """
-ReLoop Core Verification Module - 5 Layer Architecture
+ReLoop Core Verification Module - 3 Layer Architecture
 
 Layers:
-- L1: Execution & Solver (Blocking Layer) → FATAL
-- L2: Anomaly Detection (Diagnostic Layer) → ERROR/INFO
-- L3: Dual Consistency (Diagnostic Layer) → INFO only
-- L4: Adversarial Direction Analysis (Diagnostic Layer) → WARNING/INFO
-- L5: CPT (Enhancement Layer, Optional) → WARNING/INFO
+- L1: Execution Verification (Blocking Layer) -> FATAL + duality INFO
+- L2: Direction Consistency Analysis (Diagnostic Layer) -> WARNING/INFO
+- L3: Constraint Presence Testing (Enhancement Layer, Optional) -> WARNING/INFO
 
 Severity Levels:
 - FATAL: Code cannot run (L1 only)
-- ERROR: Mathematically certain error, must fix (L2 anomaly - both directions improve)
-- WARNING: High-confidence issue, should fix (L4 accepted, L5 cpt_missing)
-- INFO: Likely normal, for reference only (L2 no_effect, L3 duality, L4 rejected)
+- ERROR: Mathematically certain error, must fix
+- WARNING: High-confidence issue, should fix (L2 accepted, L3 cpt_missing)
+- INFO: Likely normal, for reference only (L1 duality, L2 rejected)
 - PASS: Check passed
 """
 
@@ -28,6 +26,11 @@ from .param_utils import (
     extract_numeric_params, get_param_value,
     perturb_param, set_param, should_skip_param
 )
+from .perturbation import (
+    detect_perturbation_mode, run_perturbation,
+    get_source_code_param_names, perturb_code,
+    extract_perturbable_params, _match_param,
+)
 
 
 class Severity(Enum):
@@ -42,6 +45,21 @@ class Complexity(Enum):
     SIMPLE = "SIMPLE"
     MEDIUM = "MEDIUM"
     COMPLEX = "COMPLEX"
+
+
+@dataclass
+class Diagnostic:
+    """Unified diagnostic schema for all verification layers."""
+    layer: str              # "L1", "L2", "L3"
+    issue_type: str         # "INFEASIBLE", "UNBOUNDED", "RUNTIME_ERROR",
+                            # "SYNTAX_ERROR", "NO_OUTPUT", "TIMEOUT",
+                            # "DUALITY_GAP",
+                            # "DIRECTION_VIOLATION",
+                            # "MISSING_CONSTRAINT"
+    severity: str           # "ERROR", "WARNING", "INFO"
+    target_name: str        # which parameter/constraint, e.g. "capacity"
+    evidence: str           # auto-generated evidence description
+    triggers_repair: bool = True
 
 
 @dataclass
@@ -72,7 +90,7 @@ class ReLoopVerifier:
 
     def __init__(
         self,
-        delta: float = 0.2,
+        delta: float = 0.1,
         epsilon: float = 1e-4,
         timeout: int = 60,
         llm_client=None
@@ -100,9 +118,9 @@ class ReLoopVerifier:
             print("ReLoop Verification")
             print("=" * 60)
 
-        # L1: Execution & Solver
+        # L1: Execution Verification (+ duality check)
         if verbose:
-            print("\n[L1] Execution & Solver")
+            print("\n[L1] Execution Verification")
         l1_results, baseline = self._layer1(code, data, verbose)
         layer_results.extend(l1_results)
 
@@ -120,57 +138,57 @@ class ReLoopVerifier:
 
         # Estimate complexity
         complexity = self._estimate_complexity(code, data)
-        params = extract_numeric_params(data)
+
+        # Detect perturbation mode
+        mode = detect_perturbation_mode(code, data)
+        if mode == "source_code":
+            params = get_source_code_param_names(code)
+        elif mode == "hybrid":
+            data_params = extract_numeric_params(data)
+            code_params = get_source_code_param_names(code)
+            params = data_params + [p for p in code_params if p not in data_params]
+        else:
+            params = extract_numeric_params(data)
 
         if verbose:
             print(f"\n[Complexity: {complexity.value}]")
             print(f"[Parameters: {len(params)} found]")
 
-        # L2: Anomaly Detection (bidirectional perturbation)
+        # L2: Direction Consistency Analysis (placeholder - full analysis in pipeline)
         if verbose:
-            print("\n[L2] Anomaly Detection")
-        l2_results = self._layer2(code, data, objective, params, verbose)
-        layer_results.extend(l2_results)
-
-        # Extract L2 anomaly params to exclude from L4
-        l2_anomaly_params = [
-            r.details.get("param") for r in l2_results
-            if r.severity == Severity.ERROR and r.details and "param" in r.details
-        ]
-
-        # L3: Dual Consistency
-        if verbose:
-            print("\n[L3] Dual Consistency")
-        l3_results = self._layer3(objective, baseline, verbose)
-        layer_results.extend(l3_results)
-
-        # L4: Adversarial Direction Analysis (LLM-based)
-        if verbose:
-            print("\n[L4] Adversarial Direction Analysis")
-        l4_results = self._layer4(
+            print("\n[L2] Direction Consistency Analysis")
+        l2_results = self._layer2(
             code, data, params, objective, complexity, verbose,
             problem_description=problem_description,
-            l2_anomaly_params=l2_anomaly_params
+            mode=mode
         )
-        layer_results.extend(l4_results)
+        layer_results.extend(l2_results)
 
-        # L5: CPT (Optional)
+        # L3: Constraint Presence Testing (Optional)
         if enable_cpt and problem_description:
             if verbose:
-                print("\n[L5] CPT")
-            l5_results = self._layer5(code, data, objective, problem_description, verbose)
-            layer_results.extend(l5_results)
+                print("\n[L3] Constraint Presence Testing")
+            l3_results = self._layer3(code, data, objective, problem_description, verbose, mode)
+            layer_results.extend(l3_results)
 
         return self._aggregate(layer_results, objective, solution, complexity, start_time, verbose)
 
     # =========================================================================
-    # L1: Execution & Solver (FATAL only)
+    # L1: Execution Verification (Blocking) + Duality Check
     # =========================================================================
 
     def _layer1(
         self, code: str, data: Dict, verbose: bool
     ) -> Tuple[List[LayerResult], Dict]:
-        """L1: Execution and solver status check."""
+        """
+        L1: Execution Verification (blocking).
+
+        Steps:
+        1. Syntax check
+        2. Execute code
+        3. Solver status check (INFEASIBLE/UNBOUNDED/TIMEOUT)
+        4. If OPTIMAL: extract objective + run duality check as add-on diagnostic
+        """
         results = []
 
         # L1.1: Syntax check
@@ -206,20 +224,87 @@ class ReLoopVerifier:
             return results, baseline
 
         if status == "INFEASIBLE":
+            # Build enhanced message with IIS diagnostics if available
+            iis_constrs = baseline.get("iis_constraints")
+            iis_bounds = baseline.get("iis_bounds")
+            if iis_constrs or iis_bounds:
+                n_c = len(iis_constrs) if iis_constrs else 0
+                n_b = len(iis_bounds) if iis_bounds else 0
+                constr_list = "\n".join(
+                    f"  - {c}" for c in (iis_constrs or [])
+                )
+                bound_list = "\n".join(
+                    f"  - {b}" for b in (iis_bounds or [])
+                )
+                iis_msg = (
+                    f"Model is INFEASIBLE. Gurobi IIS analysis identified "
+                    f"{n_c} conflicting constraints and {n_b} conflicting "
+                    f"variable bounds that cannot be simultaneously satisfied."
+                    f"\n\nConflicting constraints:\n{constr_list}"
+                )
+                if iis_bounds:
+                    iis_msg += f"\n\nConflicting variable bounds:\n{bound_list}"
+                iis_msg += (
+                    "\n\nCommon causes:\n"
+                    "1. Missing slack/surplus variable (e.g. no lost_sales "
+                    "variable when supply < demand)\n"
+                    "2. Constraint direction error (<= written as >=)\n"
+                    "3. Overly tight bounds relative to data values\n"
+                    "4. Incorrect indexing causing wrong parameter values"
+                )
+                details = {
+                    "trigger_repair": True, "is_likely_normal": False,
+                    "iis_constraints": iis_constrs,
+                    "iis_bounds": iis_bounds,
+                    "repair_hint": iis_msg,
+                }
+            else:
+                iis_msg = (
+                    "Model is INFEASIBLE. No IIS details available.\n"
+                    "Please check: (1) are slack variables present where needed? "
+                    "(2) are constraint directions correct? "
+                    "(3) are bounds reasonable?"
+                )
+                details = {
+                    "trigger_repair": True, "is_likely_normal": False,
+                    "repair_hint": iis_msg,
+                }
+
             results.append(LayerResult(
                 "L1", "feasibility", Severity.FATAL,
-                "Model is INFEASIBLE", 1.0,
-                {"trigger_repair": True, "is_likely_normal": False,
-                 "repair_hint": "Remove conflicting constraints or fix constraint directions"}
+                iis_msg, 1.0, details
             ))
             return results, baseline
 
         if status == "UNBOUNDED":
+            ub_vars = baseline.get("unbounded_vars")
+            if ub_vars:
+                var_list = "\n".join(f"  - {v}" for v in ub_vars)
+                ub_msg = (
+                    f"Model is UNBOUNDED. The following {len(ub_vars)} "
+                    f"variable(s) have unbounded rays:\n{var_list}\n\n"
+                    "This means these variables can be increased/decreased "
+                    "infinitely to improve the objective. Common causes:\n"
+                    "1. A decision variable that should be bounded is not "
+                    "(e.g. order quantity has no capacity constraint)\n"
+                    "2. A constraint that should limit the objective is missing\n"
+                    "3. Wrong sign in the objective function"
+                )
+            else:
+                ub_msg = (
+                    "Model is UNBOUNDED. The objective can be improved "
+                    "infinitely. Common causes:\n"
+                    "1. A decision variable without upper bound or "
+                    "capacity constraint\n"
+                    "2. A missing constraint that should limit the objective\n"
+                    "3. Wrong sign in the objective function"
+                )
             results.append(LayerResult(
                 "L1", "boundedness", Severity.FATAL,
-                "Model is UNBOUNDED", 1.0,
+                ub_msg, 1.0,
                 {"trigger_repair": True, "is_likely_normal": False,
-                 "repair_hint": "Add missing variable bounds or constraints"}
+                 "unbounded_vars": ub_vars,
+                 "repair_hint": ub_msg}
             ))
             return results, baseline
 
@@ -239,194 +324,23 @@ class ReLoopVerifier:
         if verbose:
             print(f"  [PASS] Status={status}, Objective={objective}")
 
+        # L1 add-on: Duality check (if OPTIMAL)
+        duality_results = self._check_duality(objective, baseline, verbose)
+        results.extend(duality_results)
+
         return results, baseline
 
     # =========================================================================
-    # L2: Anomaly Detection (bidirectional perturbation)
+    # Duality Check (internal helper, called by L1 after OPTIMAL)
     # =========================================================================
 
-    def _layer2(
-        self, code: str, data: Dict, baseline_obj: float,
-        params: List[str], verbose: bool
-    ) -> List[LayerResult]:
-        """
-        L2: Anomaly Detection.
-
-        Detects physically impossible behavior through bidirectional perturbation:
-        - anomaly (both directions improve): ERROR (physically impossible)
-        - no_effect: INFO (likely slack constraint)
-        - high_sensitivity: INFO (for reference)
-
-        Theory: For any valid optimization model, it is impossible for both
-        increasing AND decreasing a parameter to improve the objective.
-        """
-        results = []
-        tested = 0
-        anomaly_params = []
-        no_effect_params = []
-        high_sensitivity_params = []
-        is_minimize = True
-
-        for param in params[:self.max_params]:
-            skip, reason = should_skip_param(data, param)
-            if skip:
-                continue
-
-            # Bidirectional perturbation
-            result_up = self.executor.execute(
-                code, perturb_param(data, param, 1 + self.delta)
-            )
-            result_down = self.executor.execute(
-                code, perturb_param(data, param, 1 - self.delta)
-            )
-
-            obj_up = result_up.get("objective")
-            obj_down = result_down.get("objective")
-
-            # Handle infeasibility caused by perturbation
-            if obj_up is None or obj_down is None:
-                if verbose:
-                    print(f"  [INFO] Parameter '{param}' perturbation caused infeasibility")
-                results.append(LayerResult(
-                    "L2", "perturbation_infeasible", Severity.INFO,
-                    f"Parameter '{param}' perturbation caused infeasibility",
-                    0.5,
-                    {"param": param, "trigger_repair": False, "is_likely_normal": True}
-                ))
-                continue
-
-            tested += 1
-            threshold = self.epsilon * max(abs(baseline_obj), 1.0)
-            change_up = obj_up - baseline_obj
-            change_down = obj_down - baseline_obj
-            has_effect = abs(change_up) > threshold or abs(change_down) > threshold
-
-            # ────────────────────────────────────────────────────
-            # Check 1: No-effect → INFO (very likely normal)
-            # ────────────────────────────────────────────────────
-            if not has_effect:
-                no_effect_params.append({
-                    "param": param,
-                    "baseline": baseline_obj,
-                    "obj_up": obj_up,
-                    "obj_down": obj_down
-                })
-                continue
-
-            # ────────────────────────────────────────────────────
-            # Check 2: Anomaly (both directions improve) → ERROR
-            # ────────────────────────────────────────────────────
-            if is_minimize:
-                up_better = change_up < -threshold
-                down_better = change_down < -threshold
-            else:
-                up_better = change_up > threshold
-                down_better = change_down > threshold
-
-            if up_better and down_better:
-                # ERROR: Physically impossible
-                anomaly_params.append({
-                    "param": param,
-                    "baseline": baseline_obj,
-                    "obj_up": obj_up,
-                    "obj_down": obj_down,
-                    "change_up": change_up,
-                    "change_down": change_down
-                })
-                continue
-
-            # ────────────────────────────────────────────────────
-            # Check 3: High sensitivity → INFO
-            # ────────────────────────────────────────────────────
-            max_change = max(abs(change_up), abs(change_down))
-            if abs(baseline_obj) > self.epsilon and max_change > 0.5 * abs(baseline_obj):
-                sensitivity = max_change / abs(baseline_obj)
-                high_sensitivity_params.append({
-                    "param": param,
-                    "sensitivity": sensitivity,
-                    "change_up": change_up,
-                    "change_down": change_down
-                })
-
-        # Report anomalies → ERROR
-        for item in anomaly_params:
-            results.append(LayerResult(
-                "L2", "anomaly", Severity.ERROR,
-                f"ANOMALY: Both increasing AND decreasing '{item['param']}' "
-                f"IMPROVE the objective ({item['baseline']:.4f} -> "
-                f"{item['obj_up']:.4f} / {item['obj_down']:.4f}). "
-                f"This is physically impossible - model has structural error.",
-                0.95,
-                {
-                    "param": item["param"],
-                    "baseline_obj": item["baseline"],
-                    "obj_up": item["obj_up"],
-                    "obj_down": item["obj_down"],
-                    "change_up": item["change_up"],
-                    "change_down": item["change_down"],
-                    "trigger_repair": True,
-                    "is_likely_normal": False,
-                    "repair_hint": f"Parameter '{item['param']}' is used incorrectly. "
-                                   f"Check constraint signs, directions, and coefficients."
-                }
-            ))
-
-        # Report no-effect parameters → INFO
-        for item in no_effect_params:
-            results.append(LayerResult(
-                "L2", "no_effect", Severity.INFO,
-                f"Parameter '{item['param']}' has no measurable effect on objective",
-                0.3,
-                {
-                    "param": item["param"],
-                    "baseline": item["baseline"],
-                    "obj_up": item["obj_up"],
-                    "obj_down": item["obj_down"],
-                    "trigger_repair": False,
-                    "is_likely_normal": True,
-                    "note": "VERY LIKELY NORMAL - slack constraints naturally have no effect."
-                }
-            ))
-
-        # Report high sensitivity → INFO
-        for item in high_sensitivity_params[:3]:
-            results.append(LayerResult(
-                "L2", "high_sensitivity", Severity.INFO,
-                f"Parameter '{item['param']}' shows high sensitivity: "
-                f"{item['sensitivity']:.1%} change in objective",
-                0.4,
-                {
-                    "param": item["param"],
-                    "sensitivity": item["sensitivity"],
-                    "trigger_repair": False,
-                    "is_likely_normal": True,
-                    "note": "High sensitivity is often normal for binding parameters"
-                }
-            ))
-
-        if not anomaly_params:
-            results.append(LayerResult(
-                "L2", "anomaly_ok", Severity.PASS,
-                f"Anomaly detection passed ({tested} parameters tested)", 0.9
-            ))
-
-        if verbose:
-            print(f"  Tested {tested} params: {len(anomaly_params)} anomalies, "
-                  f"{len(no_effect_params)} no-effect, {len(high_sensitivity_params)} high-sensitivity")
-
-        return results
-
-    # =========================================================================
-    # L3: Dual Consistency (INFO only - likely numerical issues)
-    # =========================================================================
-
-    def _layer3(
+    def _check_duality(
         self, primal_obj: float, baseline: Dict, verbose: bool
     ) -> List[LayerResult]:
         """
-        L3: Dual Consistency Detection.
+        Duality check: verify primal-dual consistency.
 
-        Purpose: Check primal-dual gap.
+        Formerly L3. Now an add-on diagnostic within L1.
         Severity: INFO only (not WARNING).
         Reason: Large gap is often numerical precision, not modeling error.
         """
@@ -440,7 +354,7 @@ class ReLoopVerifier:
             if relative_gap > 0.01:
                 # INFO: Large gap is likely numerical, not error
                 results.append(LayerResult(
-                    "L3", "duality_gap", Severity.INFO,
+                    "L1", "duality_gap", Severity.INFO,
                     f"Primal-dual gap: {relative_gap:.2%}", 0.5,
                     {
                         "primal": primal_obj,
@@ -453,12 +367,12 @@ class ReLoopVerifier:
                 ))
             else:
                 results.append(LayerResult(
-                    "L3", "duality_gap", Severity.PASS,
+                    "L1", "duality_gap", Severity.PASS,
                     f"Duality gap: {relative_gap:.4%}", 0.9
                 ))
         else:
             results.append(LayerResult(
-                "L3", "dual_unavailable", Severity.INFO,
+                "L1", "dual_unavailable", Severity.INFO,
                 "Dual objective not available (MIP or solver limitation)", 0.5,
                 {"trigger_repair": False, "is_likely_normal": True}
             ))
@@ -466,85 +380,75 @@ class ReLoopVerifier:
         return results
 
     # =========================================================================
-    # L4: Adversarial Direction Analysis (LLM-based)
+    # L2: Direction Consistency Analysis (placeholder in verifier)
     # =========================================================================
 
-    def _layer4(
+    def _layer2(
         self, code: str, data: Dict, params: List[str],
         baseline_obj: float,
         complexity: Complexity, verbose: bool,
         problem_description: str = "",
-        l2_anomaly_params: Optional[List[str]] = None
+        mode: str = "data_dict"
     ) -> List[LayerResult]:
         """
-        L4: Adversarial Direction Analysis.
+        L2: Direction Consistency Analysis.
 
         Uses LLM to analyze parameter direction expectations and detect violations.
-        Features adversarial mechanism: Repair LLM can Accept or Reject diagnostics.
-
-        Note: This is a placeholder. Full implementation is in l4_adversarial.py
-        and is called from pipeline.py. When LLM client is not available,
-        L4 returns PASS (no analysis performed).
-
-        Args:
-            l2_anomaly_params: Parameters already flagged by L2 (excluded from L4)
+        Full implementation uses L4AdversarialVerifier (called from pipeline.py).
+        When LLM client is not available, L2 returns PASS (no analysis performed).
         """
         results = []
 
-        # If no LLM client, skip L4
+        # If no LLM client, skip L2
         if self.llm_client is None:
             results.append(LayerResult(
-                "L4", "skipped", Severity.INFO,
-                "L4 Adversarial Direction Analysis skipped (no LLM client)",
+                "L2", "skipped", Severity.INFO,
+                "L2 Direction Consistency Analysis skipped (no LLM client)",
                 0.5,
                 {"trigger_repair": False, "is_likely_normal": True}
             ))
             return results
 
-        # Exclude parameters already flagged by L2
-        l2_anomaly_params = l2_anomaly_params or []
-        params_to_analyze = [p for p in params if p not in l2_anomaly_params]
-
-        if not params_to_analyze:
+        if not params:
             results.append(LayerResult(
-                "L4", "no_params", Severity.PASS,
-                "No parameters to analyze (all handled by L2)",
+                "L2", "no_params", Severity.PASS,
+                "No parameters to analyze",
                 0.9
             ))
             return results
 
-        # Full L4 analysis is handled by L4AdversarialVerifier in pipeline
+        # Full L2 analysis is handled by L2AdversarialVerifier in pipeline
         # This placeholder returns PASS when called directly
         results.append(LayerResult(
-            "L4", "placeholder", Severity.INFO,
-            f"L4 analysis deferred to pipeline ({len(params_to_analyze)} params pending)",
+            "L2", "placeholder", Severity.INFO,
+            f"L2 analysis deferred to pipeline ({len(params)} params pending)",
             0.5,
             {
-                "params_pending": params_to_analyze,
+                "params_pending": params,
                 "trigger_repair": False,
-                "note": "Full L4 analysis with LLM is handled in pipeline.py"
+                "note": "Full L2 analysis with LLM is handled in pipeline.py"
             }
         ))
 
         return results
 
     # =========================================================================
-    # L5: CPT (WARNING for missing <5%, INFO for uncertain 5-30%)
+    # L3: Constraint Presence Testing (WARNING for missing <5%, INFO for uncertain 5-30%)
     # =========================================================================
 
-    def _layer5(
+    def _layer3(
         self, code: str, data: Dict, baseline_obj: float,
-        problem_description: str, verbose: bool
+        problem_description: str, verbose: bool, mode: str = "data_dict"
     ) -> List[LayerResult]:
         """
-        L5: CPT (Constraint Perturbation Testing).
+        L3: Constraint Presence Testing (CPT).
 
         Severity grading based on change ratio:
         - < 5%: WARNING (constraint likely missing)
         - 5%-30%: INFO (uncertain, may be normal)
         - > 30%: PASS (constraint present)
 
-        Note: L5 uses WARNING (not ERROR) because LLM-extracted
+        Note: L3 uses WARNING (not ERROR) because LLM-extracted
         candidates may themselves be inaccurate.
         """
         results = []
@@ -553,8 +457,8 @@ class ReLoopVerifier:
             # Extract candidates (LLM-only, no keyword fallback)
             if not self.llm_client:
                 results.append(LayerResult(
-                    "L5", "cpt_skipped", Severity.INFO,
-                    "L5 CPT skipped (requires LLM for constraint extraction)", 0.5,
+                    "L3", "cpt_skipped", Severity.INFO,
+                    "L3 CPT skipped (requires LLM for constraint extraction)", 0.5,
                     {"trigger_repair": False, "is_likely_normal": True}
                 ))
                 return results
@@ -563,7 +467,7 @@ class ReLoopVerifier:
 
             if not candidates:
                 results.append(LayerResult(
-                    "L5", "cpt_extraction", Severity.INFO,
+                    "L3", "cpt_extraction", Severity.INFO,
                     "No candidate constraints extracted", 0.5,
                     {"trigger_repair": False, "is_likely_normal": True}
                 ))
@@ -575,7 +479,7 @@ class ReLoopVerifier:
             for candidate in candidates[:10]:
                 try:
                     test_result = self._cpt_test_candidate_v2(
-                        code, data, baseline_obj, candidate, verbose
+                        code, data, baseline_obj, candidate, verbose, mode
                     )
                     if test_result:
                         results.append(test_result)
@@ -584,7 +488,7 @@ class ReLoopVerifier:
 
         except Exception as e:
             results.append(LayerResult(
-                "L5", "cpt_error", Severity.INFO,
+                "L3", "cpt_error", Severity.INFO,
                 f"CPT skipped: {str(e)[:100]}", 0.5,
                 {"trigger_repair": False, "is_likely_normal": True}
             ))
@@ -593,7 +497,7 @@ class ReLoopVerifier:
 
     def _cpt_test_candidate_v2(
         self, code: str, data: Dict, baseline_obj: float,
-        candidate: Dict, verbose: bool
+        candidate: Dict, verbose: bool, mode: str = "data_dict"
     ) -> Optional[LayerResult]:
         """Test a single candidate constraint with new thresholds."""
         params = candidate.get("parameters", [])
@@ -604,27 +508,60 @@ class ReLoopVerifier:
         ctype = candidate.get("type", "other")
         description = candidate.get("description", "")
 
-        # Create extreme perturbation based on constraint type
+        # Determine perturbation factor based on constraint type
         if ctype == "capacity":
-            test_data = set_param(data, param, 0.001)
+            code_factor = 0.001
             perturbation_desc = "set to near-zero (x0.001)"
         elif ctype == "demand":
-            test_data = perturb_param(data, param, 100.0)
+            code_factor = 100.0
             perturbation_desc = "scaled up 100x"
         else:
-            test_data = perturb_param(data, param, 0.01)
+            code_factor = 0.01
             perturbation_desc = "scaled to 1%"
 
-        result = self.executor.execute(code, test_data)
-        new_status = result.get("status")
-        new_obj = result.get("objective")
+        new_status = None
+        new_obj = None
+
+        # Strategy 1: data-dict perturbation (for data_dict and hybrid modes)
+        if mode != "source_code":
+            if ctype == "capacity":
+                test_data = set_param(data, param, 0.001)
+            elif ctype == "demand":
+                test_data = perturb_param(data, param, 100.0)
+            else:
+                test_data = perturb_param(data, param, 0.01)
+            result = self.executor.execute(code, test_data)
+            new_status = result.get("status")
+            new_obj = result.get("objective")
+
+        # Strategy 2: source-code fallback
+        use_code_fallback = False
+        if mode == "source_code":
+            use_code_fallback = True
+        elif mode == "hybrid" and new_obj is not None and new_status != "INFEASIBLE":
+            if abs(baseline_obj) > self.epsilon:
+                pre_change = abs(new_obj - baseline_obj) / abs(baseline_obj)
+            else:
+                pre_change = abs(new_obj - baseline_obj)
+            if pre_change < 0.01:
+                use_code_fallback = True
+
+        if use_code_fallback:
+            l3_code_params = extract_perturbable_params(code)
+            matched = _match_param(l3_code_params, param)
+            if matched:
+                perturbed_code = perturb_code(code, matched['access_path'], code_factor)
+                if perturbed_code != code:
+                    result = self.executor.execute(perturbed_code, data)
+                    new_status = result.get("status")
+                    new_obj = result.get("objective")
 
         # If became infeasible, constraint is present
         if new_status == "INFEASIBLE":
             if verbose:
                 print(f"    [PRESENT] {description} - perturbation caused infeasibility")
             return LayerResult(
-                "L5", "cpt_present", Severity.PASS,
+                "L3", "cpt_present", Severity.PASS,
                 f"Constraint '{description}': extreme perturbation caused infeasibility - constraint is present",
                 0.9,
                 {"trigger_repair": False}
@@ -648,7 +585,7 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [MISSING] {description} - only {change_ratio:.1%} change")
             return LayerResult(
-                "L5", "cpt_missing", Severity.WARNING,
+                "L3", "cpt_missing", Severity.WARNING,
                 f"Constraint '{description}' is likely MISSING: "
                 f"extreme perturbation ({perturbation_desc}) caused only {change_ratio:.1%} change",
                 0.75,
@@ -668,7 +605,7 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [UNCERTAIN] {description} - {change_ratio:.1%} change")
             return LayerResult(
-                "L5", "cpt_uncertain", Severity.INFO,
+                "L3", "cpt_uncertain", Severity.INFO,
                 f"Constraint '{description}': {change_ratio:.1%} change (uncertain, may be normal)",
                 0.5,
                 {
@@ -685,7 +622,7 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [PRESENT] {description} - {change_ratio:.1%} change")
             return LayerResult(
-                "L5", "cpt_present", Severity.PASS,
+                "L3", "cpt_present", Severity.PASS,
                 f"Constraint '{description}': {change_ratio:.1%} change - constraint is active",
                 0.85,
                 {"trigger_repair": False}
@@ -742,11 +679,9 @@ Return ONLY the JSON array, no explanation."""
             except json.JSONDecodeError:
                 pass
 
-        except json.JSONDecodeError as e:
-            # JSON parsing failed - log but continue
+        except json.JSONDecodeError:
             pass
-        except Exception as e:
-            # Other error - log but continue
+        except Exception:
             pass
 
         return []
@@ -832,6 +767,239 @@ Return ONLY the JSON array, no explanation."""
             recommendations=recommendations,
             execution_time=time.time() - start_time
         )
+
+
+# =============================================================================
+# Diagnostic Conversion
+# =============================================================================
+
+def layer_results_to_diagnostics(
+    layer_results: List[LayerResult],
+    baseline_obj: Optional[float] = None,
+    delta: float = 0.1,
+) -> List[Diagnostic]:
+    """
+    Convert LayerResult list to unified Diagnostic list.
+
+    Does NOT change any detection logic -- only re-packages the existing
+    results into the unified Diagnostic schema.
+
+    Handles L1 (execution + duality) and L3 (CPT) results.
+    L2 results are handled separately via l2_verify_results_to_diagnostics().
+    """
+    diagnostics: List[Diagnostic] = []
+
+    for r in layer_results:
+        if r.severity == Severity.PASS:
+            continue
+
+        d = r.details or {}
+
+        # --- L1 ---
+        if r.layer == "L1":
+            if r.check == "syntax":
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="SYNTAX_ERROR",
+                    severity="ERROR",
+                    target_name="code",
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "runtime":
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="RUNTIME_ERROR",
+                    severity="ERROR",
+                    target_name="code",
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "output":
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="NO_OUTPUT",
+                    severity="ERROR",
+                    target_name="code",
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "feasibility":
+                # INFEASIBLE with optional IIS
+                iis_constrs = d.get("iis_constraints") or []
+                target = ", ".join(
+                    c.split(" (")[0] for c in iis_constrs[:5]
+                ) if iis_constrs else "model"
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="INFEASIBLE",
+                    severity="ERROR",
+                    target_name=target,
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "boundedness":
+                ub_vars = d.get("unbounded_vars") or []
+                target = ", ".join(
+                    v.split(" (")[0] for v in ub_vars[:5]
+                ) if ub_vars else "objective"
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="UNBOUNDED",
+                    severity="ERROR",
+                    target_name=target,
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "timeout":
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="TIMEOUT",
+                    severity="ERROR",
+                    target_name="solver",
+                    evidence=r.message,
+                    triggers_repair=True,
+                ))
+            elif r.check == "duality_gap" and r.severity == Severity.INFO:
+                # Duality check (formerly L3, now part of L1)
+                primal = d.get("primal", baseline_obj or 0)
+                dual = d.get("dual", 0)
+                gap = d.get("gap", 0)
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="DUALITY_GAP",
+                    severity="INFO",
+                    target_name="primal_dual",
+                    evidence=(
+                        f"Primal-dual gap detected: "
+                        f"primal={primal:.6f}, dual={dual:.6f}, "
+                        f"relative gap={gap:.2%} (threshold=1%). "
+                        f"This is typically a numerical artifact rather than a modeling error."
+                    ),
+                    triggers_repair=False,
+                ))
+            elif r.severity == Severity.INFO:
+                diagnostics.append(Diagnostic(
+                    layer="L1",
+                    issue_type="DUALITY_GAP",
+                    severity="INFO",
+                    target_name="primal_dual",
+                    evidence=r.message,
+                    triggers_repair=False,
+                ))
+
+        # --- L2 ---
+        # L2 (Direction Analysis) results are handled separately via
+        # l2_verify_results_to_diagnostics() since they come from
+        # L2AdversarialVerifier, not from LayerResult objects.
+        # The placeholder LayerResult from verify() is ignored here.
+
+        # --- L3 ---
+        elif r.layer == "L3":
+            if r.check == "cpt_missing" and r.severity == Severity.WARNING:
+                desc = d.get("constraint_name", "unknown")
+                param = d.get("related_param", "unknown")
+                ratio = d.get("change_ratio", 0)
+                diagnostics.append(Diagnostic(
+                    layer="L3",
+                    issue_type="MISSING_CONSTRAINT",
+                    severity="WARNING",
+                    target_name=desc,
+                    evidence=(
+                        f"Constraint related to '{desc}' is likely MISSING. "
+                        f"Extreme perturbation ({param} -> extreme value) caused only "
+                        f"{ratio:.1%} objective change (threshold: <5% = missing). "
+                        f"A correctly constrained model should show significant objective "
+                        f"change under this perturbation."
+                    ),
+                    triggers_repair=True,
+                ))
+            elif r.check == "cpt_uncertain" and r.severity == Severity.INFO:
+                desc = d.get("constraint_name", "unknown")
+                ratio = d.get("change_ratio", 0)
+                diagnostics.append(Diagnostic(
+                    layer="L3",
+                    issue_type="MISSING_CONSTRAINT",
+                    severity="INFO",
+                    target_name=desc,
+                    evidence=(
+                        f"Constraint related to '{desc}' shows UNCERTAIN response. "
+                        f"Extreme perturbation caused {ratio:.1%} objective change "
+                        f"(threshold: 5-30% = uncertain)."
+                    ),
+                    triggers_repair=False,
+                ))
+            elif r.severity == Severity.INFO:
+                diagnostics.append(Diagnostic(
+                    layer="L3",
+                    issue_type=r.check.upper(),
+                    severity="INFO",
+                    target_name="constraint",
+                    evidence=r.message,
+                    triggers_repair=False,
+                ))
+
+    return diagnostics
+
+
+def l2_verify_results_to_diagnostics(
+    l2_results: List,  # List[L2VerifyResult] - avoid circular import
+    rejection_history: Optional[Dict] = None,
+) -> List[Diagnostic]:
+    """
+    Convert L2 Direction Analysis results to unified Diagnostic list.
+
+    Args:
+        l2_results: List of L2VerifyResult objects (from L2AdversarialVerifier)
+        rejection_history: Dict of param -> rejection history (for rejected items)
+    """
+    diagnostics: List[Diagnostic] = []
+    rejection_history = rejection_history or {}
+
+    for r in l2_results:
+        if not r.is_violation or r.confidence < 0.5:
+            continue
+
+        # Check if this param was rejected
+        param_rejections = rejection_history.get(r.param, [])
+        if param_rejections:
+            latest = param_rejections[-1]
+            diagnostics.append(Diagnostic(
+                layer="L2",
+                issue_type="DIRECTION_VIOLATION",
+                severity="INFO",
+                target_name=r.param,
+                evidence=(
+                    f"Parameter '{r.param}' direction initially flagged but "
+                    f"REJECTED by repair-role: {latest.rejection_reason}"
+                ),
+                triggers_repair=False,
+            ))
+        else:
+            delta_pct = int(getattr(r, '_delta', 10) if hasattr(r, '_delta') else 10)
+            diagnostics.append(Diagnostic(
+                layer="L2",
+                issue_type="DIRECTION_VIOLATION",
+                severity="ERROR",
+                target_name=r.param,
+                evidence=(
+                    f"Parameter '{r.param}' moves objective in UNEXPECTED direction. "
+                    f"Role: {r.param_role}. "
+                    f"Expected '{r.expected_direction}' effect, "
+                    f"observed '{r.actual_direction}' effect. "
+                    f"Perturbation: baseline={r.z_baseline:.4f}, "
+                    f"+{delta_pct}%={r.z_plus:.4f}, -{delta_pct}%={r.z_minus:.4f}. "
+                    f"Confidence: {r.confidence:.0%}. "
+                    f"Reason: {r.reason}"
+                ),
+                triggers_repair=True,
+            ))
+
+    return diagnostics
+
+
+# Keep old name as alias for backward compatibility
+l4_verify_results_to_diagnostics = l2_verify_results_to_diagnostics
 
 
 # =============================================================================

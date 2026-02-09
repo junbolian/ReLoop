@@ -60,7 +60,8 @@ class OpenAILLM:
             model=self.model,
             messages=messages,
             temperature=0,
-            max_tokens=4096,
+            seed=0,
+            max_tokens=8192,
         )
         return resp.choices[0].message.content
 
