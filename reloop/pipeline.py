@@ -412,6 +412,11 @@ class ReLoopPipeline:
             verify_time += time.time() - verify_start
             history.append((code, report))
 
+            # Re-collect diagnostics from updated report (L1/L2/L3 only).
+            # L4 is NOT re-run (too expensive); if L4 was the only source of
+            # triggers_repair=True, the loop will now exit correctly.
+            all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
+
             if self.verbose:
                 print(f"[Pipeline] After repair: {report.status}")
 
