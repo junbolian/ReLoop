@@ -192,6 +192,45 @@ print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
 
 ---
 
+## Ablation Study
+
+The ablation study measures each verification layer's marginal contribution. The pipeline records intermediate checkpoints during a single run:
+
+| Checkpoint | What it captures | Pipeline state |
+|------------|-----------------|----------------|
+| **CoT** (baseline) | Raw generated code execution | Before any verification |
+| **L1** | After L1 verify + FATAL regeneration | Before L2 adversarial |
+| **L2** | After L2 direction consistency analysis | Before diagnostic repair |
+| **Final** | After full repair loop (L1+L2+L3 diagnostics) | Complete pipeline |
+
+### Running ablation experiments
+
+```bash
+python run_ablation.py -d data/RetailOpt-190.jsonl -m <model> --enable-cpt --workers 5 -v
+```
+
+### Analyzing layer contributions
+
+```bash
+python analyze_layers.py experiment_results/RetailOpt-190/<model>/ablation_report.csv
+```
+
+Output includes:
+- Pass counts at each stage (0.01%, 1%, 5% tolerance)
+- Layer transitions: fail→pass (helped) vs pass→fail (hurt) per layer
+- Crash recovery statistics
+- Net contribution summary per layer
+
+### Checkpoint design
+
+The `PipelineResult` dataclass includes `l1_checkpoint_obj/status` and `l2_checkpoint_obj/status` fields, recorded automatically during `pipeline.run()`:
+
+1. **L1 checkpoint**: Recorded after L1 verification and FATAL regeneration loop (Step 3). Captures L1's contribution through crash recovery via code regeneration.
+2. **L2 checkpoint**: Recorded after L2 adversarial loop (Step 4). Captures L2's additional contribution through direction consistency repair.
+3. **Final**: The standard pipeline output after the full diagnostic-based repair loop (Step 5), which processes diagnostics from all enabled layers.
+
+---
+
 ## Project Structure
 
 ```
@@ -207,7 +246,7 @@ reloop/
 │   ├── generation.py             # Code generation
 │   ├── repair.py                 # Diagnostic-based repair with L2 Accept/Reject
 │   ├── repair_safety.py          # Repair safety guardrails (data protection, import blocking)
-│   ├── pipeline.py               # Pipeline orchestration
+│   ├── pipeline.py               # Pipeline orchestration (with ablation checkpoints)
 │   ├── data_extraction.py        # NL → structured data extraction
 │   └── experiment_runner.py      # Batch experiment runner
 ├── tests/                        # Test suite
@@ -217,6 +256,8 @@ reloop/
 ├── data/                         # Benchmark datasets (JSONL)
 ├── fig/                          # Architecture diagrams
 │   └── Reloop_framework.pdf      # System architecture diagram
+├── run_ablation.py               # Ablation experiment runner (per-layer contribution)
+├── analyze_layers.py             # Layer contribution analysis from ablation CSV
 ├── requirements.txt              # Python dependencies
 ├── pyproject.toml                # Project configuration
 ├── LICENSE                       # MIT License
@@ -231,7 +272,7 @@ reloop/
 
 | Class | Description |
 |-------|-------------|
-| `ReLoopVerifier` | 4-layer verification engine |
+| `ReLoopVerifier` | 3-layer verification engine |
 | `Diagnostic` | Unified diagnostic schema for all layers |
 | `L2DirectionVerifier` | L2 Direction Consistency Analysis with LLM adversarial debate |
 | `CodeGenerator` | Generate Gurobi code from problem description |
