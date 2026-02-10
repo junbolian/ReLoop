@@ -69,6 +69,11 @@ class PipelineResult:
     success: bool
     improved: bool
     regeneration_count: int = 0
+    # Intermediate ablation checkpoints (recorded automatically)
+    l1_checkpoint_obj: Optional[float] = None    # Objective after L1 verify + regeneration
+    l1_checkpoint_status: str = ""               # Status after L1
+    l2_checkpoint_obj: Optional[float] = None    # Objective after L1 + L2 adversarial
+    l2_checkpoint_status: str = ""               # Status after L2
 
 
 @dataclass
@@ -262,6 +267,10 @@ class ReLoopPipeline:
             if self.verbose:
                 print(f"[Pipeline] After regeneration: {report.status}")
 
+        # -- Ablation checkpoint: after L1 verify + regeneration --
+        l1_checkpoint_obj = report.objective if report else None
+        l1_checkpoint_status = report.status if report else "FAILED"
+
         # Step 4: Run L2 Direction Consistency Analysis (if enabled)
         l2_time = 0.0
         last_l2_results: List[L2VerifyResult] = []
@@ -301,6 +310,10 @@ class ReLoopPipeline:
 
                 if self.verbose:
                     print(f"[Pipeline] After L2 fix: {report.status}")
+
+        # -- Ablation checkpoint: after L2 adversarial loop --
+        l2_checkpoint_obj = report.objective if report else None
+        l2_checkpoint_status = report.status if report else "FAILED"
 
         # Step 5: Handle ERROR/WARNING with repair (INFO does NOT trigger)
         # Uses unified Diagnostic schema + build_repair_prompt()
@@ -425,7 +438,11 @@ class ReLoopPipeline:
             repair_time=repair_time,
             success=success,
             improved=improved,
-            regeneration_count=regeneration_count
+            regeneration_count=regeneration_count,
+            l1_checkpoint_obj=l1_checkpoint_obj,
+            l1_checkpoint_status=l1_checkpoint_status,
+            l2_checkpoint_obj=l2_checkpoint_obj,
+            l2_checkpoint_status=l2_checkpoint_status,
         )
 
     def _analyze_verification_results(self, report: VerificationReport) -> RepairContext:
