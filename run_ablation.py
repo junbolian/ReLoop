@@ -107,11 +107,19 @@ class UsageLLM:
 # Data structures
 # --------------------------------------------------------------------------- #
 
+# Tolerance levels for accuracy evaluation
+TOL_STRICT = 1e-4    # ε=10⁻⁴ (0.01% relative error)
+TOL_MEDIUM = 1e-2    # ε=10⁻² (1% relative error)
+TOL_LOOSE  = 0.05    # ε=5%   (5% relative error)
+
+
 @dataclass
 class StageResult:
     objective: Optional[float]
     status: str
-    passed: bool
+    passed_strict: bool   # ε=10⁻⁴
+    passed_medium: bool   # ε=10⁻²
+    passed_loose: bool    # ε=5%
 
 
 @dataclass
@@ -163,12 +171,32 @@ def load_dataset(path: str) -> List[Dict[str, Any]]:
     return []
 
 
-def pass_check(pred: Optional[float], truth: Optional[float], tol: float) -> Optional[bool]:
+def pass_check(pred: Optional[float], truth: Optional[float], tol: float) -> bool:
     if pred is None or truth is None:
         return False
     if truth == 0:
         return abs(pred) < tol
     return abs(pred - truth) / max(abs(truth), 1e-12) < tol
+
+
+def relative_gap(pred: Optional[float], truth: Optional[float]) -> Optional[float]:
+    """Compute relative gap: |pred - truth| / |truth|. Returns None if either is None."""
+    if pred is None or truth is None:
+        return None
+    if truth == 0:
+        return abs(pred) if pred != 0 else 0.0
+    return abs(pred - truth) / max(abs(truth), 1e-12)
+
+
+def make_stage(obj: Optional[float], status: str, gt: Optional[float]) -> StageResult:
+    """Create StageResult with pass checks at all tolerance levels."""
+    return StageResult(
+        objective=obj,
+        status=status,
+        passed_strict=pass_check(obj, gt, TOL_STRICT),
+        passed_medium=pass_check(obj, gt, TOL_MEDIUM),
+        passed_loose=pass_check(obj, gt, TOL_LOOSE),
+    )
 
 
 def stage_report_from_layers(verifier: ReLoopVerifier, layers: List[Any],
@@ -185,7 +213,6 @@ def run_item(
     item: Dict[str, Any],
     model: str,
     base_url: Optional[str],
-    tol: float,
     enable_cpt: bool,
     verbose: bool = False,
 ) -> RecordResult:
@@ -284,10 +311,10 @@ def run_item(
             problem_id=problem_id,
             difficulty=difficulty,
             ground_truth=ground_truth,
-            cot=StageResult(cot_obj, cot_status, pass_check(cot_obj, ground_truth, tol)),
-            l1=StageResult(l1_obj, l1_status, pass_check(l1_obj, ground_truth, tol)),
-            l2=StageResult(l2_obj, l2_status, pass_check(l2_obj, ground_truth, tol)),
-            final=StageResult(final_obj, final_status, pass_check(final_obj, ground_truth, tol)),
+            cot=make_stage(cot_obj, cot_status, ground_truth),
+            l1=make_stage(l1_obj, l1_status, ground_truth),
+            l2=make_stage(l2_obj, l2_status, ground_truth),
+            final=make_stage(final_obj, final_status, ground_truth),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -305,10 +332,10 @@ def run_item(
             problem_id=problem_id,
             difficulty=difficulty,
             ground_truth=ground_truth,
-            cot=StageResult(None, "FAILED", False),
-            l1=StageResult(None, "FAILED", False),
-            l2=StageResult(None, "FAILED", False),
-            final=StageResult(None, "FAILED", False),
+            cot=StageResult(None, "FAILED", False, False, False),
+            l1=StageResult(None, "FAILED", False, False, False),
+            l2=StageResult(None, "FAILED", False, False, False),
+            final=StageResult(None, "FAILED", False, False, False),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -327,7 +354,6 @@ def main():
     parser.add_argument("-o", "--output-dir", default=None, help="Output base directory (default: experiment_results/<dataset-stem>/<model>).")
     parser.add_argument("-m", "--model", default="gpt-4.1", help="OpenAI model name.")
     parser.add_argument("--base-url", default=None, help="Optional OpenAI-compatible base URL.")
-    parser.add_argument("--tol", type=float, default=1e-6, help="Pass tolerance for objective error.")
     parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging to stdout.")
@@ -346,7 +372,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(run_item, idx, item, args.model, args.base_url, args.tol, args.enable_cpt, args.verbose): idx
+            ex.submit(run_item, idx, item, args.model, args.base_url, args.enable_cpt, args.verbose): idx
             for idx, item in enumerate(records)
         }
         for fut in as_completed(futures):
@@ -370,13 +396,25 @@ def main():
             "difficulty",
             "ground_truth",
             "cot_obj",
-            "cot_pass",
+            "cot_pass_1e4",
+            "cot_pass_1e2",
+            "cot_pass_5pct",
+            "cot_gap",
             "l1_obj",
-            "l1_pass",
+            "l1_pass_1e4",
+            "l1_pass_1e2",
+            "l1_pass_5pct",
+            "l1_gap",
             "l2_obj",
-            "l2_pass",
+            "l2_pass_1e4",
+            "l2_pass_1e2",
+            "l2_pass_5pct",
+            "l2_gap",
             "final_obj",
-            "final_pass",
+            "final_pass_1e4",
+            "final_pass_1e2",
+            "final_pass_5pct",
+            "final_gap",
             "runtime_s",
             "prompt_tokens",
             "completion_tokens",
@@ -389,20 +427,32 @@ def main():
                 r.difficulty,
                 r.ground_truth,
                 r.cot.objective,
-                r.cot.passed,
+                r.cot.passed_strict,
+                r.cot.passed_medium,
+                r.cot.passed_loose,
+                relative_gap(r.cot.objective, r.ground_truth),
                 r.l1.objective,
-                r.l1.passed,
+                r.l1.passed_strict,
+                r.l1.passed_medium,
+                r.l1.passed_loose,
+                relative_gap(r.l1.objective, r.ground_truth),
                 r.l2.objective,
-                r.l2.passed,
+                r.l2.passed_strict,
+                r.l2.passed_medium,
+                r.l2.passed_loose,
+                relative_gap(r.l2.objective, r.ground_truth),
                 r.final.objective,
-                r.final.passed,
+                r.final.passed_strict,
+                r.final.passed_medium,
+                r.final.passed_loose,
+                relative_gap(r.final.objective, r.ground_truth),
                 f"{r.runtime:.3f}",
                 r.prompt_tokens,
                 r.completion_tokens,
                 r.total_tokens,
             ])
 
-    # Chat logs placeholder (empty)
+    # Chat logs
     logs_path = base_dir / "chat_logs.jsonl"
     with logs_path.open("w", encoding="utf-8") as f:
         for r in sorted(results, key=lambda x: x.index):
@@ -410,6 +460,37 @@ def main():
 
     print(f"[ablation] saved CSV to {csv_path}")
     print(f"[ablation] saved logs to {logs_path}")
+
+    # Summary statistics
+    n = len(results)
+    if n == 0:
+        return
+    print(f"\n{'='*70}")
+    print(f"  SUMMARY  ({n} problems, model={args.model})")
+    print(f"{'='*70}")
+
+    for stage_name in ["cot", "final"]:
+        stages = [getattr(r, stage_name) for r in results]
+        gts = [r.ground_truth for r in results]
+
+        exec_count = sum(1 for s in stages if s.objective is not None)
+        strict_count = sum(1 for s in stages if s.passed_strict)
+        medium_count = sum(1 for s in stages if s.passed_medium)
+        loose_count = sum(1 for s in stages if s.passed_loose)
+
+        gaps = [relative_gap(s.objective, gt) for s, gt in zip(stages, gts)
+                if s.objective is not None and gt is not None]
+        avg_gap = sum(gaps) / len(gaps) if gaps else float("nan")
+
+        label = "CoT (no verify)" if stage_name == "cot" else "CoT + ReLoop"
+        print(f"\n  {label}:")
+        print(f"    Exec%          = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
+        print(f"    Acc%(ε=10⁻⁴)   = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
+        print(f"    Acc%(ε=10⁻²)   = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
+        print(f"    Acc%(ε=5%)     = {loose_count}/{n} ({100*loose_count/n:.1f}%)")
+        print(f"    Avg Gap        = {avg_gap:.4f} ({100*avg_gap:.2f}%)")
+
+    print(f"\n{'='*70}")
 
 
 if __name__ == "__main__":

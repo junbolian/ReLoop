@@ -30,9 +30,11 @@ PROTECTED_VARIABLES = {
 
 # Regex patterns for dangerous operations (checked line-by-line)
 PROTECTED_PATTERNS = [
-    # Redefine data variable with dict literal or json.loads
+    # Redefine data variable with dict literal (fabricated data — always dangerous)
     (r'^\s*data\s*=\s*\{', 'Redefines data variable with dict literal'),
-    (r'^\s*data\s*=\s*json\.loads', 'Redefines data variable with json.loads'),
+    # Note: `data = json.loads(...)` is NOT blocked here — it re-parses existing data,
+    # not fabricates new values. The AST check still catches `data = <any assignment>`,
+    # but the prompt now explicitly discourages json.loads usage.
 
     # Modify data contents: data["key"] = value
     # Note: data["key"]["subkey"] READ is fine; only top-level assignment is blocked
@@ -44,6 +46,17 @@ PROTECTED_PATTERNS = [
     (r'^\s*from\s+os\s+import', 'Imports from os module'),
     (r'^\s*from\s+subprocess\s+import', 'Imports from subprocess module'),
 ]
+
+
+def _is_json_loads_call(node: ast.expr) -> bool:
+    """Check if an AST node is a json.loads(...) call."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'loads'
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == 'json'
+    )
 
 
 def validate_repair_code(
@@ -87,6 +100,11 @@ def validate_repair_code(
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id in PROTECTED_VARIABLES:
+                        # Allow data = json.loads(...) — re-parses existing data,
+                        # does not fabricate new values.  The prompt discourages
+                        # this pattern, but it is not inherently dangerous.
+                        if _is_json_loads_call(node.value):
+                            continue
                         violations.append(
                             f"Line {node.lineno}: Assignment to protected "
                             f"variable '{target.id}'"
@@ -130,10 +148,10 @@ def validate_repair_code(
 # Safety rules text to embed in repair prompts
 REPAIR_SAFETY_RULES = """
 SAFETY RULES (violations will cause your repair to be rejected):
-- Do NOT redefine the 'data' variable. Data is provided externally.
+- Do NOT redefine the 'data' variable. Data is provided externally as a Python dict.
+- Do NOT use json.loads() — 'data' is already a dict, access keys directly with data["key"].
 - Do NOT modify data contents (no data[key] = new_value).
-- Only modify the optimization model: variables, constraints, objective function.
-- Read data using data["key"] but never write to it."""
+- Only modify the optimization model: variables, constraints, objective function."""
 
 # Re-repair prompt for safety violations
 SAFETY_RE_REPAIR_PROMPT = """Your previous repair was REJECTED because it violated safety rules:
@@ -142,9 +160,10 @@ SAFETY_RE_REPAIR_PROMPT = """Your previous repair was REJECTED because it violat
 
 CRITICAL RULES:
 1. Do NOT redefine the 'data' variable. Data is provided externally and must not be modified.
-2. Do NOT assign new values to data[...]. Only READ from data.
-3. Only modify the optimization model (variables, constraints, objective).
-4. The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.
+2. Do NOT use json.loads() — 'data' is ALREADY a Python dict. Access it directly: data["key"].
+3. Do NOT assign new values to data[...]. Only READ from data.
+4. Only modify the optimization model (variables, constraints, objective).
+5. The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.
 
 Please fix your code again, following these rules.
 

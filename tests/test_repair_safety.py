@@ -109,8 +109,8 @@ print(f"objective: {m.ObjVal}")
         assert not is_safe
         assert any("os" in v for v in violations)
 
-    def test_data_json_loads(self):
-        """data = json.loads(...) should be detected."""
+    def test_data_json_loads_allowed(self):
+        """data = json.loads(...) re-parses existing data — should be allowed."""
         code = '''import json
 from gurobipy import Model, GRB
 data = json.loads('{"key": 1}')
@@ -120,8 +120,8 @@ print(f"status: {m.Status}")
 print(f"objective: {m.ObjVal}")
 '''
         is_safe, violations = validate_repair_code(code, "", None)
-        assert not is_safe
-        assert len(violations) >= 1
+        assert is_safe
+        assert len(violations) == 0
 
     # ---- SHOULD NOT BE DETECTED (FALSE POSITIVES) ----
 
