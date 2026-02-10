@@ -36,10 +36,13 @@ uv.lock
 .ipython/
 
 # ----------------------------
-# Editors / OS
+# Editors / OS / tool config
 # ----------------------------
 .vscode/
 .idea/
+.claude/
+.cursor/
+.windsurf/
 .DS_Store
 Thumbs.db
 
@@ -65,9 +68,6 @@ Thumbs.db
 artifacts/
 models/
 test/
-qwen3-max-result/
-claude-opus-4.5-result/
-claude-opus-4.5-result-round2/
 *-result/
 *-result-*/
 outputs/
