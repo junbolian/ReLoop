@@ -215,6 +215,8 @@ def run_item(
     base_url: Optional[str],
     enable_cpt: bool,
     verbose: bool = False,
+    use_cot: bool = True,
+    run_verify: bool = True,
 ) -> RecordResult:
     started = time.time()
     difficulty = item.get("difficulty", "")
@@ -233,17 +235,17 @@ def run_item(
         ground_truth = None
 
     llm = UsageLLM(model=model, base_url=base_url)
-    generator = CodeGenerator(llm_client=llm, use_structured_generation=True)
+    generator = CodeGenerator(llm_client=llm, use_structured_generation=use_cot)
     extractor = DataExtractor(llm_client=llm)
-    verifier = ReLoopVerifier(llm_client=llm)
     executor = CodeExecutor()
-    pipeline = ReLoopPipeline(
-        llm_client=llm,
-        enable_cpt=enable_cpt,
-        enable_l4_adversarial=True,
-        max_repair_iterations=3,
-        verbose=False,
-    )
+    if run_verify:
+        pipeline = ReLoopPipeline(
+            llm_client=llm,
+            enable_cpt=enable_cpt,
+            enable_l4_adversarial=True,
+            max_repair_iterations=3,
+            verbose=False,
+        )
 
     try:
         if verbose:
@@ -258,49 +260,38 @@ def run_item(
         if verbose:
             print(f"[ablation] idx={idx} code generated (len={len(code)})")
 
-        # Stage 1: L1 execution verification (+ duality check)
-        l1_results, l1_base = verifier._layer1(code, data, verbose=False)
-        l1_obj = l1_base.get("objective") if isinstance(l1_base, dict) else None
-        cot_obj = l1_obj
-        cot_status = l1_base.get("status") or "UNKNOWN"
-        l1_status = "FAILED" if any(r.severity == Severity.FATAL for r in l1_results) else "PASS"
+        # Execute code to get baseline objective (used for all modes)
+        exec_result = executor.execute(code, data)
+        cot_obj = exec_result.get("objective") if isinstance(exec_result, dict) else None
+        cot_status = exec_result.get("status") or "UNKNOWN" if isinstance(exec_result, dict) else "FAILED"
 
-        # Stage 2: L1+L2 direction analysis (adversarial loop, no CPT)
-        l2_obj = None
-        l2_status = "FAILED"
-        if l1_obj is not None:
-            layer_results = list(l1_results)
-            report_l1 = verifier._aggregate(
-                layer_results, l1_obj, l1_base.get("solution"), verifier._estimate_complexity(code, data), 0, False
-            )
-            l2_results, l2_exit, code_after_l2 = pipeline._run_l2_adversarial_loop(
-                code=code,
-                data=data,
-                baseline_obj=l1_obj,
+        if run_verify:
+            # Single pipeline run with intermediate checkpoints.
+            # pipeline.run() records l1/l2 checkpoints automatically:
+            #   l1_checkpoint: after L1 verify + regeneration (before L2)
+            #   l2_checkpoint: after L2 adversarial loop (before repair)
+            #   final: after full repair loop with all diagnostics
+            result = pipeline.run(
                 problem_description=problem,
-                report=report_l1,
-                max_l2_iterations=3,
+                data=data,
+                initial_code=code,
             )
-            # Re-verify (without CPT) to get objective
-            report_after_l2 = verifier.verify(
-                code_after_l2, data, problem_description=problem, enable_cpt=False, verbose=False
-            )
-            l2_obj = report_after_l2.objective
-            l2_status = report_after_l2.status
-            code = code_after_l2  # use for final stage
-        if verbose:
-            print(f"[ablation] idx={idx} after L2 status={l2_status}")
-
-        # Stage 3: Final (L1+L2+L3 full pipeline with CPT)
-        final_result = pipeline.run(
-            problem_description=problem,
-            data=data,
-            initial_code=code,
-        )
-        final_obj = final_result.final_report.objective
-        final_status = final_result.final_report.status
-        if verbose:
-            print(f"[ablation] idx={idx} final status={final_status}, obj={final_obj}")
+            l1_obj = result.l1_checkpoint_obj
+            l1_status = result.l1_checkpoint_status
+            l2_obj = result.l2_checkpoint_obj
+            l2_status = result.l2_checkpoint_status
+            final_obj = result.final_report.objective
+            final_status = result.final_report.status
+            if verbose:
+                print(f"[ablation] idx={idx} L1={l1_obj} L2={l2_obj} final={final_obj}")
+        else:
+            # No verification: all stages same as raw execution
+            l1_obj = cot_obj
+            l1_status = cot_status
+            l2_obj = cot_obj
+            l2_status = cot_status
+            final_obj = cot_obj
+            final_status = cot_status
 
         runtime = time.time() - started
         prompt_tokens = llm.total_prompt_tokens
@@ -356,6 +347,8 @@ def main():
     parser.add_argument("--base-url", default=None, help="Optional OpenAI-compatible base URL.")
     parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
+    parser.add_argument("--no-cot", action="store_true", help="Use direct generation (no CoT structured generation).")
+    parser.add_argument("--no-verify", action="store_true", help="Skip all verification stages (execute only).")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging to stdout.")
     args = parser.parse_args()
 
@@ -365,14 +358,23 @@ def main():
         sys.exit(1)
 
     dataset_stem = Path(args.dataset).stem
-    base_dir = Path(args.output_dir) if args.output_dir else Path("experiment_results") / dataset_stem / args.model
+    if args.output_dir:
+        base_dir = Path(args.output_dir)
+    else:
+        mode_suffix = ""
+        if args.no_cot:
+            mode_suffix += "_direct"
+        if args.no_verify:
+            mode_suffix += "_noverify"
+        base_dir = Path("experiment_results") / dataset_stem / (args.model + mode_suffix)
     base_dir.mkdir(parents=True, exist_ok=True)
 
     results: List[RecordResult] = []
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(run_item, idx, item, args.model, args.base_url, args.enable_cpt, args.verbose): idx
+            ex.submit(run_item, idx, item, args.model, args.base_url, args.enable_cpt, args.verbose,
+                      use_cot=not args.no_cot, run_verify=not args.no_verify): idx
             for idx, item in enumerate(records)
         }
         for fut in as_completed(futures):
@@ -469,6 +471,7 @@ def main():
     print(f"  SUMMARY  ({n} problems, model={args.model})")
     print(f"{'='*70}")
 
+    gen_label = "Direct" if args.no_cot else "CoT"
     for stage_name in ["cot", "final"]:
         stages = [getattr(r, stage_name) for r in results]
         gts = [r.ground_truth for r in results]
@@ -482,7 +485,7 @@ def main():
                 if s.objective is not None and gt is not None]
         avg_gap = sum(gaps) / len(gaps) if gaps else float("nan")
 
-        label = "CoT (no verify)" if stage_name == "cot" else "CoT + ReLoop"
+        label = f"{gen_label} (no verify)" if stage_name == "cot" else f"{gen_label} + ReLoop"
         print(f"\n  {label}:")
         print(f"    Exec%          = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
         print(f"    Acc%(e=1e-4)    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
