@@ -179,15 +179,6 @@ def pass_check(pred: Optional[float], truth: Optional[float], tol: float) -> boo
     return abs(pred - truth) / max(abs(truth), 1e-12) < tol
 
 
-def relative_gap(pred: Optional[float], truth: Optional[float]) -> Optional[float]:
-    """Compute relative gap: |pred - truth| / |truth|. Returns None if either is None."""
-    if pred is None or truth is None:
-        return None
-    if truth == 0:
-        return abs(pred) if pred != 0 else 0.0
-    return abs(pred - truth) / max(abs(truth), 1e-12)
-
-
 def make_stage(obj: Optional[float], status: str, gt: Optional[float]) -> StageResult:
     """Create StageResult with pass checks at all tolerance levels."""
     return StageResult(
@@ -401,22 +392,18 @@ def main():
             "cot_pass_1e4",
             "cot_pass_1e2",
             "cot_pass_5pct",
-            "cot_gap",
             "l1_obj",
             "l1_pass_1e4",
             "l1_pass_1e2",
             "l1_pass_5pct",
-            "l1_gap",
             "l2_obj",
             "l2_pass_1e4",
             "l2_pass_1e2",
             "l2_pass_5pct",
-            "l2_gap",
             "final_obj",
             "final_pass_1e4",
             "final_pass_1e2",
             "final_pass_5pct",
-            "final_gap",
             "runtime_s",
             "prompt_tokens",
             "completion_tokens",
@@ -432,22 +419,18 @@ def main():
                 r.cot.passed_strict,
                 r.cot.passed_medium,
                 r.cot.passed_loose,
-                relative_gap(r.cot.objective, r.ground_truth),
                 r.l1.objective,
                 r.l1.passed_strict,
                 r.l1.passed_medium,
                 r.l1.passed_loose,
-                relative_gap(r.l1.objective, r.ground_truth),
                 r.l2.objective,
                 r.l2.passed_strict,
                 r.l2.passed_medium,
                 r.l2.passed_loose,
-                relative_gap(r.l2.objective, r.ground_truth),
                 r.final.objective,
                 r.final.passed_strict,
                 r.final.passed_medium,
                 r.final.passed_loose,
-                relative_gap(r.final.objective, r.ground_truth),
                 f"{r.runtime:.3f}",
                 r.prompt_tokens,
                 r.completion_tokens,
@@ -481,17 +464,12 @@ def main():
         medium_count = sum(1 for s in stages if s.passed_medium)
         loose_count = sum(1 for s in stages if s.passed_loose)
 
-        gaps = [relative_gap(s.objective, gt) for s, gt in zip(stages, gts)
-                if s.objective is not None and gt is not None]
-        avg_gap = sum(gaps) / len(gaps) if gaps else float("nan")
-
         label = f"{gen_label} (no verify)" if stage_name == "cot" else f"{gen_label} + ReLoop"
         print(f"\n  {label}:")
         print(f"    Exec%          = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
         print(f"    Acc%(e=1e-4)    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
         print(f"    Acc%(e=1e-2)    = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
         print(f"    Acc%(e=5%)      = {loose_count}/{n} ({100*loose_count/n:.1f}%)")
-        print(f"    Avg Gap        = {avg_gap:.4f} ({100*avg_gap:.2f}%)")
 
     print(f"\n{'='*70}")
 
