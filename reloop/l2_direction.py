@@ -175,7 +175,8 @@ Your rejection will trigger re-analysis with your feedback.
 3. You cannot find a reason to reject the analysis
 
 **SAFETY RULES (violations will cause your repair to be rejected):**
-- Do NOT redefine the `data` variable. Data is provided externally.
+- Do NOT redefine the `data` variable. Data is provided externally as a Python dict.
+- Do NOT use `json.loads()` — `data` is already a dict, access keys directly with `data["key"]`.
 - Do NOT modify data contents (no `data[key] = new_value`).
 - Only modify the optimization model: variables, constraints, objective function.
 

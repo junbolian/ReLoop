@@ -593,9 +593,12 @@ ReLoop enforces safety guardrails on repair LLM outputs to prevent data corrupti
 
 | Check | Method | What it catches |
 |-------|--------|----------------|
-| Data reassignment | AST + Regex | `data = {...}`, `data = json.loads(...)` |
+| Data reassignment (dict literal) | AST + Regex | `data = {...}` (fabricated data) |
+| Data reassignment (other) | AST | `data = some_function()` (unknown source) |
 | Data mutation | AST + Regex | `data["key"] = value`, `data["key"] += value` |
 | Dangerous imports | Regex | `import os`, `import subprocess` |
+
+Note: `data = json.loads(...)` is **allowed** — it re-parses existing data rather than fabricating new values. Prompts discourage this pattern but it is not blocked by the safety check.
 
 **Enforcement flow:**
 1. Repair LLM generates fixed code

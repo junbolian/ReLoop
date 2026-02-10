@@ -607,14 +607,15 @@ The `data` variable is PRE-DEFINED with these keys:
 2. Identify the root cause in your code for each actionable issue
 3. Fix ALL actionable issues above
 4. DO NOT fix items in the REFERENCE section — they are likely normal
-5. **CRITICAL**: The `data` variable is PRE-DEFINED. Do NOT create `data = {{{{...}}}}`.
-6. Preserve all working code — only change what is broken
+5. **CRITICAL**: The `data` variable is PRE-DEFINED as a Python dict. Do NOT create `data = {{{{...}}}}`.
+6. **CRITICAL**: Do NOT use `data = json.loads(...)`. The `data` variable is ALREADY a dict — access it directly as `data["key"]`.
+7. Preserve all working code — only change what is broken
 
 **SAFETY RULES (violations will cause your repair to be rejected):**
-- Do NOT redefine the `data` variable. Data is provided externally.
+- Do NOT redefine the `data` variable. Data is provided externally as a Python dict.
+- Do NOT use `json.loads()` to re-parse data. Access `data["key"]` directly.
 - Do NOT modify data contents (no `data[key] = new_value`).
 - Only modify the optimization model: variables, constraints, objective function.
-- Read data using `data["key"]` but never write to it.
 
 Return the COMPLETE fixed code in a ```python block."""
 
@@ -628,7 +629,8 @@ CRITICAL RULES:
 2. Items in REFERENCE ONLY are for context — DO NOT modify code based on them
 3. Be conservative — only make changes that are clearly necessary
 4. Preserve all working code — only change what is broken
-5. NEVER redefine or modify the `data` variable — it is provided externally"""
+5. NEVER redefine or modify the `data` variable — it is provided externally as a Python dict
+6. NEVER use `json.loads()` — `data` is already a dict, access keys directly with `data["key"]`"""
 
 
 def format_repair_section(items: list, empty_message: str = "None") -> str:
