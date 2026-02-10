@@ -485,9 +485,9 @@ def main():
         label = "CoT (no verify)" if stage_name == "cot" else "CoT + ReLoop"
         print(f"\n  {label}:")
         print(f"    Exec%          = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
-        print(f"    Acc%(ε=10⁻⁴)   = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
-        print(f"    Acc%(ε=10⁻²)   = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
-        print(f"    Acc%(ε=5%)     = {loose_count}/{n} ({100*loose_count/n:.1f}%)")
+        print(f"    Acc%(e=1e-4)    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
+        print(f"    Acc%(e=1e-2)    = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
+        print(f"    Acc%(e=5%)      = {loose_count}/{n} ({100*loose_count/n:.1f}%)")
         print(f"    Avg Gap        = {avg_gap:.4f} ({100*avg_gap:.2f}%)")
 
     print(f"\n{'='*70}")
