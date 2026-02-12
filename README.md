@@ -334,7 +334,7 @@ print(f"Objective: {result.final_report.objective}")
 | Foundation LLM | DeepSeek-V3.1 | DeepSeek |
 | Foundation LLM | Qwen3-32B | [Qwen Team, 2025](https://qwenlm.github.io/blog/qwen3/) |
 | Offline SFT | OptMATH-Qwen2.5-32B | [Zhou et al., 2025](https://arxiv.org/abs/2502.11102) |
-| Online RL | SIRL-Qwen2.5-32B | [Kong et al., 2025](https://arxiv.org/abs/2504.19253) |
+| Online RL | SIRL-Qwen2.5-32B | [Kong et al., 2025](https://arxiv.org/abs/2505.11792) |
 
 ---
 
