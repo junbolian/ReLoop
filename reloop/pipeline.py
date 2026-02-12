@@ -55,6 +55,24 @@ from .l2_direction import (
 from .perturbation import detect_perturbation_mode
 
 
+# Status ranking for regression detection
+_STATUS_ORDER = {'FAILED': 0, 'ERRORS': 1, 'WARNINGS': 2, 'VERIFIED': 3}
+
+
+def _is_regression(before: 'VerificationReport', after: 'VerificationReport') -> bool:
+    """True if *after* is strictly worse than *before*.
+
+    Regression cases:
+    - Crash regression: before had an objective, after crashed (None)
+    - Status regression: after's status rank is lower than before's
+    """
+    if before.objective is not None and after.objective is None:
+        return True
+    if _STATUS_ORDER.get(after.status, -1) < _STATUS_ORDER.get(before.status, -1):
+        return True
+    return False
+
+
 @dataclass
 class PipelineResult:
     """Result of running the ReLoop pipeline."""
@@ -317,6 +335,9 @@ class ReLoopPipeline:
 
         # Step 5: Handle ERROR/WARNING with repair (INFO does NOT trigger)
         # Uses unified Diagnostic schema + build_repair_prompt()
+        # Save pre-repair state for regression rollback
+        pre_repair_code = code
+        pre_repair_report = report
         repair_iteration = 0
         all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
 
@@ -389,6 +410,19 @@ class ReLoopPipeline:
                     and report.objective == prev_report.objective):
                 if self.verbose:
                     print("[Pipeline] Repair did not change status or objective, stopping")
+                break
+
+            # Regression guard: rollback if repair made things worse than pre-repair baseline
+            if _is_regression(pre_repair_report, report):
+                if self.verbose:
+                    pre_obj = pre_repair_report.objective
+                    post_obj = report.objective
+                    print(f"[Pipeline] Repair regression detected "
+                          f"(obj: {pre_obj} -> {post_obj}, "
+                          f"status: {pre_repair_report.status} -> {report.status}), "
+                          f"rolling back")
+                code = pre_repair_code
+                report = pre_repair_report
                 break
 
             # If repair caused L1 FATAL, try to regenerate
@@ -754,7 +788,7 @@ class ReLoopPipeline:
         )
 
         try:
-            response = self.llm_client.generate(prompt)
+            response = self.llm_client.generate(prompt, temperature=0.3)
             decisions, fixed_code = self.l2_verifier.parse_repair_response(response)
             return decisions, fixed_code
         except Exception as e:

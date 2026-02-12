@@ -15,17 +15,21 @@ Usage:
 
 import argparse
 import csv
+import io
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Ensure Unicode output on Windows (GBK console can't handle ε/⁻ chars)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
 
 STAGES = ["cot", "l1", "l2", "final"]
-TOLERANCES = [
-    ("1e4", "0.01%"),
-    ("1e2", "1%"),
-    ("5pct", "5%"),
-]
+
+# Auto-detected per CSV: cross-benchmark uses 1e6, RetailOpt uses 1e4/1e2
+TOLERANCES_RETAIL = [("1e4", "ε=10⁻⁴"), ("1e2", "ε=10⁻²")]
+TOLERANCES_CROSS = [("1e6", "ε=10⁻⁶")]
 
 
 def load_csv(path: str) -> List[Dict]:
@@ -171,22 +175,22 @@ def print_report(results: List[Dict]):
     print(f"\n{'─'*72}")
     print("  Crash Recovery (CoT crashed → later stage recovered)")
     print(f"{'─'*72}")
-    # Use 5% tolerance for crash recovery
-    r_5pct = [r for r in results if r["tol_label"] == "5%"][0] if any(r["tol_label"] == "5%" for r in results) else results[-1]
-    cr = r_5pct["crash_recovery"]
+    r_last = results[-1]
+    tol_label_last = r_last["tol_label"]
+    cr = r_last["crash_recovery"]
     total_crashes = cr[STAGES[1]]["total_crashes"]
     print(f"  Total CoT crashes: {total_crashes}/{n}")
     for stage in STAGES[1:]:
         info = cr[stage]
         print(f"  {stage:>8}: recovered={info['recovered']}, "
-              f"recovered+pass(5%)={info['recovered_and_pass']}")
+              f"recovered+pass({tol_label_last})={info['recovered_and_pass']}")
 
     # --- Summary verdict ---
     print(f"\n{'─'*72}")
-    print("  Layer Contribution Summary (5% tolerance)")
+    print(f"  Layer Contribution Summary ({tol_label_last})")
     print(f"{'─'*72}")
-    r_5pct_transitions = r_5pct["transitions"]
-    for key, t in r_5pct_transitions.items():
+    r_medium_transitions = r_last["transitions"]
+    for key, t in r_medium_transitions.items():
         helped = len(t["helped"])
         hurt = len(t["hurt"])
         net = helped - hurt
@@ -216,8 +220,15 @@ def main():
         print("No data rows found in CSV.", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-detect tolerance columns from CSV header
+    header = set(rows[0].keys())
+    if any("_pass_1e6" in col for col in header):
+        tolerances = TOLERANCES_CROSS
+    else:
+        tolerances = TOLERANCES_RETAIL
+
     results = []
-    for tol_key, tol_label in TOLERANCES:
+    for tol_key, tol_label in tolerances:
         results.append(analyze(rows, tol_key, tol_label))
 
     print_report(results)

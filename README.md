@@ -99,6 +99,7 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 | **Unified Diagnostic Schema** | All layers output `Diagnostic` objects; unified `build_repair_prompt()` assembles repair prompts |
 | **Diagnostic-Based Repair** | Conservative strategy: only ERROR/WARNING trigger repair, INFO is reference only |
 | **Repair Safety Guardrails** | Prevents repair LLM from modifying input data or introducing dangerous operations |
+| **Repair Regression Guard** | Post-repair rollback if repaired code crashes or status degrades vs pre-repair baseline |
 
 ### Design Principles
 
@@ -107,6 +108,127 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 3. **Robustness Guarantee**: L1 FATAL triggers regeneration; L2-L3 are diagnostic only
 4. **LLM-Only Analysis**: No keyword-based heuristics; all semantic analysis uses LLM
 5. **Repair Safety**: Repair code is validated before execution; data variable cannot be reassigned
+6. **Regression Guard**: Repair never makes results worse — rollback on crash or status degradation
+
+### Generation: Chain-of-Thought (CoT)
+
+A single LLM call with 3-stage structured reasoning (`generation.py`, `prompts.py`):
+
+1. **Understand** — Identify objective (min/max), decisions, constraints, parameters
+2. **Formalize** — Write the mathematical model: sets, parameters, decision variables (with explicit CONTINUOUS/INTEGER/BINARY type reasoning), constraints, objective
+3. **Synthesize** — Generate executable Gurobi Python code
+
+The code receives a pre-defined `data` dict (schema only, not values in the prompt) and must not redefine it. Big-M values must be computed dynamically from data, never hardcoded.
+
+### L1: Execution Verification (Blocking Layer)
+
+Checks whether generated code executes and produces a valid solution (`verification.py:_layer1`).
+
+**Sequential checks:**
+
+| Step | Check | On Failure |
+|------|-------|------------|
+| L1.1 | Syntax (AST parse) | FATAL |
+| L1.2 | Runtime execution | FATAL (with stderr) |
+| L1.3 | Solver status | See below |
+| L1.4 | Duality gap (add-on) | INFO only |
+
+**L1.3 Solver status handling:**
+
+| Status | Severity | Action | Diagnostics |
+|--------|----------|--------|-------------|
+| INFEASIBLE | FATAL | Regenerate | IIS constraint names + conflicting bounds |
+| UNBOUNDED | FATAL | Regenerate | Unbounded variable rays (`InfUnbdInfo=1`) |
+| TIMEOUT (no solution) | FATAL | Regenerate | — |
+| OPTIMAL / feasible | PASS | Continue | — |
+
+**L1.4 Duality check** — After OPTIMAL, compute relative primal-dual gap:
+- Gap > 1%: INFO (likely numerical artifact, no repair)
+- Gap <= 1%: PASS
+
+**FATAL handling:** Triggers regeneration (up to `max_regeneration_attempts=3`). The LLM receives the failed code and error message to generate corrected code.
+
+### L2: Direction Consistency Analysis (Adversarial)
+
+Detects parameters whose objective response contradicts expected behavior (`l2_direction.py`, `pipeline.py:_run_l2_adversarial_loop`).
+
+**Procedure:**
+
+1. **Perturb** — For each numeric parameter, perturb by +delta and -delta (default delta=10%), re-solve, record `z_plus` and `z_minus`
+2. **LLM_verify** (temperature=0) — Single batched LLM call analyzes all parameters:
+   - Input: parameter name, current value, baseline objective, +delta% objective change, -delta% objective change
+   - Output per parameter: `param_role` (constraint_bound / objective_coef / other), `expected_direction`, `is_violation`, `confidence` (0.0-1.0)
+3. **LLM_repair** (temperature=0.3) — For each violation with confidence >= 0.5, repair LLM decides:
+   - **Accept** — Agrees with diagnosis, provides fixed code
+   - **Reject** — Disagrees with diagnosis, provides rejection reason
+   - Higher temperature encourages diverse reasoning for the adversarial "devil's advocate" role
+4. **Re-analysis** — Rejected parameters are re-analyzed with rejection context (up to `max_rejections=2` per parameter)
+
+**Exit conditions:**
+
+| Condition | Exit Reason | Severity |
+|-----------|-------------|----------|
+| No violations found | `all_pass` | PASS |
+| All violations rejected + L1/L3 PASS | `all_rejected_others_pass` | INFO |
+| Max rejections reached for all params | `max_rejections` (downgrade) | INFO |
+| Some accepted, code fixed | `accepted_fixed` | ERROR (triggers repair) |
+| Max L2 iterations (3) reached | `max_iterations` | ERROR |
+
+**Perturbation modes** (auto-detected per problem):
+- `data_dict` — Perturb values in the data dictionary
+- `source_code` — Perturb hardcoded values in generated code
+- `hybrid` — Try data_dict first, fall back to source_code if no effect
+
+### L3: Constraint Presence Test (CPT, Optional)
+
+Tests whether expected constraints are actually active in the generated model (`verification.py:_layer3`). Enabled by `--enable-cpt`.
+
+**Procedure:**
+
+1. **Extract candidates** — LLM reads problem description, outputs candidate constraints with type (capacity / demand / balance) and related parameters
+2. **Perturb and re-solve** — For each candidate, apply extreme perturbation to related parameter:
+
+   | Constraint Type | Perturbation | Rationale |
+   |----------------|-------------|-----------|
+   | Capacity | x 0.001 (near-zero) | If capacity constraint exists, near-zero capacity should drastically change objective |
+   | Demand | x 100 (scale up) | If demand constraint exists, extreme demand should cause infeasibility or large change |
+   | Other | x 0.01 (1%) | General extreme perturbation |
+
+3. **Grade by change ratio** — `change_ratio = |new_obj - baseline| / |baseline|`
+
+   | Change Ratio | Severity | Meaning |
+   |-------------|----------|---------|
+   | < 5% | WARNING | Constraint likely **missing** (triggers repair) |
+   | 5% - 30% | INFO | Uncertain (no repair) |
+   | > 30% | PASS | Constraint is **present** |
+   | INFEASIBLE | PASS | Constraint is active (extreme perturbation caused infeasibility) |
+
+### Diagnostic-Based Repair
+
+All layers output unified `Diagnostic` objects with severity and evidence (`verification.py:Diagnostic`, `pipeline.py`).
+
+**Severity-to-action mapping:**
+
+| Severity | Source | Action |
+|----------|--------|--------|
+| FATAL | L1 execution errors | Regenerate code (not repair) |
+| ERROR | L2 accepted direction violations | **Must fix** — included in repair prompt |
+| WARNING | L3 CPT missing constraints | **Should fix** — included in repair prompt |
+| INFO | L1 duality, L2 rejected, L3 uncertain | **Reference only** — shown but not fixed |
+
+**Repair loop** (`pipeline.py`, budget `N=3`):
+1. Collect all diagnostics → `build_repair_prompt()` assembles prompt with actionable issues (ERROR/WARNING) and reference context (INFO)
+2. LLM generates repaired code
+3. **Safety guardrail** (`repair_safety.py`) — Validates repair code before execution:
+   - Blocks: `data = {...}` (reassignment), `data["key"] = val` (mutation), dangerous imports (`os`, `subprocess`)
+   - Exception: `data = json.loads(...)` is allowed (re-parses existing data)
+   - On violation: 1 guided retry (does not consume repair budget); 2nd failure → keep original code
+4. Re-verify repaired code
+5. **Regression guard** — Compare post-repair result against pre-repair baseline:
+   - Crash regression: objective was not None → now None
+   - Status regression: status rank decreased (VERIFIED=3 > WARNINGS=2 > ERRORS=1 > FAILED=0)
+   - On regression: **rollback** to pre-repair code and stop all further repair
+6. Repeat until: no actionable diagnostics, no change, regression detected, or budget exhausted
 
 ---
 
@@ -134,17 +256,52 @@ python -c "from reloop import ReLoopVerifier; print('OK')"
 
 ## Quick Start
 
+ReLoop uses the OpenAI Python SDK, so any **OpenAI-compatible API** works out of the box (OpenAI, vLLM, Ollama, llama.cpp server, LiteLLM, etc.).
+
+Set environment variables and run:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_BASE_URL="http://localhost:8000/v1"   # your API endpoint
+
+python run_ablation.py \
+    -d data/RetailOpt-190.jsonl \
+    -m gpt-4.1 \
+    --enable-cpt \
+    --workers 5 \
+    -v
+```
+
+Results are saved to `experiment_results/<dataset-name>/<model>/`:
+- `ablation_report.csv` — per-problem objectives and pass/fail at each verification stage
+- `chat_logs.jsonl` — full LLM conversation logs
+
+### CLI Parameters
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-d, --dataset` | *(required)* | Path to dataset JSONL file |
+| `-m, --model` | `gpt-4.1` | Model name (passed to OpenAI SDK) |
+| `--base-url` | `$OPENAI_BASE_URL` | Override API base URL (alternative to env var) |
+| `-o, --output-dir` | `experiment_results/<dataset>/<model>` | Custom output directory |
+| `--enable-cpt` | off | Enable L3 Constraint Presence Test |
+| `--workers` | 20 | Number of concurrent workers |
+| `--no-cot` | off | Skip Chain-of-Thought, use direct generation |
+| `--no-verify` | off | Skip all verification (execute generated code only) |
+| `-v, --verbose` | off | Print verbose logs to stdout |
+
+### Python API
+
+For programmatic usage:
+
 ```python
 from reloop import run_reloop, DataExtractor
 
-# Your LLM client (must implement generate(prompt, system=None) -> str)
-llm_client = YourLLMClient()
+llm_client = YourLLMClient()  # must implement generate(prompt, system=None) -> str
 
-# Extract structured data from natural language
 extractor = DataExtractor(llm_client)
 data = extractor.extract("Minimize cost with capacity 500 and demands [100, 150, 200]...")
 
-# Run pipeline: Generate → Verify → Repair
 result = run_reloop(
     problem_description="...",
     data=data,
@@ -158,37 +315,107 @@ print(f"Objective: {result.final_report.objective}")
 
 ---
 
-## Reproducing Paper Results
-
-### Run experiments on benchmark datasets
-
-```python
-from reloop import run_experiment
-
-summary = run_experiment(
-    dataset_path="data/RetailOpt-190.jsonl",
-    llm_client=your_llm_client,
-    output_dir="results",
-    verbose=True
-)
-
-print(f"Detection Rate: {summary.detection_rate:.1%}")
-print(f"False Positive Rate: {summary.false_positive_rate:.1%}")
-print(f"Repair Success Rate: {summary.repair_success_rate:.1%}")
-```
-
-### Available Datasets
+## Available Datasets
 
 | Dataset | # Problems | Description |
 |---------|------------|-------------|
 | `RetailOpt-190.jsonl` | 190 | **Our benchmark** - Retail optimization scenarios |
 | `IndustryOR_fixedV2.jsonl` | 100 | Industry OR problems with difficulty labels |
 | `MAMO_EasyLP_fixed.jsonl` | 642 | Easy LP problems |
-| `MAMO_ComplexLP_fixed.jsonl` | - | Complex LP problems |
-| `NL4OPT.jsonl` | 245 | NL4OPT benchmark |
-| `OptMATH_Bench_166.jsonl` | 166 | OptMATH benchmark |
-| `OptMATH_Bench_193.jsonl` | 193 | OptMATH benchmark |
-| `OptiBench.jsonl` | - | OptiBench problems |
+| `MAMO_ComplexLP_fixed.jsonl` | 203 | Complex LP problems |
+
+---
+
+## Compared Models
+
+| Type | Model | Source |
+|------|-------|--------|
+| Foundation LLM | Claude Opus 4.5 | Anthropic |
+| Foundation LLM | DeepSeek-V3.1 | DeepSeek |
+| OR Agent | OptiMUS-0.3 (GPT-4o) | [AhmadiTeshnizi et al., 2024](https://arxiv.org/abs/2402.10172) |
+| Offline SFT | OptMATH-Qwen2.5-32B | [Zhou et al., 2025](https://arxiv.org/abs/2502.11573) |
+| Online RL | SIRL-Qwen2.5-32B | [Kong et al., 2025](https://arxiv.org/abs/2504.19253) |
+
+---
+
+## Experiment Results
+
+### Table 1: Main Results on RetailOpt-190
+
+| Type | Model | Exec% ||| Acc% pass@1 (ε=10⁻⁴) ||| Acc% pass@1 (ε=10⁻²) |||
+|------|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
+| Foundation | Claude Opus 4.5 | | | | | | | | | |
+| Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
+| Agent | OptiMUS-0.3 (GPT-4o) | — | — | | — | — | | — | — | |
+| Offline SFT | OptMATH-Qwen2.5-32B | — | | | — | | | — | | |
+| Online RL | SIRL-Qwen2.5-32B | — | | | — | | | — | | |
+
+### Table 2: Cross-Benchmark Generalization (Acc% pass@1, ε=10⁻⁶)
+
+| | | MAMO-ComplexLP ||| IndustryOR |||
+|------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
+| Foundation | Claude Opus 4.5 | | | | | | |
+| Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0† | 58.0 | **60.0** |
+| Agent | OptiMUS-0.3 (GPT-4o) | 43.6† | — | — | 31.0† | — | — |
+| Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | — | | 31.0† | — | |
+| Online RL | SIRL-Qwen2.5-32B | 61.1† | — | | 42.0† | — | |
+
+† Cited from SIRL (Kong et al., 2025) Table 1.
+
+### Table 3: Ablation (Claude Opus 4.5 × RetailOpt-190)
+
+| Config | Exec% | Acc% pass@1 (ε=10⁻⁴) | Acc% pass@1 (ε=10⁻²) |
+|--------|:---:|:---:|:---:|
+| Direct | | | |
+| +CoT | | | |
+| +CoT+L1 | | | |
+| +CoT+L1+L2 | | | |
+| +CoT+L1+L2+L3 | | | |
+
+---
+
+## Appendix Tables
+
+### Table A1: Per-Family Breakdown on RetailOpt-190 (Acc% pass@1, ε=10⁻²)
+
+| Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || OptiMUS-0.3 || OptMATH-32B || SIRL-32B ||
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
+| F1 Core Ops | 20 | | | 0.0 | **40.0** | | | | | | |
+| F2 Assort & Sub | 30 | | | 6.7 | **20.0** | | | | | | |
+| F3 Resource | 20 | | | 0.0 | **10.0** | | | | | | |
+| F4 Demand Dyn | 30 | | | 3.3 | **10.0** | | | | | | |
+| F5 Feasibility | 20 | | | 35.0 | **45.0** | | | | | | |
+| F6 Discrete Log | 20 | | | 5.0 | **5.0** | | | | | | |
+| F7 Network & ME | 30 | | | 10.0 | **20.0** | | | | | | |
+| F8 Omni-channel | 20 | | | 20.0 | **35.0** | | | | | | |
+| **Total** | **190** | | | **9.5** | **22.1** | | | | | | |
+
+### Table A2: Tiered Tolerance on RetailOpt-190 (Acc% pass@1)
+
+| Model | ε=10⁻⁴ || ε=10⁻² || ε=5×10⁻² || ε=10⁻¹ ||
+|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
+| Claude Opus 4.5 | | | | | | | | |
+| DeepSeek-V3.1 | 5.3 | **17.9** | 9.5 | **22.1** | 14.7 | **31.1** | 27.4 | **45.3** |
+| OptiMUS-0.3 | — | | — | | — | | — | |
+| OptMATH-Qwen2.5-32B | | | | | | | | |
+| SIRL-Qwen2.5-32B | | | | | | | | |
+
+### Table A3: Verification Layer Statistics (Claude Opus 4.5 × RetailOpt-190)
+
+| Layer | Trigger Type | Count | Repair Success% |
+|-------|-------------|:---:|:---:|
+| L1 | Runtime Error | | |
+| L1 | Infeasible | | (IIS-enhanced) |
+| L1 | Unbounded | | (Ray diagnosis) |
+| L1 | Timeout | | |
+| L2 | Direction Violation | | |
+| L3 | Missing Constraint | | |
+| L3 | Uncertain Constraint | | |
+| — | Undetected (silent) | | (detection boundary) |
 
 ---
 
@@ -205,6 +432,8 @@ The ablation study measures each verification layer's marginal contribution. The
 
 ### Running ablation experiments
 
+`run_ablation.py` records all checkpoints automatically (see [Quick Start](#quick-start) for full CLI usage):
+
 ```bash
 python run_ablation.py -d data/RetailOpt-190.jsonl -m <model> --enable-cpt --workers 5 -v
 ```
@@ -216,7 +445,7 @@ python analyze_layers.py experiment_results/RetailOpt-190/<model>/ablation_repor
 ```
 
 Output includes:
-- Pass counts at each stage (0.01%, 1%, 5% tolerance)
+- Pass counts at each stage (auto-detected tolerance: ε=10⁻⁴/10⁻² for RetailOpt, ε=10⁻⁶ for cross-benchmark)
 - Layer transitions: fail→pass (helped) vs pass→fail (hurt) per layer
 - Crash recovery statistics
 - Net contribution summary per layer
