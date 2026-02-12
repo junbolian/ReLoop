@@ -88,6 +88,14 @@ tmp*/
 temp*/
 *.tmp
 
+# ----------------------------
+# Solver artifacts
+# ----------------------------
+*.ilp
+*.lp
+*.mps
+*.sol
+
 # If you DO want to keep a small sample jsonl in repo, you can negate it like:
 # !data/sample.jsonl
 

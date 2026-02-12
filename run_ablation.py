@@ -63,7 +63,7 @@ class UsageLLM:
         self.total_completion_tokens = 0
         self.logs: List[Dict[str, Any]] = []
 
-    def generate(self, prompt: str, system: Optional[str] = None) -> str:
+    def generate(self, prompt: str, system: Optional[str] = None, temperature: Optional[float] = None) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -77,10 +77,11 @@ class UsageLLM:
                 max_completion_tokens=16384,
             )
         else:
+            t = temperature if temperature is not None else 0
             resp = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0,
+                temperature=t,
                 seed=0,
                 max_tokens=8192,
             )
@@ -108,9 +109,12 @@ class UsageLLM:
 # --------------------------------------------------------------------------- #
 
 # Tolerance levels for accuracy evaluation
-TOL_STRICT = 1e-4    # ε=10⁻⁴ (0.01% relative error)
-TOL_MEDIUM = 1e-2    # ε=10⁻² (1% relative error)
-TOL_LOOSE  = 0.05    # ε=5%   (5% relative error)
+# Tolerance levels — selected per dataset in main()
+TOL_STRICT = 1e-4    # ε=10⁻⁴  (RetailOpt default)
+TOL_MEDIUM = 1e-2    # ε=10⁻²  (RetailOpt default)
+
+# Cross-benchmark datasets use stricter tolerance (ε=10⁻⁶)
+CROSS_BENCHMARK_DATASETS = {"IndustryOR", "MAMO_ComplexLP", "MAMO_EasyLP"}
 
 
 @dataclass
@@ -119,7 +123,6 @@ class StageResult:
     status: str
     passed_strict: bool   # ε=10⁻⁴
     passed_medium: bool   # ε=10⁻²
-    passed_loose: bool    # ε=5%
 
 
 @dataclass
@@ -186,7 +189,6 @@ def make_stage(obj: Optional[float], status: str, gt: Optional[float]) -> StageR
         status=status,
         passed_strict=pass_check(obj, gt, TOL_STRICT),
         passed_medium=pass_check(obj, gt, TOL_MEDIUM),
-        passed_loose=pass_check(obj, gt, TOL_LOOSE),
     )
 
 
@@ -314,10 +316,10 @@ def run_item(
             problem_id=problem_id,
             difficulty=difficulty,
             ground_truth=ground_truth,
-            cot=StageResult(None, "FAILED", False, False, False),
-            l1=StageResult(None, "FAILED", False, False, False),
-            l2=StageResult(None, "FAILED", False, False, False),
-            final=StageResult(None, "FAILED", False, False, False),
+            cot=StageResult(None, "FAILED", False, False),
+            l1=StageResult(None, "FAILED", False, False),
+            l2=StageResult(None, "FAILED", False, False),
+            final=StageResult(None, "FAILED", False, False),
             runtime=runtime,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -349,6 +351,17 @@ def main():
         sys.exit(1)
 
     dataset_stem = Path(args.dataset).stem
+
+    # Select tolerance per dataset
+    global TOL_STRICT, TOL_MEDIUM
+    is_cross = any(cb in dataset_stem for cb in CROSS_BENCHMARK_DATASETS)
+    if is_cross:
+        TOL_STRICT = 1e-6    # ε=10⁻⁶
+        TOL_MEDIUM = 1e-6    # ε=10⁻⁶ (single tier for cross-benchmark)
+        print("[ablation] Cross-benchmark dataset detected -> eps=1e-6")
+    else:
+        print("[ablation] RetailOpt dataset -> eps=1e-4 / eps=1e-2")
+
     if args.output_dir:
         base_dir = Path(args.output_dir)
     else:
@@ -383,59 +396,44 @@ def main():
     csv_path = base_dir / "ablation_report.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "index",
-            "problem_id",
-            "difficulty",
-            "ground_truth",
-            "cot_obj",
-            "cot_pass_1e4",
-            "cot_pass_1e2",
-            "cot_pass_5pct",
-            "l1_obj",
-            "l1_pass_1e4",
-            "l1_pass_1e2",
-            "l1_pass_5pct",
-            "l2_obj",
-            "l2_pass_1e4",
-            "l2_pass_1e2",
-            "l2_pass_5pct",
-            "final_obj",
-            "final_pass_1e4",
-            "final_pass_1e2",
-            "final_pass_5pct",
-            "runtime_s",
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-        ])
-        for r in sorted(results, key=lambda x: x.index):
+        if is_cross:
+            # Cross-benchmark: single tolerance ε=10⁻⁶
             writer.writerow([
-                r.index,
-                r.problem_id,
-                r.difficulty,
-                r.ground_truth,
-                r.cot.objective,
-                r.cot.passed_strict,
-                r.cot.passed_medium,
-                r.cot.passed_loose,
-                r.l1.objective,
-                r.l1.passed_strict,
-                r.l1.passed_medium,
-                r.l1.passed_loose,
-                r.l2.objective,
-                r.l2.passed_strict,
-                r.l2.passed_medium,
-                r.l2.passed_loose,
-                r.final.objective,
-                r.final.passed_strict,
-                r.final.passed_medium,
-                r.final.passed_loose,
-                f"{r.runtime:.3f}",
-                r.prompt_tokens,
-                r.completion_tokens,
-                r.total_tokens,
+                "index", "problem_id", "difficulty", "ground_truth",
+                "cot_obj", "cot_pass_1e6",
+                "l1_obj", "l1_pass_1e6",
+                "l2_obj", "l2_pass_1e6",
+                "final_obj", "final_pass_1e6",
+                "runtime_s", "prompt_tokens", "completion_tokens", "total_tokens",
             ])
+            for r in sorted(results, key=lambda x: x.index):
+                writer.writerow([
+                    r.index, r.problem_id, r.difficulty, r.ground_truth,
+                    r.cot.objective, r.cot.passed_strict,
+                    r.l1.objective, r.l1.passed_strict,
+                    r.l2.objective, r.l2.passed_strict,
+                    r.final.objective, r.final.passed_strict,
+                    f"{r.runtime:.3f}", r.prompt_tokens, r.completion_tokens, r.total_tokens,
+                ])
+        else:
+            # RetailOpt: two tiers ε=10⁻⁴ / ε=10⁻²
+            writer.writerow([
+                "index", "problem_id", "difficulty", "ground_truth",
+                "cot_obj", "cot_pass_1e4", "cot_pass_1e2",
+                "l1_obj", "l1_pass_1e4", "l1_pass_1e2",
+                "l2_obj", "l2_pass_1e4", "l2_pass_1e2",
+                "final_obj", "final_pass_1e4", "final_pass_1e2",
+                "runtime_s", "prompt_tokens", "completion_tokens", "total_tokens",
+            ])
+            for r in sorted(results, key=lambda x: x.index):
+                writer.writerow([
+                    r.index, r.problem_id, r.difficulty, r.ground_truth,
+                    r.cot.objective, r.cot.passed_strict, r.cot.passed_medium,
+                    r.l1.objective, r.l1.passed_strict, r.l1.passed_medium,
+                    r.l2.objective, r.l2.passed_strict, r.l2.passed_medium,
+                    r.final.objective, r.final.passed_strict, r.final.passed_medium,
+                    f"{r.runtime:.3f}", r.prompt_tokens, r.completion_tokens, r.total_tokens,
+                ])
 
     # Chat logs
     logs_path = base_dir / "chat_logs.jsonl"
@@ -462,14 +460,15 @@ def main():
         exec_count = sum(1 for s in stages if s.objective is not None)
         strict_count = sum(1 for s in stages if s.passed_strict)
         medium_count = sum(1 for s in stages if s.passed_medium)
-        loose_count = sum(1 for s in stages if s.passed_loose)
 
         label = f"{gen_label} (no verify)" if stage_name == "cot" else f"{gen_label} + ReLoop"
+        tol_s = "ε=10⁻⁶" if is_cross else "ε=10⁻⁴"
+        tol_m = "ε=10⁻⁶" if is_cross else "ε=10⁻²"
         print(f"\n  {label}:")
-        print(f"    Exec%          = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
-        print(f"    Acc%(e=1e-4)    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
-        print(f"    Acc%(e=1e-2)    = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
-        print(f"    Acc%(e=5%)      = {loose_count}/{n} ({100*loose_count/n:.1f}%)")
+        print(f"    Exec%           = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
+        print(f"    Acc%({tol_s})    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")
+        if not is_cross:
+            print(f"    Acc%({tol_m})    = {medium_count}/{n} ({100*medium_count/n:.1f}%)")
 
     print(f"\n{'='*70}")
 
