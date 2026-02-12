@@ -332,7 +332,7 @@ print(f"Objective: {result.final_report.objective}")
 |------|-------|--------|
 | Foundation LLM | Claude Opus 4.5 | Anthropic |
 | Foundation LLM | DeepSeek-V3.1 | DeepSeek |
-| OR Agent | OptiMUS-0.3 (GPT-4o) | [AhmadiTeshnizi et al., 2024](https://arxiv.org/abs/2402.10172) |
+| Foundation LLM | Qwen3-32B | [Qwen Team, 2025](https://qwenlm.github.io/blog/qwen3/) |
 | Offline SFT | OptMATH-Qwen2.5-32B | [Zhou et al., 2025](https://arxiv.org/abs/2502.11573) |
 | Online RL | SIRL-Qwen2.5-32B | [Kong et al., 2025](https://arxiv.org/abs/2504.19253) |
 
@@ -347,7 +347,7 @@ print(f"Objective: {result.final_report.objective}")
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | | | | |
 | Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
-| Agent | OptiMUS-0.3 (GPT-4o) | — | — | | — | — | | — | — | |
+| Foundation | Qwen3-32B | | | | | | | | | |
 | Offline SFT | OptMATH-Qwen2.5-32B | — | | | — | | | — | | |
 | Online RL | SIRL-Qwen2.5-32B | — | | | — | | | — | | |
 
@@ -358,11 +358,11 @@ print(f"Objective: {result.final_report.objective}")
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0† | 58.0 | **60.0** |
-| Agent | OptiMUS-0.3 (GPT-4o) | 43.6† | — | — | 31.0† | — | — |
+| Foundation | Qwen3-32B | 46.9† | | | 61.9† | | |
 | Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | — | | 31.0† | — | |
 | Online RL | SIRL-Qwen2.5-32B | 61.1† | — | | 42.0† | — | |
 
-† Cited from SIRL (Kong et al., 2025) Table 1.
+† Cited from SIRL (Kong et al., 2025) and StepORLM (Zhou et al., 2025).
 
 ### Table 3: Ablation (Claude Opus 4.5 × RetailOpt-190)
 
@@ -380,7 +380,7 @@ print(f"Objective: {result.final_report.objective}")
 
 ### Table A1: Per-Family Breakdown on RetailOpt-190 (Acc% pass@1, ε=10⁻²)
 
-| Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || OptiMUS-0.3 || OptMATH-32B || SIRL-32B ||
+| Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
 | F1 Core Ops | 20 | | | 0.0 | **40.0** | | | | | | |
@@ -400,7 +400,7 @@ print(f"Objective: {result.final_report.objective}")
 | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
 | Claude Opus 4.5 | | | | | | | | |
 | DeepSeek-V3.1 | 5.3 | **17.9** | 9.5 | **22.1** | 14.7 | **31.1** | 27.4 | **45.3** |
-| OptiMUS-0.3 | — | | — | | — | | — | |
+| Qwen3-32B | | | | | | | | |
 | OptMATH-Qwen2.5-32B | | | | | | | | |
 | SIRL-Qwen2.5-32B | | | | | | | | |
 
