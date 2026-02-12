@@ -317,12 +317,15 @@ print(f"Objective: {result.final_report.objective}")
 
 ## Available Datasets
 
-| Dataset | # Problems | Description |
-|---------|------------|-------------|
-| `RetailOpt-190.jsonl` | 190 | **Our benchmark** - Retail optimization scenarios |
-| `IndustryOR_fixedV2.jsonl` | 100 | Industry OR problems with difficulty labels |
-| `MAMO_EasyLP_fixed.jsonl` | 642 | Easy LP problems |
-| `MAMO_ComplexLP_fixed.jsonl` | 203 | Complex LP problems |
+| Dataset | # Problems | Avg Tokens | Description |
+|---------|:---:|:---:|-------------|
+| `RetailOpt-190.jsonl` | 190 | 2,900 | **Our benchmark** - Retail optimization scenarios |
+| `IndustryOR_fixedV2.jsonl` | 100 | 267 | Industry OR problems with difficulty labels |
+| `MAMO_EasyLP_fixed.jsonl` | 642 | — | Easy LP problems |
+| `MAMO_ComplexLP_fixed.jsonl` | 203 | 459 | Complex LP problems |
+
+**Prompt format:** All datasets use data-embedded format (full data in prompt) for evaluation.
+RetailOpt additionally provides schema-based prompts where the LLM sees only data schema (keys, types, dimensions), and actual values are injected at runtime via the `data` dict — this is the format used by ReLoop's verification pipeline.
 
 ---
 
@@ -378,7 +381,7 @@ print(f"Objective: {result.final_report.objective}")
 
 ## Appendix Tables
 
-### Table A1: Per-Family Breakdown on RetailOpt-190 (Acc% pass@1, ε=10⁻²)
+### Table A1: Per-Family Breakdown on RetailOpt-190 (Acc% pass@1, ε=10⁻⁴)
 
 | Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -386,12 +389,12 @@ print(f"Objective: {result.final_report.objective}")
 | F1 Core Ops | 20 | | | 0.0 | **40.0** | | | | | | |
 | F2 Assort & Sub | 30 | | | 6.7 | **20.0** | | | | | | |
 | F3 Resource | 20 | | | 0.0 | **10.0** | | | | | | |
-| F4 Demand Dyn | 30 | | | 3.3 | **10.0** | | | | | | |
-| F5 Feasibility | 20 | | | 35.0 | **45.0** | | | | | | |
+| F4 Demand Dyn | 30 | | | 3.3 | **6.7** | | | | | | |
+| F5 Feasibility | 20 | | | 5.0 | **15.0** | | | | | | |
 | F6 Discrete Log | 20 | | | 5.0 | **5.0** | | | | | | |
-| F7 Network & ME | 30 | | | 10.0 | **20.0** | | | | | | |
-| F8 Omni-channel | 20 | | | 20.0 | **35.0** | | | | | | |
-| **Total** | **190** | | | **9.5** | **22.1** | | | | | | |
+| F7 Network & ME | 30 | | | 6.7 | **16.7** | | | | | | |
+| F8 Omni-channel | 20 | | | 15.0 | **35.0** | | | | | | |
+| **Total** | **190** | | | **5.3** | **17.9** | | | | | | |
 
 ### Table A2: Tiered Tolerance on RetailOpt-190 (Acc% pass@1)
 
@@ -585,7 +588,7 @@ data = extractor.extract("""
 from reloop import ExperimentRunner, run_experiment
 
 runner = ExperimentRunner(llm_client, output_dir="results")
-summary = runner.run_dataset("data/NL4OPT.jsonl")
+summary = runner.run_dataset("data/RetailOpt-190.jsonl")
 
 # Summary fields
 summary.total_problems
