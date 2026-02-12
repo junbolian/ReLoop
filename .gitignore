@@ -73,7 +73,6 @@ test/
 outputs/
 results/
 logs/
-experiment_results/
 
 # ----------------------------
 # Test files (not for commit)
