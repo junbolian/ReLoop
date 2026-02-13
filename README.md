@@ -279,8 +279,6 @@ print(f"Objective: {result.final_report.objective}")
 | `RetailOpt-190.jsonl` | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Data-embedded |
 | `MAMO_ComplexLP_fixed.jsonl` | 203 | ~459 | 10⁻⁶ | Data-embedded |
 | `IndustryOR_fixedV2.jsonl` | 100 | ~267 | 10⁻⁶ | Data-embedded |
-| `MAMO_EasyLP_fixed.jsonl` | 642 | — | — | Data-embedded |
-
 All datasets use data-embedded format (full data in prompt) for evaluation. RetailOpt additionally provides schema-based prompts for ReLoop's verification pipeline, where the LLM sees only data schema and actual values are injected at runtime.
 
 ---
@@ -318,7 +316,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | |
-| Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0† | 58.0 | **60.0** |
+| Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0 | 58.0 | **60.0** |
 | Foundation | Qwen3-32B | 46.9† | | | 61.9† | | |
 | Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | | | 31.0† | | |
 | Online RL | SIRL-Qwen2.5-32B | 61.1† | | | 42.0† | | |
