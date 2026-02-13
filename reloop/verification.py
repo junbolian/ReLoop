@@ -8,8 +8,8 @@ Layers:
 
 Severity Levels:
 - FATAL: Code cannot run (L1 only)
-- ERROR: Mathematically certain error, must fix
-- WARNING: High-confidence issue, should fix (L2 accepted, L3 cpt_missing)
+- ERROR: Mathematically certain error, must fix (L2 accepted)
+- WARNING: High-confidence issue, should fix (L3 cpt_missing)
 - INFO: Likely normal, for reference only (L1 duality, L2 rejected)
 - PASS: Check passed
 """
