@@ -48,20 +48,78 @@ class UsageLLM:
     # Reasoning models that need max_completion_tokens instead of max_tokens
     REASONING_MODELS = {"deepseek-r1", "deepseek-reasoner", "o1", "o1-preview", "o1-mini", "o3", "o3-mini"}
 
-    def __init__(self, model: str, base_url: Optional[str] = None):
+    def __init__(
+        self,
+        model: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        request_timeout: int = 300,
+    ):
         if OpenAI is None:
             raise RuntimeError("openai package not available; pip install openai")
-        if not os.environ.get("OPENAI_API_KEY"):
-            raise RuntimeError("OPENAI_API_KEY not set")
+
         if base_url is None:
             base_url = os.environ.get("OPENAI_BASE_URL", "https://yinli.one/v1")
-        kwargs = {"base_url": base_url} if base_url else {}
+
+        resolved_api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        # Most local OpenAI-compatible servers accept a dummy key.
+        if not resolved_api_key:
+            if base_url and ("localhost" in base_url or "127.0.0.1" in base_url):
+                resolved_api_key = "EMPTY"
+            else:
+                raise RuntimeError("OPENAI_API_KEY not set (or pass --api-key)")
+
+        kwargs: Dict[str, Any] = {"api_key": resolved_api_key, "timeout": request_timeout}
+        if base_url:
+            kwargs["base_url"] = base_url
         self.client = OpenAI(**kwargs)
         self.model = model
+        self.base_url = base_url
         self.is_reasoning = any(model.startswith(r) for r in self.REASONING_MODELS)
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.logs: List[Dict[str, Any]] = []
+
+    def _create_with_fallbacks(self, payload: Dict[str, Any]) -> Any:
+        """
+        Some local OpenAI-compatible backends do not support all fields
+        (e.g., seed / temperature). Retry with progressively simpler payload.
+        """
+        attempts = [payload]
+        if "seed" in payload:
+            no_seed = dict(payload)
+            no_seed.pop("seed", None)
+            attempts.append(no_seed)
+        if "temperature" in payload:
+            no_temp = dict(payload)
+            no_temp.pop("temperature", None)
+            no_temp.pop("seed", None)
+            attempts.append(no_temp)
+
+        last_err: Optional[Exception] = None
+        for i, cur_payload in enumerate(attempts):
+            try:
+                return self.client.chat.completions.create(**cur_payload)
+            except Exception as e:
+                last_err = e
+                if i == len(attempts) - 1:
+                    raise
+                msg = str(e).lower()
+                unsupported = any(
+                    key in msg
+                    for key in [
+                        "unsupported",
+                        "unknown field",
+                        "unexpected keyword",
+                        "seed",
+                        "temperature",
+                    ]
+                )
+                if not unsupported:
+                    raise
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("Unknown error while creating chat completion")
 
     def generate(self, prompt: str, system: Optional[str] = None, temperature: Optional[float] = None) -> str:
         messages = []
@@ -71,25 +129,39 @@ class UsageLLM:
 
         if self.is_reasoning:
             # Reasoning models: use max_completion_tokens (covers thinking + output)
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_completion_tokens=16384,
+            resp = self._create_with_fallbacks(
+                {
+                    "model": self.model,
+                    "messages": messages,
+                    "max_completion_tokens": 16384,
+                }
             )
         else:
             t = temperature if temperature is not None else 0
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=t,
-                seed=0,
-                max_tokens=8192,
+            resp = self._create_with_fallbacks(
+                {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": t,
+                    "seed": 0,
+                    "max_tokens": 8192,
+                }
             )
         usage = resp.usage
         if usage:
             self.total_prompt_tokens += usage.prompt_tokens or 0
             self.total_completion_tokens += usage.completion_tokens or 0
         content = resp.choices[0].message.content
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
+            # Handle multimodal/structured content returned by some local servers.
+            try:
+                content = "".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+                )
+            except Exception:
+                content = str(content)
         self.logs.append(
             {
                 "messages": messages,
@@ -174,6 +246,40 @@ def load_dataset(path: str) -> List[Dict[str, Any]]:
     return []
 
 
+def normalize_base_url(url: str) -> str:
+    u = url.strip().rstrip("/")
+    if not u:
+        raise ValueError("Empty base URL")
+    if not u.endswith("/v1"):
+        u = f"{u}/v1"
+    return u
+
+
+def resolve_base_urls(
+    base_url: Optional[str],
+    base_urls: Optional[str],
+    local_mode: bool,
+) -> List[Optional[str]]:
+    if base_urls:
+        urls = [normalize_base_url(u) for u in base_urls.split(",") if u.strip()]
+        if not urls:
+            raise ValueError("--base-urls is empty after parsing")
+        return urls
+
+    if base_url:
+        return [normalize_base_url(base_url)]
+
+    env_base = os.environ.get("OPENAI_BASE_URL")
+    if env_base:
+        return [normalize_base_url(env_base)]
+
+    if local_mode:
+        return ["http://127.0.0.1:8000/v1"]
+
+    # None means UsageLLM will fall back to its internal default.
+    return [None]
+
+
 def pass_check(pred: Optional[float], truth: Optional[float], tol: float) -> bool:
     if pred is None or truth is None:
         return False
@@ -206,6 +312,8 @@ def run_item(
     item: Dict[str, Any],
     model: str,
     base_url: Optional[str],
+    api_key: Optional[str],
+    request_timeout: int,
     enable_cpt: bool,
     verbose: bool = False,
     use_cot: bool = True,
@@ -227,7 +335,12 @@ def run_item(
     except Exception:
         ground_truth = None
 
-    llm = UsageLLM(model=model, base_url=base_url)
+    llm = UsageLLM(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        request_timeout=request_timeout,
+    )
     generator = CodeGenerator(llm_client=llm, use_structured_generation=use_cot)
     extractor = DataExtractor(llm_client=llm)
     executor = CodeExecutor()
@@ -337,7 +450,15 @@ def main():
     parser.add_argument("-d", "--dataset", required=True, help="Path to dataset json/jsonl.")
     parser.add_argument("-o", "--output-dir", default=None, help="Output base directory (default: experiment_results/<dataset-stem>/<model>).")
     parser.add_argument("-m", "--model", default="gpt-4.1", help="OpenAI model name.")
-    parser.add_argument("--base-url", default=None, help="Optional OpenAI-compatible base URL.")
+    parser.add_argument("--base-url", default=None, help="Single OpenAI-compatible base URL.")
+    parser.add_argument(
+        "--base-urls",
+        default=None,
+        help="Comma-separated base URLs for round-robin load balancing (e.g. http://127.0.0.1:8000/v1,http://127.0.0.1:8001/v1).",
+    )
+    parser.add_argument("--api-key", default=None, help="Override API key (for local services you can set EMPTY).")
+    parser.add_argument("--local", action="store_true", help="Local mode: default base URL -> http://127.0.0.1:8000/v1.")
+    parser.add_argument("--request-timeout", type=int, default=300, help="Per-request timeout in seconds.")
     parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
     parser.add_argument("--no-cot", action="store_true", help="Use direct generation (no CoT structured generation).")
@@ -373,12 +494,27 @@ def main():
         base_dir = Path("experiment_results") / dataset_stem / (args.model + mode_suffix)
     base_dir.mkdir(parents=True, exist_ok=True)
 
+    base_urls = resolve_base_urls(args.base_url, args.base_urls, args.local)
+    base_url_msg = ", ".join([u if u is not None else "<default>" for u in base_urls])
+    print(f"[ablation] endpoints={base_url_msg} (count={len(base_urls)})")
+
     results: List[RecordResult] = []
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(run_item, idx, item, args.model, args.base_url, args.enable_cpt, args.verbose,
-                      use_cot=not args.no_cot, run_verify=not args.no_verify): idx
+            ex.submit(
+                run_item,
+                idx,
+                item,
+                args.model,
+                base_urls[idx % len(base_urls)],
+                args.api_key,
+                args.request_timeout,
+                args.enable_cpt,
+                args.verbose,
+                use_cot=not args.no_cot,
+                run_verify=not args.no_verify,
+            ): idx
             for idx, item in enumerate(records)
         }
         for fut in as_completed(futures):
