@@ -2,7 +2,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![NeurIPS 2026](https://img.shields.io/badge/NeurIPS-2026-red.svg)]()
+[![arXiv](https://img.shields.io/badge/arXiv-preprint-b31b1b.svg)]()
 
 This repository contains the official implementation of the paper:
 
@@ -10,7 +10,7 @@ This repository contains the official implementation of the paper:
 >
 > Junbo Jacob Lian, Yujun Sun, Huiling Chen, Chaoyu Zhang, Chung-Piaw Teo
 >
-> NeurIPS 2026
+> arXiv preprint, 2026
 
 ---
 
@@ -41,9 +41,8 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 
 ## Framework Architecture
 
-> 📄 **Full architecture diagram:** [fig/Reloop_framework.pdf](fig/Reloop_framework.pdf)
->
-> *Download the PDF for the complete visual architecture used in the paper.*
+![ReLoop Framework Architecture](fig/Reloop_framework.png)
+
 
 ### Pipeline Overview
 
@@ -149,6 +148,8 @@ Checks whether generated code executes and produces a valid solution (`verificat
 **FATAL handling:** Triggers regeneration (up to `max_regeneration_attempts=3`). The LLM receives the failed code and error message to generate corrected code.
 
 ### L2: Direction Consistency Analysis (Adversarial)
+
+![L2 Direction Consistency Analysis](fig/L2.png)
 
 Detects parameters whose objective response contradicts expected behavior (`l2_direction.py`, `pipeline.py:_run_l2_adversarial_loop`).
 
@@ -487,7 +488,8 @@ reloop/
 │   ├── test_repair_safety.py     # Unit tests for repair safety guardrails
 ├── data/                         # Benchmark datasets (JSONL)
 ├── fig/                          # Architecture diagrams
-│   └── Reloop_framework.pdf      # System architecture diagram
+│   ├── Reloop_framework.png      # System architecture diagram
+│   └── L2.png                    # L2 Direction Consistency Analysis diagram
 ├── run_ablation.py               # Ablation experiment runner (per-layer contribution)
 ├── analyze_layers.py             # Layer contribution analysis from ablation CSV
 ├── requirements.txt              # Python dependencies
@@ -547,7 +549,7 @@ pipeline = ReLoopPipeline(
     max_repair_iterations=3,        # L2-L3 repair attempts
     max_regeneration_attempts=3,    # L1 FATAL regeneration attempts
     enable_cpt=True,                # Enable L3 CPT layer
-    enable_l4_adversarial=True,     # Enable L2 Direction Consistency Analysis
+    enable_l2_adversarial=True,     # Enable L2 Direction Consistency Analysis
     use_structured_generation=True  # Use 3-stage pipeline
 )
 result = pipeline.run(problem_description, data)
@@ -758,7 +760,7 @@ L2 uses an **adversarial mechanism** where two LLM roles debate to converge on t
 5. `accepted_fixed`: Some accepted, code fixed → re-verify and continue
 
 **Key Parameters:**
-- `max_l4_rejections`: Max times a param can be rejected before downgrade (default: 2)
+- `max_l2_rejections`: Max times a param can be rejected before downgrade (default: 2)
 - `max_l2_iterations`: Max L2 loop iterations (default: 3)
 
 > **Design Principle:** The adversarial mechanism allows two LLM perspectives to debate.
@@ -896,11 +898,11 @@ JSONL format, one problem per line:
 ## Citation
 
 ```bibtex
-@inproceedings{lian2026reloop,
-  title     = {ReLoop: Detecting Silent Failures in LLM-Generated Optimization Code via Behavioral Verification},
-  author    = {Lian, Junbo Jacob and Sun, Yujun and Chen, Huiling and Zhang, Chaoyu and Teo, Chung-Piaw},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2026}
+@article{lian2026reloop,
+  title   = {ReLoop: Detecting Silent Failures in LLM-Generated Optimization Code via Behavioral Verification},
+  author  = {Lian, Junbo Jacob and Sun, Yujun and Chen, Huiling and Zhang, Chaoyu and Teo, Chung-Piaw},
+  journal = {arXiv preprint},
+  year    = {2026}
 }
 ```
 
