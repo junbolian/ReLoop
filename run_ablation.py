@@ -235,7 +235,7 @@ def run_item(
         pipeline = ReLoopPipeline(
             llm_client=llm,
             enable_cpt=enable_cpt,
-            enable_l4_adversarial=True,
+            enable_l2_adversarial=True,
             max_repair_iterations=3,
             verbose=False,
         )

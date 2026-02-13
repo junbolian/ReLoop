@@ -135,9 +135,12 @@ class ReLoopPipeline:
         llm_client,
         max_repair_iterations: int = 3,
         max_regeneration_attempts: int = 3,
-        max_l4_rejections: int = 2,
+        max_l2_rejections: int = 2,
         enable_cpt: bool = True,
-        enable_l4_adversarial: bool = True,
+        enable_l2_adversarial: bool = True,
+        # Backward compatibility aliases
+        max_l4_rejections: int = None,
+        enable_l4_adversarial: bool = None,
         use_structured_generation: bool = True,
         verbose: bool = False
     ):
@@ -146,9 +149,9 @@ class ReLoopPipeline:
             llm_client: LLM client with generate(prompt, system=None) method
             max_repair_iterations: Max repair attempts for ERROR/WARNING issues
             max_regeneration_attempts: Max regeneration attempts for L1 FATAL
-            max_l4_rejections: Max rejections per param before L2 downgrades to INFO
+            max_l2_rejections: Max rejections per param before L2 downgrades to INFO
             enable_cpt: Enable L3 CPT layer
-            enable_l4_adversarial: Enable L2 Direction Consistency Analysis
+            enable_l2_adversarial: Enable L2 Direction Consistency Analysis
             use_structured_generation: Use CoT generation pipeline
             verbose: Print progress messages
         """
@@ -162,14 +165,17 @@ class ReLoopPipeline:
         self.max_repair_iterations = max_repair_iterations
         self.max_regeneration_attempts = max_regeneration_attempts
         self.enable_cpt = enable_cpt
-        self.enable_l2_direction = enable_l4_adversarial
+        # Resolve backward compat: l4 aliases take precedence if explicitly passed
+        _l2_adv = enable_l4_adversarial if enable_l4_adversarial is not None else enable_l2_adversarial
+        _l2_rej = max_l4_rejections if max_l4_rejections is not None else max_l2_rejections
+        self.enable_l2_direction = _l2_adv
         self.verbose = verbose
 
         # L2 Direction Consistency Verifier (adversarial)
         if self.enable_l2_direction and llm_client:
             self.l2_verifier = L2DirectionVerifier(
                 llm_client=llm_client,
-                max_rejections=max_l4_rejections
+                max_rejections=_l2_rej
             )
         else:
             self.l2_verifier = None
