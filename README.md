@@ -43,50 +43,6 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 
 ![ReLoop Framework Architecture](fig/Reloop_framework.png)
 
-
-### Pipeline Overview
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                           ReLoop Pipeline                                     │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    GENERATION (Chain-of-Thought)                     │    │
-│  │  Problem → [Understand] → [Formalize] → [Synthesize] → Gurobi Code  │    │
-│  └──────────────────────────────┬──────────────────────────────────────┘    │
-│                                 │                                            │
-│                                 ▼                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    3-LAYER VERIFICATION                              │    │
-│  │                                                                      │    │
-│  │  L1: Execution & Solver + Duality Check ───────────┐              │    │
-│  │      (Blocking: FATAL → Regenerate up to 3x)        │              │    │
-│  │      (Duality gap → INFO, add-on diagnostic)        │              │    │
-│  │                                                       ▼              │    │
-│  │  L2: Direction Consistency Analysis ───────────────┤              │    │
-│  │      (LLM debate: verify ↔ repair → Accept/Reject)  │              │    │
-│  │                                                       ▼              │    │
-│  │  L3: Constraint Presence Test (CPT) ───────────────┘              │    │
-│  │      (LLM-based CPT → WARNING/INFO)                  │              │    │
-│  └──────────────────────────────┬──────────────────────────────────────┘    │
-│                                 │                                            │
-│                                 ▼                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    DIAGNOSTIC-BASED REPAIR                           │    │
-│  │                                                                      │    │
-│  │  ERROR (L2 accepted) ─────→ MUST fix                  │    │
-│  │  WARNING (L3 cpt_missing) ──────────────→ SHOULD fix                │    │
-│  │  INFO (L1 duality, L2 rejected) ────────→ Reference only            │    │
-│  │                                                                      │    │
-│  └──────────────────────────────┬──────────────────────────────────────┘    │
-│                                 │                                            │
-│                                 ▼                                            │
-│                          [Verified Code]                                     │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
 ### Key Components
 
 | Component | Description |
@@ -630,48 +586,31 @@ The formalization step explicitly prompts the LLM to determine variable types (C
 
 ---
 
-## Schema-Only Visibility Design
+## Data Input Modes
 
-A key architectural principle is that generated code uses **schema-only visibility**:
+ReLoop supports two data input modes for code generation. Both produce code that accesses data via `data["key"]` at runtime.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Data Dict (external)                                         │
-│   {"capacity": 500, "costs": [10,15,8], "demand": [100,150]} │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-                   Schema Description (sent to LLM)
-                          ↓
-┌─────────────────────────────────────────────────────────────┐
-│ - capacity: int (scalar)                                     │
-│ - costs: list[3] of int                                      │
-│ - demand: list[3] of int                                     │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-                   Generated Code uses data["key"]
-                          ↓
-┌─────────────────────────────────────────────────────────────┐
-│ # Code accesses data at runtime                              │
-│ m.addConstr(x <= data["capacity"])                           │
-│ for i in range(len(data["costs"])): ...                      │
-└─────────────────────────────────────────────────────────────┘
-```
+| Mode | LLM Sees | Use Case |
+|------|----------|----------|
+| **Data-embedded** | Full data values in prompt | Benchmark evaluation (all experiments in this paper) |
+| **Schema-based** | Schema only (keys, types, dimensions) | Industrial deployment (data too large or sensitive for prompt) |
 
-**Key Points:**
-1. LLM sees schema (keys, types, dimensions) but NOT actual values
-2. Code must use `data["key"]` to access runtime-injected data
-3. The `data` dict is injected by executor at runtime
-4. Generation prompts include schema; repair prompts also include schema to ensure consistency
+**Data-embedded mode** (used for all benchmark evaluations):
+- The complete data dict is embedded directly in the problem prompt
+- LLM sees actual values and generates code accordingly
+- Simpler and more reliable for fixed-size benchmark problems
+
+**Schema-based mode** (for production deployment):
+- LLM sees only schema descriptions (e.g., `capacity: int`, `costs: list[3] of int`)
+- Actual data values are injected at runtime via the `data` dict
+- Enables deployment on large-scale or confidential datasets where embedding full data in the prompt is impractical
+
+**Code Design Principle:** Regardless of input mode, generated code must use `data["key"]` to access data at runtime. The `data` dict is injected by the executor, and repair prompts also include data context to ensure consistency.
 
 **Big-M Guidelines (for indicator/logical constraints):**
 - NEVER hardcode Big-M values like `M = 1e6`
 - ALWAYS compute M dynamically: `M = sum(data["demand"]) * 1.5`
 - Use problem-relevant parameters for M calculation
-
-**Edge Case Handling:**
-- Check array length: `if data["items"]: ...`
-- Avoid division by zero: `max(value, 1e-6)`
-- Use `.get()` for optional keys: `data.get("key", default)`
 
 ---
 
