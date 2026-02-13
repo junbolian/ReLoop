@@ -33,8 +33,8 @@ The **RetailOpt-190** benchmark is a key contribution of this paper, featuring:
 ReLoop is a behavioral verification framework that detects **silent failures** in LLM-generated optimization code—code that executes successfully but produces incorrect results. Our key insight is that correct optimization models satisfy fundamental mathematical invariants (execution correctness, direction consistency, constraint presence) that can be tested without ground truth.
 
 **Key Results:**
-- 94% detection rate for silent failures
-- 3% false positive rate on correct code
+- Consistent improvements across all five models and three benchmarks
+- Detection of missing constraints, direction reversals, and data access errors
 - No ground truth required for verification
 
 ---
@@ -73,7 +73,7 @@ A single LLM call with 3-stage structured reasoning (`generation.py`, `prompts.p
 2. **Formalize** — Write the mathematical model: sets, parameters, decision variables (with explicit CONTINUOUS/INTEGER/BINARY type reasoning), constraints, objective
 3. **Synthesize** — Generate executable Gurobi Python code
 
-The code receives a pre-defined `data` dict (schema only, not values in the prompt) and must not redefine it. Big-M values must be computed dynamically from data, never hardcoded.
+The code receives a pre-defined `data` dict and must not redefine it. Big-M values must be computed dynamically from data, never hardcoded.
 
 ### L1: Execution Verification (Blocking Layer)
 
@@ -142,7 +142,7 @@ Tests whether expected constraints are actually active in the generated model (`
 
 **Procedure:**
 
-1. **Extract candidates** — LLM reads problem description, outputs candidate constraints with type (capacity / demand / balance) and related parameters
+1. **Extract candidates** — LLM reads problem description, outputs candidate constraints with type (capacity / demand / other) and related parameters
 2. **Perturb and re-solve** — For each candidate, apply extreme perturbation to related parameter:
 
    | Constraint Type | Perturbation | Rationale |
@@ -243,8 +243,8 @@ Results are saved to `experiment_results/<dataset-name>/<model>/`:
 | `-o, --output-dir` | `experiment_results/<dataset>/<model>` | Custom output directory |
 | `--enable-cpt` | off | Enable L3 Constraint Presence Test |
 | `--workers` | 20 | Number of concurrent workers |
-| `--no-cot` | off | Skip Chain-of-Thought, use direct generation |
-| `--no-verify` | off | Skip all verification (execute generated code only) |
+| `--no-cot` | off | Skip CoT, use direct generation (for ablation baseline only; not recommended) |
+| `--no-verify` | off | Skip verification layers (CoT generation only, for ablation baseline) |
 | `-v, --verbose` | off | Print verbose logs to stdout |
 
 ### Python API
@@ -274,27 +274,26 @@ print(f"Objective: {result.final_report.objective}")
 
 ## Available Datasets
 
-| Dataset | # Problems | Avg Tokens | Description |
-|---------|:---:|:---:|-------------|
-| `RetailOpt-190.jsonl` | 190 | 2,900 | **Our benchmark** - Retail optimization scenarios |
-| `IndustryOR_fixedV2.jsonl` | 100 | 267 | Industry OR problems with difficulty labels |
-| `MAMO_EasyLP_fixed.jsonl` | 642 | — | Easy LP problems |
-| `MAMO_ComplexLP_fixed.jsonl` | 203 | 459 | Complex LP problems |
+| Dataset | # Problems | Avg Tokens | Tolerance | Format |
+|---------|:---:|:---:|:---:|--------|
+| `RetailOpt-190.jsonl` | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Data-embedded |
+| `MAMO_ComplexLP_fixed.jsonl` | 203 | ~459 | 10⁻⁶ | Data-embedded |
+| `IndustryOR_fixedV2.jsonl` | 100 | ~267 | 10⁻⁶ | Data-embedded |
+| `MAMO_EasyLP_fixed.jsonl` | 642 | — | — | Data-embedded |
 
-**Prompt format:** All datasets use data-embedded format (full data in prompt) for evaluation.
-RetailOpt additionally provides schema-based prompts where the LLM sees only data schema (keys, types, dimensions), and actual values are injected at runtime via the `data` dict — this is the format used by ReLoop's verification pipeline.
+All datasets use data-embedded format (full data in prompt) for evaluation. RetailOpt additionally provides schema-based prompts for ReLoop's verification pipeline, where the LLM sees only data schema and actual values are injected at runtime.
 
 ---
 
 ## Compared Models
 
-| Type | Model | Source |
-|------|-------|--------|
-| Foundation LLM | Claude Opus 4.5 | Anthropic |
-| Foundation LLM | DeepSeek-V3.1 | DeepSeek |
-| Foundation LLM | Qwen3-32B | [Qwen Team, 2025](https://qwenlm.github.io/blog/qwen3/) |
-| Offline SFT | OptMATH-Qwen2.5-32B | [Zhou et al., 2025](https://arxiv.org/abs/2502.11102) |
-| Online RL | SIRL-Qwen2.5-32B | [Kong et al., 2025](https://arxiv.org/abs/2505.11792) |
+| Type | Model | Provider | Temp. | Max Tokens | Notes |
+|------|-------|----------|:---:|:---:|-------|
+| Foundation | Claude Opus 4.5 | Anthropic API | 0.0 | 8192 | |
+| Foundation | DeepSeek-V3.1 | DeepSeek API | 0.0 | 8192 | |
+| Foundation | Qwen3-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
+| Offline SFT | OptMATH-Qwen2.5-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
+| Online RL | SIRL-Qwen2.5-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
 
 ---
 
@@ -302,14 +301,16 @@ RetailOpt additionally provides schema-based prompts where the LLM sees only dat
 
 ### Table 1: Main Results on RetailOpt-190
 
-| Type | Model | Exec% ||| Acc% pass@1 (ε=10⁻⁴) ||| Acc% pass@1 (ε=10⁻²) |||
+> Foundation models: Base = direct generation, CoT = structured chain-of-thought, ReLoop = CoT + L1–L3 verification with repair. SFT/RL models: Base = native generation format, CoT = our structured CoT replacing native prompting, ReLoop = CoT + L1–L3 (same pipeline as foundation models).
+
+| Type | Model | Exec% ||| Acc% (ε=10⁻⁴) ||| Acc% (ε=10⁻²) |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | | | | |
 | Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
 | Foundation | Qwen3-32B | | | | | | | | | |
-| Offline SFT | OptMATH-Qwen2.5-32B | — | | | — | | | — | | |
-| Online RL | SIRL-Qwen2.5-32B | — | | | — | | | — | | |
+| Offline SFT | OptMATH-Qwen2.5-32B | | | | | | | | | |
+| Online RL | SIRL-Qwen2.5-32B | | | | | | | | | |
 
 ### Table 2: Cross-Benchmark Generalization (Acc% pass@1, ε=10⁻⁶)
 
@@ -319,10 +320,10 @@ RetailOpt additionally provides schema-based prompts where the LLM sees only dat
 | Foundation | Claude Opus 4.5 | | | | | | |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0† | 58.0 | **60.0** |
 | Foundation | Qwen3-32B | 46.9† | | | 61.9† | | |
-| Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | — | | 31.0† | — | |
-| Online RL | SIRL-Qwen2.5-32B | 61.1† | — | | 42.0† | — | |
+| Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | | | 31.0† | | |
+| Online RL | SIRL-Qwen2.5-32B | 61.1† | | | 42.0† | | |
 
-† Cited from SIRL (Kong et al., 2025) and StepORLM (Zhou et al., 2025).
+> † Baselines cited from SIRL (Chen et al., 2025) and StepORLM (Zhou et al., 2025); all CoT and +ReLoop results are ours. For reference: GPT-4 (49.3%/33.0%), DeepSeek-R1 (67.9%/45.0%), o3 (51.2%/44.0%) on MAMO/IndustryOR.
 
 ### Table 3: Ablation (Claude Opus 4.5 × RetailOpt-190)
 
@@ -340,6 +341,8 @@ RetailOpt additionally provides schema-based prompts where the LLM sees only dat
 
 ### Table A1: Per-Family Breakdown on RetailOpt-190 (Acc% pass@1, ε=10⁻⁴)
 
+> Base = direct generation for foundation models, native format for SFT/RL models. +ReLoop = CoT + L1–L3 for all models.
+
 | Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
@@ -353,42 +356,35 @@ RetailOpt additionally provides schema-based prompts where the LLM sees only dat
 | F8 Omni-channel | 20 | | | 15.0 | **35.0** | | | | | | |
 | **Total** | **190** | | | **5.3** | **17.9** | | | | | | |
 
-### Table A2: Tiered Tolerance on RetailOpt-190 (Acc% pass@1)
+### Table A2: Silent Failure Taxonomy (Claude Opus 4.5 baseline on RetailOpt-190)
 
-| Model | ε=10⁻⁴ || ε=10⁻² || ε=5×10⁻² || ε=10⁻¹ ||
-|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
-| Claude Opus 4.5 | | | | | | | | |
-| DeepSeek-V3.1 | 5.3 | **17.9** | 9.5 | **22.1** | 14.7 | **31.1** | 27.4 | **45.3** |
-| Qwen3-32B | | | | | | | | |
-| OptMATH-Qwen2.5-32B | | | | | | | | |
-| SIRL-Qwen2.5-32B | | | | | | | | |
+> Each silent failure instance is manually classified by root cause and cross-referenced with the detecting layer.
 
-### Table A3: Verification Layer Statistics (Claude Opus 4.5 × RetailOpt-190)
-
-| Layer | Trigger Type | Count | Repair Success% |
-|-------|-------------|:---:|:---:|
-| L1 | Runtime Error | | |
-| L1 | Infeasible | | (IIS-enhanced) |
-| L1 | Unbounded | | (Ray diagnosis) |
-| L1 | Timeout | | |
-| L2 | Direction Violation | | |
-| L3 | Missing Constraint | | |
-| L3 | Uncertain Constraint | | |
-| — | Undetected (silent) | | (detection boundary) |
+| Error Type | Count | Detected by L2 | Detected by L3 | None | Repaired |
+|------------|:---:|:---:|:---:|:---:|:---:|
+| Missing constraint | | | | | |
+| Wrong constraint direction | | | — | | |
+| Wrong indexing/subscript | | | — | | |
+| Wrong coefficient | | | — | | |
+| Missing variable | | | | | |
+| Logic/composition error | | | | | |
+| Data access error | | | — | | |
+| Other | | | | | |
+| **Total** | | | | | |
 
 ---
 
 ## Ablation Study
 
-The ablation study measures each verification layer's marginal contribution. The pipeline records intermediate checkpoints during a single run:
+The ablation study measures each component's marginal contribution. The pipeline records intermediate checkpoints during a single run:
 
-| Checkpoint | What it captures | Pipeline state |
-|------------|-----------------|----------------|
-| **CoT** (baseline) | Raw generated code execution | Before any verification |
-| **L1** | After L1 verify + FATAL regeneration | Before L2 adversarial |
-| **L2** | After L2 direction consistency analysis | Before diagnostic repair |
-| **Final** | After full repair loop (L1+L2+L3 diagnostics) | Complete pipeline |
+| Config | What it captures | Pipeline state |
+|--------|-----------------|----------------|
+| **Direct** | Direct generation without CoT | No structured reasoning |
+| **+CoT** | Structured generation output | Before any verification |
+| **+CoT+L1** | After L1 verify + FATAL regeneration | Before L2 |
+| **+CoT+L1+L2** | After L2 adversarial analysis | Before L3 |
+| **+CoT+L1+L2+L3** (Full ReLoop) | After full pipeline | Complete |
 
 ### Running ablation experiments
 
@@ -576,13 +572,11 @@ The formalization step explicitly prompts the LLM to determine variable types (C
 
 **Generation Approaches:**
 
-| Approach | Description | Error Rate |
-|----------|-------------|------------|
-| Single-Stage | Direct problem → code (baseline) | - |
-| 3-Stage CoT (single call) | All steps in one prompt | 2.17% |
-| 3-Stage CoT (separate calls) | 3 API calls (loses context) | 10.85% |
-
-**Recommended:** 3-Stage CoT with single API call (preserves reasoning chain)
+| Approach | Description | Note |
+|----------|-------------|------|
+| Single-Stage | Direct problem → code (baseline) | Higher error rate |
+| 3-Stage CoT (single call) | All steps in one prompt | **Recommended** |
+| 3-Stage CoT (separate calls) | 3 API calls (loses context) | Not recommended (loses reasoning chain) |
 
 ---
 
@@ -790,7 +784,7 @@ All verification layers output results in a unified `Diagnostic` format:
 @dataclass
 class Diagnostic:
     layer: str          # "L1", "L2", "L3"
-    issue_type: str     # "INFEASIBLE", "DIRECTION_VIOLATION", "MISSING_CONSTRAINT", "SPEC_VIOLATION", etc.
+    issue_type: str     # "INFEASIBLE", "UNBOUNDED", "RUNTIME_ERROR", "DIRECTION_VIOLATION", "MISSING_CONSTRAINT", etc.
     severity: str       # "ERROR", "WARNING", "INFO"
     target_name: str    # Which parameter/constraint
     evidence: str       # Auto-generated evidence description
