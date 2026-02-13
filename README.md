@@ -240,12 +240,73 @@ Results are saved to `experiment_results/<dataset-name>/<model>/`:
 | `-d, --dataset` | *(required)* | Path to dataset JSONL file |
 | `-m, --model` | `gpt-4.1` | Model name (passed to OpenAI SDK) |
 | `--base-url` | `$OPENAI_BASE_URL` | Override API base URL (alternative to env var) |
+| `--base-urls` | off | Comma-separated API endpoints; requests are round-robin distributed across endpoints |
+| `--local` | off | Local mode; default endpoint becomes `http://127.0.0.1:8000/v1` and local dummy key is supported |
+| `--api-key` | `$OPENAI_API_KEY` | Override API key for this run (`EMPTY` is fine for most local servers) |
+| `--request-timeout` | 300 | Per-request timeout (seconds) |
 | `-o, --output-dir` | `experiment_results/<dataset>/<model>` | Custom output directory |
 | `--enable-cpt` | off | Enable L3 Constraint Presence Test |
 | `--workers` | 20 | Number of concurrent workers |
 | `--no-cot` | off | Skip CoT, use direct generation (for ablation baseline only; not recommended) |
 | `--no-verify` | off | Skip verification layers (CoT generation only, for ablation baseline) |
 | `-v, --verbose` | off | Print verbose logs to stdout |
+
+### Local Multi-GPU Deployment (GPU 4/5/6/7)
+
+Install optional local inference dependencies:
+
+```bash
+pip install -r requirements.local-inference.txt
+```
+
+Start local server for HF format models (`models/Qwen3-32B`, `models/SIRL-Gurobi32B`) via vLLM:
+
+```bash
+python scripts/deploy_local_llm.py \
+  --model qwen3-32b \
+  --backend vllm \
+  --gpus 4,5,6,7 \
+  --port 8000 \
+  --trust-remote-code
+```
+
+Start local server for GGUF model (`models/OptMATH-Qwen2.5-32B-Instruct-GGUF`) via llama.cpp server:
+
+```bash
+python scripts/deploy_local_llm.py \
+  --model optmath-gguf \
+  --backend llama_cpp \
+  --gpus 4,5,6,7 \
+  --port 8001
+```
+
+Run ablation against local endpoint:
+
+```bash
+export OPENAI_API_KEY="EMPTY"
+export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
+
+python run_ablation.py \
+  -d data/RetailOpt-190.jsonl \
+  -m Qwen3-32B \
+  --local \
+  --workers 5 \
+  --enable-cpt \
+  -v
+```
+
+If you deploy multiple local endpoints, use `--base-urls` for endpoint-level parallel load balancing:
+
+```bash
+python run_ablation.py \
+  -d data/RetailOpt-190.jsonl \
+  -m Qwen3-32B \
+  --local \
+  --base-urls "http://127.0.0.1:8000/v1,http://127.0.0.1:8002/v1" \
+  --workers 8 \
+  --enable-cpt \
+  -v
+```
 
 ### Python API
 
