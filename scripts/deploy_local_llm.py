@@ -72,6 +72,19 @@ def split_extra_args(extra_args: str) -> List[str]:
     return shlex.split(extra_args) if extra_args.strip() else []
 
 
+def parse_tensor_split_values(tensor_split: str) -> List[str]:
+    # Accept "1,1,1,1" or "1 1 1 1"
+    raw = tensor_split.replace(",", " ").split()
+    if not raw:
+        return []
+    values: List[str] = []
+    for item in raw:
+        # Validate numeric format expected by llama.cpp CLI.
+        float(item)
+        values.append(item)
+    return values
+
+
 def build_vllm_cmd(args: argparse.Namespace, model_path: Path, served_model_name: str, tp_size: int) -> List[str]:
     cmd = [
         sys.executable,
@@ -120,7 +133,8 @@ def build_llama_cmd(args: argparse.Namespace, gguf_file: Path) -> List[str]:
         args.chat_format,
     ]
     if args.tensor_split:
-        cmd.extend(["--tensor_split", args.tensor_split])
+        cmd.append("--tensor_split")
+        cmd.extend(parse_tensor_split_values(args.tensor_split))
     cmd.extend(split_extra_args(args.llama_extra_args))
     return cmd
 
