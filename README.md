@@ -365,7 +365,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Type | Model | Exec% ||| Acc% (ε=10⁻⁴) ||| Acc% (ε=10⁻²) |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
-| Foundation | Claude Opus 4.5 | | | | | | | | | |
+| Foundation | Claude Opus 4.5 | 42.1 | 37.4 | **99.5** | 10.0 | 11.1 | **25.3** | 11.1 | 12.1 | **31.6** |
 | Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
 | Foundation | Qwen3-32B | 0.0 | 0.0 | **2.1** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | Offline SFT | OptMATH-Qwen2.5-32B | 0.5 | 0.0 | **4.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
@@ -376,7 +376,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | | | MAMO-ComplexLP ||| IndustryOR |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
-| Foundation | Claude Opus 4.5 | | | | 71.0 | | |
+| Foundation | Claude Opus 4.5 | 76.8 | 74.4 | **78.8** | 61.0 | 64.0 | **65.0** |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0 | 58.0 | **60.0** |
 | Foundation | Qwen3-32B | 29.1 | 30.0 | **36.0** | 38.0 | 44.0 | **47.0** |
 | Offline SFT | OptMATH-Qwen2.5-32B | 44.8 | 45.8 | **46.3** | 31.0 | 33.0 | **33.0** |
@@ -388,11 +388,11 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 
 | Config | Exec% | Acc% pass@1 (ε=10⁻⁴) | Acc% pass@1 (ε=10⁻²) |
 |--------|:---:|:---:|:---:|
-| Direct | | | |
-| +CoT | | | |
-| +CoT+L1 | | | |
-| +CoT+L1+L2 | | | |
-| +CoT+L1+L2+L3 | | | |
+| Direct | 42.1 | 10.0 | 11.1 |
+| +CoT | 37.4 | 11.1 | 12.1 |
+| +CoT+L1 | 98.9 | 25.8 | 31.6 |
+| +CoT+L1+L2 | 98.9 | 25.8 | 31.6 |
+| +CoT+L1+L2+L3 | **99.5** | **25.3** | **31.6** |
 
 ---
 
@@ -405,15 +405,15 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
-| F1 Core Ops | 20 | | | 0.0 | **40.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F2 Assort & Sub | 30 | | | 6.7 | **20.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F3 Resource | 20 | | | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F4 Demand Dyn | 30 | | | 3.3 | **6.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F5 Feasibility | 20 | | | 5.0 | **15.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F6 Discrete Log | 20 | | | 5.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F7 Network & ME | 30 | | | 6.7 | **16.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F8 Omni-channel | 20 | | | 15.0 | **35.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| **Total** | **190** | | | **5.3** | **17.9** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| F1 Core Ops | 20 | 5.0 | **65.0** | 0.0 | **40.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F2 Assort & Sub | 30 | 3.3 | **26.7** | 6.7 | **20.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F3 Resource | 20 | 0.0 | 0.0 | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F4 Demand Dyn | 30 | 0.0 | **16.7** | 3.3 | **6.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F5 Feasibility | 20 | 15.0 | 5.0 | 5.0 | **15.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F6 Discrete Log | 20 | 0.0 | 0.0 | 5.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F7 Network & ME | 30 | 13.3 | **26.7** | 6.7 | **16.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F8 Omni-channel | 20 | 50.0 | **65.0** | 15.0 | **35.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| **Total** | **190** | **10.0** | **25.3** | **5.3** | **17.9** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
 ### Table A2: Silent Failure Taxonomy (Claude Opus 4.5 baseline on RetailOpt-190)
 
