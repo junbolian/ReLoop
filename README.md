@@ -367,9 +367,9 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | | | | |
 | Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
-| Foundation | Qwen3-32B | | | | | | | | | |
-| Offline SFT | OptMATH-Qwen2.5-32B | | | | | | | | | |
-| Online RL | SIRL-Qwen2.5-32B | | | | | | | | | |
+| Foundation | Qwen3-32B | 0.0 | 0.0 | **2.1** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| Offline SFT | OptMATH-Qwen2.5-32B | 0.5 | 0.0 | **4.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| Online RL | SIRL-Qwen2.5-32B | 1.6 | 1.6 | 1.6 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 
 ### Table 2: Cross-Benchmark Generalization (Acc% pass@1, ε=10⁻⁶)
 
@@ -378,11 +378,11 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
 | Foundation | Claude Opus 4.5 | | | | | | |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0 | 58.0 | **60.0** |
-| Foundation | Qwen3-32B | 46.9† | | | 61.9† | | |
-| Offline SFT | OptMATH-Qwen2.5-32B | 54.1† | | | 31.0† | | |
-| Online RL | SIRL-Qwen2.5-32B | 61.1† | | | 42.0† | | |
+| Foundation | Qwen3-32B | 29.1 | 30.0 | **36.0** | 38.0 | 44.0 | **47.0** |
+| Offline SFT | OptMATH-Qwen2.5-32B | 44.8 | 45.8 | **46.3** | 31.0 | 33.0 | **33.0** |
+| Online RL | SIRL-Qwen2.5-32B | 56.7 | 54.2 | **57.6** | 47.0 | 47.0 | **48.0** |
 
-> † Baselines cited from SIRL (Chen et al., 2025) and StepORLM (Zhou et al., 2025); all CoT and +ReLoop results are ours. For reference: GPT-4 (49.3%/33.0%), DeepSeek-R1 (67.9%/45.0%), o3 (51.2%/44.0%) on MAMO/IndustryOR.
+> For reference from SIRL (Chen et al., 2025) and StepORLM (Zhou et al., 2025): GPT-4 (49.3%/33.0%), DeepSeek-R1 (67.9%/45.0%), o3 (51.2%/44.0%) on MAMO/IndustryOR.
 
 ### Table 3: Ablation (Claude Opus 4.5 × RetailOpt-190)
 
@@ -405,15 +405,15 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
-| F1 Core Ops | 20 | | | 0.0 | **40.0** | | | | | | |
-| F2 Assort & Sub | 30 | | | 6.7 | **20.0** | | | | | | |
-| F3 Resource | 20 | | | 0.0 | **10.0** | | | | | | |
-| F4 Demand Dyn | 30 | | | 3.3 | **6.7** | | | | | | |
-| F5 Feasibility | 20 | | | 5.0 | **15.0** | | | | | | |
-| F6 Discrete Log | 20 | | | 5.0 | **5.0** | | | | | | |
-| F7 Network & ME | 30 | | | 6.7 | **16.7** | | | | | | |
-| F8 Omni-channel | 20 | | | 15.0 | **35.0** | | | | | | |
-| **Total** | **190** | | | **5.3** | **17.9** | | | | | | |
+| F1 Core Ops | 20 | | | 0.0 | **40.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F2 Assort & Sub | 30 | | | 6.7 | **20.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F3 Resource | 20 | | | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F4 Demand Dyn | 30 | | | 3.3 | **6.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F5 Feasibility | 20 | | | 5.0 | **15.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F6 Discrete Log | 20 | | | 5.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F7 Network & ME | 30 | | | 6.7 | **16.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F8 Omni-channel | 20 | | | 15.0 | **35.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| **Total** | **190** | | | **5.3** | **17.9** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
 ### Table A2: Silent Failure Taxonomy (Claude Opus 4.5 baseline on RetailOpt-190)
 
