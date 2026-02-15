@@ -9,6 +9,8 @@ HOST="${HOST:-127.0.0.1}"
 BASE_URL="http://${HOST}:${PORT}/v1"
 GPUS="${GPUS:-4,5,6,7}"
 WORKERS="${WORKERS:-8}"
+DEPLOY_MODEL_PATH="${DEPLOY_MODEL_PATH:-models/OptMATH-Qwen2.5-32B-Instruct}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-OptMATH-Qwen2.5-32B-Instruct}"
 
 DATASETS=(
   "data/RetailOpt-190.jsonl"
@@ -101,12 +103,12 @@ run_suite_for_model() {
 }
 
 main() {
-  # Remaining model to run: GGUF via llama.cpp (auto-detected).
-  start_server "optmath-gguf" "auto" "OptMATH-Qwen2.5-32B-Instruct-GGUF"
-  run_suite_for_model "OptMATH-Qwen2.5-32B-Instruct-GGUF"
+  # Run only OptMATH-Qwen2.5-32B-Instruct (HF format via vLLM).
+  start_server "${DEPLOY_MODEL_PATH}" "vllm" "${SERVED_MODEL_NAME}"
+  run_suite_for_model "${SERVED_MODEL_NAME}"
   stop_server
 
-  echo "[runner] optmath-gguf suite completed."
+  echo "[runner] ${SERVED_MODEL_NAME} suite completed."
 }
 
 main "$@"
