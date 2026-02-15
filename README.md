@@ -376,7 +376,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | | | MAMO-ComplexLP ||| IndustryOR |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
-| Foundation | Claude Opus 4.5 | | | | | | |
+| Foundation | Claude Opus 4.5 | | | | 71.0 | | |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0 | 58.0 | **60.0** |
 | Foundation | Qwen3-32B | 29.1 | 30.0 | **36.0** | 38.0 | 44.0 | **47.0** |
 | Offline SFT | OptMATH-Qwen2.5-32B | 44.8 | 45.8 | **46.3** | 31.0 | 33.0 | **33.0** |
