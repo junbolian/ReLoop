@@ -7,11 +7,8 @@ Functions:
 - Skip determination
 
 Note: Keyword-based role inference (ParameterRole, infer_param_role,
-get_expected_direction) has been completely removed. All layers now use
-universal or LLM-based approaches:
-- L2: Universal anomaly detection (both-directions-improve)
-- L4: LLM-based adversarial direction analysis
-- L5: LLM-based constraint extraction (requires LLM)
+get_expected_direction) has been completely removed. L2 behavioral
+testing (CPT + OPT) uses LLM-based candidate extraction.
 """
 
 import copy

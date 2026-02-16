@@ -45,7 +45,8 @@ Write self-contained Python code using gurobipy.
 2. Model variable must be named `m`
 3. Set `m.Params.OutputFlag = 0`
 4. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
-5. Implement ALL constraints from Step 2
+5. Implement ALL constraints mentioned in the problem description (not just those in Step 2 — re-read the problem to ensure nothing is missed)
+6. Include ALL cost/revenue terms from the problem in the objective function
 
 **Big-M Guidelines (if using indicator/logical constraints):**
 - NEVER hardcode Big-M values like `M = 1e6`
@@ -54,6 +55,13 @@ Write self-contained Python code using gurobipy.
 **Edge Case Handling:**
 - Check array length before iteration
 - Avoid division by zero: `max(value, 1e-6)`
+
+## STEP 4: VERIFY COMPLETENESS
+Before finalizing, cross-check your code against the original problem:
+- Does the objective include EVERY cost/revenue term mentioned in the problem?
+- Is EVERY constraint from the problem implemented in the code?
+- Are all numerical values correctly extracted from the problem description?
+If anything is missing, fix the code before returning it.
 
 ---
 Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
@@ -84,6 +92,98 @@ The `data` variable is PRE-DEFINED with these keys:
 7. Handle edge cases: check array length, avoid division by zero
 
 Return ONLY Python code. Do NOT include any `data = ` definition.
+'''
+
+# ============================================================================
+# Data Extraction (extract structured data dict from problem description)
+# ============================================================================
+
+DATA_EXTRACTION_SYSTEM = '''You are a data extraction expert. Extract structured data from optimization problem descriptions into a clean JSON dictionary.'''
+
+DATA_EXTRACTION_PROMPT = '''Extract ALL numerical data from this optimization problem into a structured JSON dictionary.
+
+## Problem
+{problem_description}
+
+## Task
+Read the problem carefully and extract EVERY numerical parameter into a JSON dictionary.
+Include: costs, prices, capacities, demands, rates, durations, distances, penalties, etc.
+
+## Rules
+1. Preserve the exact numerical values from the problem
+2. Use descriptive key names that match the problem terminology
+3. Group related data logically (e.g., costs together, demands together)
+4. For tabular/array data, use nested dicts or lists
+5. Include ALL data - missing parameters will cause the optimization to fail
+
+## Output Format
+Return ONLY a valid JSON object in a ```json block. No explanation.
+'''
+
+# ============================================================================
+# Chain-of-Thought with External Data (code reads from pre-loaded data dict)
+# ============================================================================
+
+CHAIN_OF_THOUGHT_WITH_DATA_SYSTEM = '''You are an optimization expert who solves problems with step-by-step reasoning.'''
+
+CHAIN_OF_THOUGHT_WITH_DATA_PROMPT = '''Solve this optimization problem using chain-of-thought reasoning.
+
+## Problem
+{problem_description}
+
+---
+## STEP 1: UNDERSTAND THE PROBLEM
+First, analyze the problem:
+- What is the objective? (minimize cost / maximize profit / etc.)
+- What decisions need to be made?
+- What constraints exist?
+- What parameters are given?
+
+## STEP 2: FORMULATE THE MATHEMATICAL MODEL
+Write the formal model:
+- Sets and indices
+- Parameters (reference the data keys listed below)
+- Decision variables with domains
+  **Variable Type**: For each variable, explicitly decide CONTINUOUS, INTEGER, or BINARY.
+  Look for context where fractional values would be physically meaningless
+  (e.g., number of trucks, workers to hire, items to select).
+  State your choice and reasoning.
+- Constraints in mathematical notation
+- Objective function
+
+## STEP 3: GENERATE GUROBI CODE
+Write Python code using gurobipy.
+
+**CRITICAL RULES:**
+1. **The `data` variable is PRE-LOADED with the problem data. Do NOT define or redefine `data`. Just use `data["key"]` directly.**
+2. Model variable must be named `m`
+3. Set `m.Params.OutputFlag = 0`
+4. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+5. Implement ALL constraints mentioned in the problem description (not just those in Step 2 — re-read the problem to ensure nothing is missed)
+6. Include ALL cost/revenue terms from the problem in the objective function
+7. Do NOT use `import json` or `json.loads()`. Data is already a Python dict.
+
+**Big-M Guidelines (if using indicator/logical constraints):**
+- NEVER hardcode Big-M values like `M = 1e6`
+- ALWAYS compute M dynamically from data parameters
+
+**Edge Case Handling:**
+- Check array length before iteration
+- Avoid division by zero: `max(value, 1e-6)`
+
+## Available Data Keys
+The `data` variable contains:
+{data_structure}
+
+## STEP 4: VERIFY COMPLETENESS
+Before finalizing, cross-check your code against the original problem:
+- Does the objective include EVERY cost/revenue term mentioned in the problem?
+- Is EVERY constraint from the problem implemented in the code?
+- Are data keys accessed correctly?
+If anything is missing, fix the code before returning it.
+
+---
+Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
 '''
 
 # ============================================================================
@@ -312,61 +412,6 @@ Return ONLY the corrected Python code in a ```python block.
 '''
 
 REGENERATE_SYSTEM = '''You fix broken optimization code. Ensure the new code is syntactically correct and handles all edge cases.'''
-
-
-# ============================================================================
-# L2 Anomaly Repair Prompt
-# ============================================================================
-
-L2_ANOMALY_REPAIR_PROMPT = '''Fix the structural anomaly in this optimization code.
-
-## Problem
-{problem_description}
-
-{data_instructions}
-
-## Current Code
-```python
-{code}
-```
-
-## CRITICAL ERROR - L2 Anomaly Detection
-
-**Parameter**: {param}
-**Baseline objective**: {z_baseline:.4f}
-**After {param} increased by {delta}%**: z = {z_plus:.4f}
-**After {param} decreased by {delta}%**: z = {z_minus:.4f}
-
-**Problem**: BOTH increasing AND decreasing '{param}' IMPROVE the objective.
-This is mathematically impossible for any valid optimization model.
-
-**Likely causes**:
-1. Constraint direction is wrong (>= should be <=, or vice versa)
-2. Parameter is used with wrong sign in constraint
-3. Parameter is applied to wrong constraint
-4. Parameter is multiplied where it should be divided (or vice versa)
-
-**Action Required**:
-Review all constraints and objective terms involving '{param}' and fix the structural error.
-
-## Instructions
-1. Find where '{param}' is used in the code
-2. Check if the constraint direction or sign is correct
-3. Fix the structural error
-
-Return the COMPLETE fixed code in a ```python block.
-'''
-
-L2_ANOMALY_REPAIR_SYSTEM = '''You fix structural errors in optimization models.
-Focus on constraint directions (>= vs <=) and parameter signs.'''
-
-
-# ============================================================================
-# L2 Semantic Audit Prompts
-# ============================================================================
-# Note: L2 prompts are defined in l2_direction.py to keep the module self-contained.
-# Import them from there if needed:
-#   from .l2_direction import L2_VERIFY_PROMPT, L2_REPAIR_PROMPT
 
 
 # ============================================================================

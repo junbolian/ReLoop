@@ -14,6 +14,7 @@ if perturbation has no effect on the objective.
 
 import ast
 import copy
+import re
 from typing import List, Dict, Any, Optional
 
 from .param_utils import perturb_param, get_param_value, should_skip_param
@@ -455,7 +456,9 @@ def run_perturbation(
     if mode in ("data_dict", "hybrid") and data is not None:
         data_perturbed = copy.deepcopy(data)
         if _apply_data_perturbation(data_perturbed, param_name, factor):
-            z_perturbed = executor_fn(code, data_perturbed)
+            # Strip json.loads override so the perturbed data dict is actually used
+            exec_code = strip_data_override(code) if has_data_override(code) else code
+            z_perturbed = executor_fn(exec_code, data_perturbed)
             if z_perturbed is not None and abs(z_perturbed - baseline_obj) > 1e-10:
                 return z_perturbed
 
@@ -470,6 +473,62 @@ def run_perturbation(
                 return z_perturbed
 
     return None
+
+
+# ============================================================================
+# Strip json.loads data override for perturbation
+# ============================================================================
+
+def has_data_override(code: str) -> bool:
+    """Check if code overrides the `data` variable via json.loads."""
+    return bool(re.search(r'\bdata\s*=\s*json\.loads\(', code))
+
+
+def strip_data_override(code: str) -> str:
+    """Strip json.loads data override so externally-injected data dict is used.
+
+    LLM-generated code often embeds data as:
+        data_json = \"\"\"{...}\"\"\"
+        data = json.loads(data_json)
+
+    This overwrites the external `data` variable, making data-dict perturbation
+    useless.  Stripping these lines lets the executor-injected (perturbed)
+    `data` flow through to the code.
+
+    Returns the modified code, or the original if no override was found.
+    """
+    # Pattern 1: data = json.loads(VARNAME) — indirect via a string variable
+    m = re.search(r'^data\s*=\s*json\.loads\((\w+)\)', code, re.MULTILINE)
+    if m:
+        source_var = m.group(1)
+        # Remove the json.loads assignment line
+        code = code[:m.start()] + code[m.end():]
+        # Remove the source variable's triple-quoted string assignment
+        # Handles both """ and ''' delimiters
+        for delim in ['"""', "'''"]:
+            esc = re.escape(delim)
+            pattern = re.compile(
+                rf'^{re.escape(source_var)}\s*=\s*{esc}.*?{esc}\s*$',
+                re.MULTILINE | re.DOTALL,
+            )
+            code = pattern.sub('', code, count=1)
+        return code
+
+    # Pattern 2: data = json.loads("""...""") — inline triple-quoted string
+    for delim in ['"""', "'''"]:
+        esc = re.escape(delim)
+        pattern = re.compile(
+            rf'^data\s*=\s*json\.loads\(\s*{esc}.*?{esc}\s*\)\s*$',
+            re.MULTILINE | re.DOTALL,
+        )
+        code = pattern.sub('', code, count=1)
+
+    # Pattern 3: data = json.loads('...') or data = json.loads("...") — single-line
+    code = re.sub(
+        r'^data\s*=\s*json\.loads\(.+\)\s*$', '', code, count=1, flags=re.MULTILINE
+    )
+
+    return code
 
 
 # ============================================================================

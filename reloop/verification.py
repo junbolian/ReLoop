@@ -1,16 +1,16 @@
 """
-ReLoop Core Verification Module - 3 Layer Architecture
+ReLoop Core Verification Module - 2 Layer Architecture
 
 Layers:
 - L1: Execution Verification (Blocking Layer) -> FATAL + duality INFO
-- L2: Semantic Audit (Diagnostic Layer) -> WARNING/INFO
-- L3: Constraint Presence Testing (Enhancement Layer, Optional) -> WARNING/INFO
+- L2: Behavioral Testing (Diagnostic Layer) -> WARNING/INFO
+  - CPT: Constraint Presence Testing
+  - OPT: Objective Presence Testing
 
 Severity Levels:
 - FATAL: Code cannot run (L1 only)
-- ERROR: Mathematically certain error, must fix (L2 accepted)
-- WARNING: High-confidence issue, should fix (L3 cpt_missing)
-- INFO: Likely normal, for reference only (L1 duality, L2 rejected)
+- WARNING: High-confidence issue, should fix (L2 CPT/OPT missing)
+- INFO: Likely normal, for reference only (L1 duality, L2 uncertain)
 - PASS: Check passed
 """
 
@@ -30,12 +30,13 @@ from .perturbation import (
     detect_perturbation_mode, run_perturbation,
     get_source_code_param_names, perturb_code,
     extract_perturbable_params, _match_param,
+    has_data_override, strip_data_override,
 )
 
 
 class Severity(Enum):
     FATAL = "FATAL"      # L1 only: code cannot run
-    ERROR = "ERROR"      # Mathematically certain error, must fix
+    ERROR = "ERROR"      # Reserved for future use
     WARNING = "WARNING"  # High-confidence issue, should fix
     INFO = "INFO"        # Likely normal, for reference only
     PASS = "PASS"        # Check passed
@@ -50,13 +51,12 @@ class Complexity(Enum):
 @dataclass
 class Diagnostic:
     """Unified diagnostic schema for all verification layers."""
-    layer: str              # "L1", "L2", "L3"
+    layer: str              # "L1", "L2"
     issue_type: str         # "INFEASIBLE", "UNBOUNDED", "RUNTIME_ERROR",
                             # "SYNTAX_ERROR", "NO_OUTPUT", "TIMEOUT",
                             # "DUALITY_GAP",
-                            # "DIRECTION_VIOLATION",
-                            # "MISSING_CONSTRAINT"
-    severity: str           # "ERROR", "WARNING", "INFO"
+                            # "MISSING_CONSTRAINT", "MISSING_OBJECTIVE_TERM"
+    severity: str           # "WARNING", "INFO"
     target_name: str        # which parameter/constraint, e.g. "capacity"
     evidence: str           # auto-generated evidence description
     triggers_repair: bool = True
@@ -154,22 +154,22 @@ class ReLoopVerifier:
             print(f"\n[Complexity: {complexity.value}]")
             print(f"[Parameters: {len(params)} found]")
 
-        # L2: Semantic Audit (placeholder - full analysis in pipeline)
-        if verbose:
-            print("\n[L2] Semantic Audit")
-        l2_results = self._layer2(
-            code, data, params, objective, complexity, verbose,
-            problem_description=problem_description,
-            mode=mode
-        )
-        layer_results.extend(l2_results)
-
-        # L3: Constraint Presence Testing (Optional)
+        # L2: Behavioral Testing (CPT + OPT, Optional)
         if enable_cpt and problem_description:
             if verbose:
-                print("\n[L3] Constraint Presence Testing")
-            l3_results = self._layer3(code, data, objective, problem_description, verbose, mode)
-            layer_results.extend(l3_results)
+                print("\n[L2] Behavioral Testing")
+
+            # L2-CPT: Constraint Presence Testing
+            if verbose:
+                print("  [L2-CPT] Constraint Presence Testing")
+            cpt_results = self._layer2_cpt(code, data, objective, problem_description, verbose, mode)
+            layer_results.extend(cpt_results)
+
+            # L2-OPT: Objective Presence Testing
+            if verbose:
+                print("  [L2-OPT] Objective Presence Testing")
+            opt_results = self._layer2_opt(code, data, objective, problem_description, verbose, mode)
+            layer_results.extend(opt_results)
 
         return self._aggregate(layer_results, objective, solution, complexity, start_time, verbose)
 
@@ -340,7 +340,6 @@ class ReLoopVerifier:
         """
         Duality check: verify primal-dual consistency.
 
-        Formerly L3. Now an add-on diagnostic within L1.
         Severity: INFO only (not WARNING).
         Reason: Large gap is often numerical precision, not modeling error.
         """
@@ -380,85 +379,30 @@ class ReLoopVerifier:
         return results
 
     # =========================================================================
-    # L2: Semantic Audit (placeholder in verifier)
+    # L2: Behavioral Testing
     # =========================================================================
 
-    def _layer2(
-        self, code: str, data: Dict, params: List[str],
-        baseline_obj: float,
-        complexity: Complexity, verbose: bool,
-        problem_description: str = "",
-        mode: str = "data_dict"
-    ) -> List[LayerResult]:
-        """
-        L2: Semantic Audit.
+    # ----- L2-CPT: Constraint Presence Testing -----
 
-        Uses LLM to compare problem description vs code for semantic issues.
-        Full implementation uses L2DirectionVerifier (called from pipeline.py).
-        When LLM client is not available, L2 returns PASS (no analysis performed).
-        """
-        results = []
-
-        # If no LLM client, skip L2
-        if self.llm_client is None:
-            results.append(LayerResult(
-                "L2", "skipped", Severity.INFO,
-                "L2 Semantic Audit skipped (no LLM client)",
-                0.5,
-                {"trigger_repair": False, "is_likely_normal": True}
-            ))
-            return results
-
-        if not params:
-            results.append(LayerResult(
-                "L2", "no_params", Severity.PASS,
-                "No parameters to analyze",
-                0.9
-            ))
-            return results
-
-        # Full L2 analysis is handled by L2AdversarialVerifier in pipeline
-        # This placeholder returns PASS when called directly
-        results.append(LayerResult(
-            "L2", "placeholder", Severity.INFO,
-            f"L2 analysis deferred to pipeline ({len(params)} params pending)",
-            0.5,
-            {
-                "params_pending": params,
-                "trigger_repair": False,
-                "note": "Full L2 analysis with LLM is handled in pipeline.py"
-            }
-        ))
-
-        return results
-
-    # =========================================================================
-    # L3: Constraint Presence Testing (WARNING for missing <5%, INFO for uncertain 5-30%)
-    # =========================================================================
-
-    def _layer3(
+    def _layer2_cpt(
         self, code: str, data: Dict, baseline_obj: float,
         problem_description: str, verbose: bool, mode: str = "data_dict"
     ) -> List[LayerResult]:
         """
-        L3: Constraint Presence Testing (CPT).
+        L2-CPT: Constraint Presence Testing.
 
         Severity grading based on change ratio:
         - < 5%: WARNING (constraint likely missing)
         - 5%-30%: INFO (uncertain, may be normal)
         - > 30%: PASS (constraint present)
-
-        Note: L3 uses WARNING (not ERROR) because LLM-extracted
-        candidates may themselves be inaccurate.
         """
         results = []
 
         try:
-            # Extract candidates (LLM-only, no keyword fallback)
             if not self.llm_client:
                 results.append(LayerResult(
-                    "L3", "cpt_skipped", Severity.INFO,
-                    "L3 CPT skipped (requires LLM for constraint extraction)", 0.5,
+                    "L2", "cpt_skipped", Severity.INFO,
+                    "L2 CPT skipped (requires LLM for constraint extraction)", 0.5,
                     {"trigger_repair": False, "is_likely_normal": True}
                 ))
                 return results
@@ -467,18 +411,18 @@ class ReLoopVerifier:
 
             if not candidates:
                 results.append(LayerResult(
-                    "L3", "cpt_extraction", Severity.INFO,
+                    "L2", "cpt_extraction", Severity.INFO,
                     "No candidate constraints extracted", 0.5,
                     {"trigger_repair": False, "is_likely_normal": True}
                 ))
                 return results
 
             if verbose:
-                print(f"  Extracted {len(candidates)} candidates")
+                print(f"    Extracted {len(candidates)} constraint candidates")
 
             for candidate in candidates[:10]:
                 try:
-                    test_result = self._cpt_test_candidate_v2(
+                    test_result = self._cpt_test_candidate(
                         code, data, baseline_obj, candidate, verbose, mode
                     )
                     if test_result:
@@ -488,18 +432,18 @@ class ReLoopVerifier:
 
         except Exception as e:
             results.append(LayerResult(
-                "L3", "cpt_error", Severity.INFO,
+                "L2", "cpt_error", Severity.INFO,
                 f"CPT skipped: {str(e)[:100]}", 0.5,
                 {"trigger_repair": False, "is_likely_normal": True}
             ))
 
         return results
 
-    def _cpt_test_candidate_v2(
+    def _cpt_test_candidate(
         self, code: str, data: Dict, baseline_obj: float,
         candidate: Dict, verbose: bool, mode: str = "data_dict"
     ) -> Optional[LayerResult]:
-        """Test a single candidate constraint with new thresholds."""
+        """Test a single candidate constraint."""
         params = candidate.get("parameters", [])
         if not params:
             return None
@@ -522,6 +466,9 @@ class ReLoopVerifier:
         new_status = None
         new_obj = None
 
+        # Strip json.loads data override so perturbed data dict is used
+        exec_code = strip_data_override(code) if has_data_override(code) else code
+
         # Strategy 1: data-dict perturbation (for data_dict and hybrid modes)
         if mode != "source_code":
             if ctype == "capacity":
@@ -530,7 +477,7 @@ class ReLoopVerifier:
                 test_data = perturb_param(data, param, 100.0)
             else:
                 test_data = perturb_param(data, param, 0.01)
-            result = self.executor.execute(code, test_data)
+            result = self.executor.execute(exec_code, test_data)
             new_status = result.get("status")
             new_obj = result.get("objective")
 
@@ -547,8 +494,8 @@ class ReLoopVerifier:
                 use_code_fallback = True
 
         if use_code_fallback:
-            l3_code_params = extract_perturbable_params(code)
-            matched = _match_param(l3_code_params, param)
+            l2_code_params = extract_perturbable_params(code)
+            matched = _match_param(l2_code_params, param)
             if matched:
                 perturbed_code = perturb_code(code, matched['access_path'], code_factor)
                 if perturbed_code != code:
@@ -561,7 +508,7 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [PRESENT] {description} - perturbation caused infeasibility")
             return LayerResult(
-                "L3", "cpt_present", Severity.PASS,
+                "L2", "cpt_present", Severity.PASS,
                 f"Constraint '{description}': extreme perturbation caused infeasibility - constraint is present",
                 0.9,
                 {"trigger_repair": False}
@@ -576,16 +523,13 @@ class ReLoopVerifier:
         else:
             change_ratio = abs(new_obj - baseline_obj)
 
-        # ────────────────────────────────────────────────────
         # Threshold-based grading
-        # ────────────────────────────────────────────────────
-
         if change_ratio < 0.05:
             # < 5%: WARNING (constraint likely missing)
             if verbose:
                 print(f"    [MISSING] {description} - only {change_ratio:.1%} change")
             return LayerResult(
-                "L3", "cpt_missing", Severity.WARNING,
+                "L2", "cpt_missing", Severity.WARNING,
                 f"Constraint '{description}' is likely MISSING: "
                 f"extreme perturbation ({perturbation_desc}) caused only {change_ratio:.1%} change",
                 0.75,
@@ -605,7 +549,7 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [UNCERTAIN] {description} - {change_ratio:.1%} change")
             return LayerResult(
-                "L3", "cpt_uncertain", Severity.INFO,
+                "L2", "cpt_uncertain", Severity.INFO,
                 f"Constraint '{description}': {change_ratio:.1%} change (uncertain, may be normal)",
                 0.5,
                 {
@@ -622,14 +566,14 @@ class ReLoopVerifier:
             if verbose:
                 print(f"    [PRESENT] {description} - {change_ratio:.1%} change")
             return LayerResult(
-                "L3", "cpt_present", Severity.PASS,
+                "L2", "cpt_present", Severity.PASS,
                 f"Constraint '{description}': {change_ratio:.1%} change - constraint is active",
                 0.85,
                 {"trigger_repair": False}
             )
 
     def _cpt_extract_candidates(self, problem_description: str, data: Dict) -> List[Dict]:
-        """LLM-based candidate extraction."""
+        """LLM-based constraint candidate extraction."""
         if not self.llm_client:
             return []
 
@@ -671,6 +615,246 @@ Return ONLY the JSON array, no explanation."""
                 return valid
 
             # Try parsing entire response as JSON
+            try:
+                candidates = json.loads(response.strip())
+                if isinstance(candidates, list):
+                    return [c for c in candidates
+                            if isinstance(c, dict) and "description" in c]
+            except json.JSONDecodeError:
+                pass
+
+        except json.JSONDecodeError:
+            pass
+        except Exception:
+            pass
+
+        return []
+
+    # ----- L2-OPT: Objective Presence Testing -----
+
+    def _layer2_opt(
+        self, code: str, data: Dict, baseline_obj: float,
+        problem_description: str, verbose: bool, mode: str = "data_dict"
+    ) -> List[LayerResult]:
+        """
+        L2-OPT: Objective Presence Testing.
+
+        Tests whether expected objective function terms (cost/revenue components)
+        are actually present in the generated code by perturbing related parameters.
+
+        Severity grading based on change ratio:
+        - < 5%: WARNING (objective term likely missing)
+        - 5%-30%: INFO (uncertain, may be normal)
+        - > 30%: PASS (objective term present)
+        """
+        results = []
+
+        try:
+            if not self.llm_client:
+                results.append(LayerResult(
+                    "L2", "opt_skipped", Severity.INFO,
+                    "L2 OPT skipped (requires LLM for objective term extraction)", 0.5,
+                    {"trigger_repair": False, "is_likely_normal": True}
+                ))
+                return results
+
+            candidates = self._opt_extract_candidates(problem_description, data)
+
+            if not candidates:
+                results.append(LayerResult(
+                    "L2", "opt_extraction", Severity.INFO,
+                    "No candidate objective terms extracted", 0.5,
+                    {"trigger_repair": False, "is_likely_normal": True}
+                ))
+                return results
+
+            if verbose:
+                print(f"    Extracted {len(candidates)} objective term candidates")
+
+            for candidate in candidates[:10]:
+                try:
+                    test_result = self._opt_test_candidate(
+                        code, data, baseline_obj, candidate, verbose, mode
+                    )
+                    if test_result:
+                        results.append(test_result)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            results.append(LayerResult(
+                "L2", "opt_error", Severity.INFO,
+                f"OPT skipped: {str(e)[:100]}", 0.5,
+                {"trigger_repair": False, "is_likely_normal": True}
+            ))
+
+        return results
+
+    def _opt_test_candidate(
+        self, code: str, data: Dict, baseline_obj: float,
+        candidate: Dict, verbose: bool, mode: str = "data_dict"
+    ) -> Optional[LayerResult]:
+        """Test a single candidate objective term."""
+        params = candidate.get("parameters", [])
+        if not params:
+            return None
+
+        param = params[0]
+        role = candidate.get("role", "other")
+        description = candidate.get("description", "")
+
+        # Determine perturbation factor based on objective term role
+        if role == "cost":
+            code_factor = 0.001
+            perturbation_desc = "set to near-zero (x0.001)"
+        elif role == "revenue":
+            code_factor = 100.0
+            perturbation_desc = "scaled up 100x"
+        else:
+            code_factor = 0.01
+            perturbation_desc = "scaled to 1%"
+
+        new_status = None
+        new_obj = None
+
+        # Strip json.loads data override so perturbed data dict is used
+        exec_code = strip_data_override(code) if has_data_override(code) else code
+
+        # Strategy 1: data-dict perturbation
+        if mode != "source_code":
+            if role == "cost":
+                test_data = perturb_param(data, param, 0.001)
+            elif role == "revenue":
+                test_data = perturb_param(data, param, 100.0)
+            else:
+                test_data = perturb_param(data, param, 0.01)
+            result = self.executor.execute(exec_code, test_data)
+            new_status = result.get("status")
+            new_obj = result.get("objective")
+
+        # Strategy 2: source-code fallback
+        use_code_fallback = False
+        if mode == "source_code":
+            use_code_fallback = True
+        elif mode == "hybrid" and new_obj is not None and new_status != "INFEASIBLE":
+            if abs(baseline_obj) > self.epsilon:
+                pre_change = abs(new_obj - baseline_obj) / abs(baseline_obj)
+            else:
+                pre_change = abs(new_obj - baseline_obj)
+            if pre_change < 0.01:
+                use_code_fallback = True
+
+        if use_code_fallback:
+            opt_code_params = extract_perturbable_params(code)
+            matched = _match_param(opt_code_params, param)
+            if matched:
+                perturbed_code = perturb_code(code, matched['access_path'], code_factor)
+                if perturbed_code != code:
+                    result = self.executor.execute(perturbed_code, data)
+                    new_status = result.get("status")
+                    new_obj = result.get("objective")
+
+        if new_obj is None:
+            return None
+
+        # Calculate change ratio
+        if abs(baseline_obj) > self.epsilon:
+            change_ratio = abs(new_obj - baseline_obj) / abs(baseline_obj)
+        else:
+            change_ratio = abs(new_obj - baseline_obj)
+
+        # Threshold-based grading
+        if change_ratio < 0.05:
+            # < 5%: WARNING (objective term likely missing)
+            if verbose:
+                print(f"    [MISSING] {description} - only {change_ratio:.1%} change")
+            return LayerResult(
+                "L2", "opt_missing", Severity.WARNING,
+                f"Objective term '{description}' is likely MISSING: "
+                f"extreme perturbation ({perturbation_desc}) caused only {change_ratio:.1%} change",
+                0.75,
+                {
+                    "term_name": description,
+                    "term_role": role,
+                    "related_param": param,
+                    "change_ratio": change_ratio,
+                    "trigger_repair": True,
+                    "is_likely_normal": False,
+                    "repair_hint": f"Add objective term: {description}"
+                }
+            )
+
+        elif change_ratio < 0.30:
+            # 5%-30%: INFO (uncertain)
+            if verbose:
+                print(f"    [UNCERTAIN] {description} - {change_ratio:.1%} change")
+            return LayerResult(
+                "L2", "opt_uncertain", Severity.INFO,
+                f"Objective term '{description}': {change_ratio:.1%} change (uncertain, may be normal)",
+                0.5,
+                {
+                    "term_name": description,
+                    "change_ratio": change_ratio,
+                    "trigger_repair": False,
+                    "is_likely_normal": True,
+                    "note": "Moderate change - term may have small contribution"
+                }
+            )
+
+        else:
+            # > 30%: PASS (objective term present)
+            if verbose:
+                print(f"    [PRESENT] {description} - {change_ratio:.1%} change")
+            return LayerResult(
+                "L2", "opt_present", Severity.PASS,
+                f"Objective term '{description}': {change_ratio:.1%} change - term is active",
+                0.85,
+                {"trigger_repair": False}
+            )
+
+    def _opt_extract_candidates(self, problem_description: str, data: Dict) -> List[Dict]:
+        """LLM-based objective function term extraction."""
+        if not self.llm_client:
+            return []
+
+        prompt = f"""Analyze this optimization problem and extract the KEY OBJECTIVE FUNCTION TERMS (cost and revenue components) that should be present in the model's objective function.
+
+## Problem Description
+{problem_description}
+
+## Available Data Parameters
+{list(data.keys())}
+
+## Task
+Identify cost and revenue terms that MUST appear in the objective function. Focus on:
+1. **Cost terms**: purchasing/procurement cost, holding/storage cost, transportation cost, shortage/backorder cost, setup/fixed cost, penalty cost
+2. **Revenue terms**: sales revenue, demand revenue, return/salvage value
+
+For each term, identify which data parameter(s) provide its coefficient.
+
+## Output Format
+Return ONLY a JSON array with this exact format:
+```json
+[
+  {{"description": "unit purchasing cost", "role": "cost", "parameters": ["unit_cost"]}},
+  {{"description": "sales revenue per unit", "role": "revenue", "parameters": ["selling_price"]}}
+]
+```
+
+Return ONLY the JSON array, no explanation."""
+
+        try:
+            response = self.llm_client.generate(prompt)
+
+            # Try to find JSON array
+            match = re.search(r'\[[\s\S]*\]', response)
+            if match:
+                json_str = match.group()
+                candidates = json.loads(json_str)
+                valid = [c for c in candidates
+                        if isinstance(c, dict) and "description" in c and "parameters" in c]
+                return valid
+
             try:
                 candidates = json.loads(response.strip())
                 if isinstance(candidates, list):
@@ -781,11 +965,7 @@ def layer_results_to_diagnostics(
     """
     Convert LayerResult list to unified Diagnostic list.
 
-    Does NOT change any detection logic -- only re-packages the existing
-    results into the unified Diagnostic schema.
-
-    Handles L1 (execution + duality) and L3 (CPT) results.
-    L2 results are handled separately via l2_verify_results_to_diagnostics().
+    Handles L1 (execution + duality) and L2 (CPT + OPT) results.
     """
     diagnostics: List[Diagnostic] = []
 
@@ -825,7 +1005,6 @@ def layer_results_to_diagnostics(
                     triggers_repair=True,
                 ))
             elif r.check == "feasibility":
-                # INFEASIBLE with optional IIS
                 iis_constrs = d.get("iis_constraints") or []
                 target = ", ".join(
                     c.split(" (")[0] for c in iis_constrs[:5]
@@ -861,7 +1040,6 @@ def layer_results_to_diagnostics(
                     triggers_repair=True,
                 ))
             elif r.check == "duality_gap" and r.severity == Severity.INFO:
-                # Duality check (formerly L3, now part of L1)
                 primal = d.get("primal", baseline_obj or 0)
                 dual = d.get("dual", 0)
                 gap = d.get("gap", 0)
@@ -888,20 +1066,15 @@ def layer_results_to_diagnostics(
                     triggers_repair=False,
                 ))
 
-        # --- L2 ---
-        # L2 (Direction Analysis) results are handled separately via
-        # l2_verify_results_to_diagnostics() since they come from
-        # L2AdversarialVerifier, not from LayerResult objects.
-        # The placeholder LayerResult from verify() is ignored here.
-
-        # --- L3 ---
-        elif r.layer == "L3":
+        # --- L2 (CPT + OPT) ---
+        elif r.layer == "L2":
+            # CPT results
             if r.check == "cpt_missing" and r.severity == Severity.WARNING:
                 desc = d.get("constraint_name", "unknown")
                 param = d.get("related_param", "unknown")
                 ratio = d.get("change_ratio", 0)
                 diagnostics.append(Diagnostic(
-                    layer="L3",
+                    layer="L2",
                     issue_type="MISSING_CONSTRAINT",
                     severity="WARNING",
                     target_name=desc,
@@ -918,7 +1091,7 @@ def layer_results_to_diagnostics(
                 desc = d.get("constraint_name", "unknown")
                 ratio = d.get("change_ratio", 0)
                 diagnostics.append(Diagnostic(
-                    layer="L3",
+                    layer="L2",
                     issue_type="MISSING_CONSTRAINT",
                     severity="INFO",
                     target_name=desc,
@@ -929,70 +1102,54 @@ def layer_results_to_diagnostics(
                     ),
                     triggers_repair=False,
                 ))
+
+            # OPT results
+            elif r.check == "opt_missing" and r.severity == Severity.WARNING:
+                desc = d.get("term_name", "unknown")
+                param = d.get("related_param", "unknown")
+                ratio = d.get("change_ratio", 0)
+                diagnostics.append(Diagnostic(
+                    layer="L2",
+                    issue_type="MISSING_OBJECTIVE_TERM",
+                    severity="WARNING",
+                    target_name=desc,
+                    evidence=(
+                        f"Objective term '{desc}' is likely MISSING. "
+                        f"Extreme perturbation ({param} -> extreme value) caused only "
+                        f"{ratio:.1%} objective change (threshold: <5% = missing). "
+                        f"If this cost/revenue term is in the problem description, "
+                        f"it should affect the objective when perturbed."
+                    ),
+                    triggers_repair=True,
+                ))
+            elif r.check == "opt_uncertain" and r.severity == Severity.INFO:
+                desc = d.get("term_name", "unknown")
+                ratio = d.get("change_ratio", 0)
+                diagnostics.append(Diagnostic(
+                    layer="L2",
+                    issue_type="MISSING_OBJECTIVE_TERM",
+                    severity="INFO",
+                    target_name=desc,
+                    evidence=(
+                        f"Objective term '{desc}' shows UNCERTAIN response. "
+                        f"Extreme perturbation caused {ratio:.1%} objective change "
+                        f"(threshold: 5-30% = uncertain)."
+                    ),
+                    triggers_repair=False,
+                ))
+
+            # Generic L2 INFO (skipped, error, etc.)
             elif r.severity == Severity.INFO:
                 diagnostics.append(Diagnostic(
-                    layer="L3",
+                    layer="L2",
                     issue_type=r.check.upper(),
                     severity="INFO",
-                    target_name="constraint",
+                    target_name="behavioral_test",
                     evidence=r.message,
                     triggers_repair=False,
                 ))
 
     return diagnostics
-
-
-def l2_verify_results_to_diagnostics(
-    l2_results: List,  # List[L2VerifyResult] - avoid circular import
-    rejection_history: Optional[Dict] = None,
-) -> List[Diagnostic]:
-    """
-    Convert L2 Semantic Audit results to unified Diagnostic list.
-
-    Args:
-        l2_results: List of L2VerifyResult objects (from L2DirectionVerifier)
-        rejection_history: Dict of param -> rejection history (for rejected items)
-    """
-    diagnostics: List[Diagnostic] = []
-    rejection_history = rejection_history or {}
-
-    for r in l2_results:
-        if not r.is_violation or r.confidence < 0.5:
-            continue
-
-        # Check if this finding was rejected
-        param_rejections = rejection_history.get(r.param, [])
-        if param_rejections:
-            latest = param_rejections[-1]
-            diagnostics.append(Diagnostic(
-                layer="L2",
-                issue_type="SEMANTIC_AUDIT",
-                severity="INFO",
-                target_name=r.param,
-                evidence=(
-                    f"Finding '{r.param}' initially flagged but "
-                    f"REJECTED by repair-role: {latest.rejection_reason}"
-                ),
-                triggers_repair=False,
-            ))
-        else:
-            diagnostics.append(Diagnostic(
-                layer="L2",
-                issue_type="SEMANTIC_AUDIT",
-                severity="ERROR",
-                target_name=r.param,
-                evidence=(
-                    f"Semantic issue: {r.param_role}. "
-                    f"Target: '{r.param}'. "
-                    f"Confidence: {r.confidence:.0%}. "
-                    f"Details: {r.reason}"
-                ),
-                triggers_repair=True,
-            ))
-
-    return diagnostics
-
-
 
 
 # =============================================================================

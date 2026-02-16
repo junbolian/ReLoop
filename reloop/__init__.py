@@ -9,7 +9,6 @@ from .verification import (
     Diagnostic,
     verify_code,
     layer_results_to_diagnostics,
-    l2_verify_results_to_diagnostics,
 )
 
 from .executor import CodeExecutor
@@ -34,18 +33,6 @@ from .generation import CodeGenerator, GenerationResult
 
 from .repair import CodeRepairer, RepairResult
 
-from .l2_direction import (
-    L2DirectionVerifier,
-    L2VerifyResult,
-    L2RepairDecision,
-    should_exit_l2_loop,
-    # Backward compatibility aliases
-    L4AdversarialVerifier,
-    L4VerifyResult,
-    L4RepairDecision,
-    should_exit_l4_loop,
-)
-
 from .pipeline import ReLoopPipeline, PipelineResult, RepairContext, run_reloop
 
 from .data_extraction import DataExtractor, extract_data_from_question
@@ -68,7 +55,6 @@ __all__ = [
     "Diagnostic",
     "verify_code",
     "layer_results_to_diagnostics",
-    "l2_verify_results_to_diagnostics",
     # Executor
     "CodeExecutor",
     # Parameter utilities
@@ -89,16 +75,6 @@ __all__ = [
     # Repair
     "CodeRepairer",
     "RepairResult",
-    # L2 Direction Analysis
-    "L2DirectionVerifier",
-    "L2VerifyResult",
-    "L2RepairDecision",
-    "should_exit_l2_loop",
-    # Backward compatibility aliases
-    "L4AdversarialVerifier",
-    "L4VerifyResult",
-    "L4RepairDecision",
-    "should_exit_l4_loop",
     # Pipeline
     "ReLoopPipeline",
     "PipelineResult",
