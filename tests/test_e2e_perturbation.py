@@ -1,11 +1,15 @@
 """
-End-to-end tests for source-code perturbation integration with L2.
+End-to-end tests for perturbation integration with verification.
 
 Tests two scenarios:
-1. Hardcode-style code (source_code mode): L2 should detect parameter effects
-   via AST-based code perturbation.
-2. Data-dict style code (data_dict mode): L2 behavior should be identical
-   to the original (unchanged).
+1. Hardcode-style code (source_code mode): perturbation mode detection
+   and L1 verification without LLM.
+2. Data-dict style code (data_dict mode): perturbation mode detection
+   and L1 verification without LLM.
+
+Note: L2 behavioral testing (CPT + OPT) requires an LLM client for
+candidate extraction, so it is not tested here. The underlying
+perturbation utilities are tested in test_perturbation.py.
 """
 
 import pytest
@@ -117,7 +121,7 @@ DATA_DICT = {
 # ============================================================================
 
 class TestHardcodeStyleE2E:
-    """Test that L2 can detect effects on hardcoded-style code."""
+    """Test hardcoded-style code with verification."""
 
     def test_mode_detection(self):
         """Hardcoded code should be detected as source_code mode."""
@@ -129,47 +133,44 @@ class TestHardcodeStyleE2E:
         mode = detect_perturbation_mode(HARDCODE_LP_CODE, {})
         assert mode == "source_code"
 
-    def test_l2_detects_effects(self):
-        """L2 should find parameter effects via AST code perturbation."""
+    def test_l1_passes(self):
+        """L1 should pass for valid hardcoded code (no LLM needed)."""
         verifier = ReLoopVerifier(delta=0.2, timeout=30)
         report = verifier.verify(HARDCODE_LP_CODE, {}, verbose=True)
 
         # Should not be FAILED (code is valid)
         assert report.status != 'FAILED', f"L1 failed: {report.recommendations}"
 
-        # Should have tested some parameters
+        # L1 results should exist
+        l1_results = [r for r in report.layer_results if r.layer == "L1"]
+        assert len(l1_results) > 0, "No L1 results"
+
+        # Without LLM, no L2 behavioral testing results
         l2_results = [r for r in report.layer_results if r.layer == "L2"]
-        assert len(l2_results) > 0, "No L2 results"
-
-        # Check that at least some parameters had effect (not all no_effect)
-        effects = [r for r in l2_results if r.check != "anomaly_ok"]
-        assert len(effects) > 0, "L2 found no individual parameter results"
-
-        # Print summary for inspection
-        for r in l2_results:
-            print(f"  L2: {r.check} | {r.severity.value} | {r.message[:80]}")
+        assert len(l2_results) == 0, "L2 results without LLM should be empty"
 
 
 class TestDataDictStyleE2E:
-    """Test that data-dict style code works exactly as before."""
+    """Test that data-dict style code works with verification."""
 
     def test_mode_detection(self):
         """Data-dict code should be detected as data_dict mode."""
         mode = detect_perturbation_mode(DATA_DICT_LP_CODE, DATA_DICT)
         assert mode == "data_dict"
 
-    def test_l2_uses_data_perturbation(self):
-        """L2 should use data-dict perturbation and produce results."""
+    def test_l1_passes(self):
+        """L1 should pass for valid data-dict style code."""
         verifier = ReLoopVerifier(delta=0.2, timeout=30)
         report = verifier.verify(DATA_DICT_LP_CODE, DATA_DICT, verbose=True)
 
         assert report.status != 'FAILED', f"L1 failed: {report.recommendations}"
 
-        l2_results = [r for r in report.layer_results if r.layer == "L2"]
-        assert len(l2_results) > 0, "No L2 results"
+        l1_results = [r for r in report.layer_results if r.layer == "L1"]
+        assert len(l1_results) > 0, "No L1 results"
 
-        for r in l2_results:
-            print(f"  L2: {r.check} | {r.severity.value} | {r.message[:80]}")
+        # Without LLM, no L2 behavioral testing results
+        l2_results = [r for r in report.layer_results if r.layer == "L2"]
+        assert len(l2_results) == 0, "L2 results without LLM should be empty"
 
 
 class TestModeDetectionEdgeCases:

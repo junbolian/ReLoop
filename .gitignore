@@ -74,6 +74,8 @@ outputs/
 results/
 logs/
 experiment_results/
+data/test*.jsonl
+data/MAMO_EasyLP_fixed.jsonl
 
 # ----------------------------
 # Ad-hoc analysis / check scripts
@@ -88,6 +90,7 @@ analyze_table_a2.py
 # ----------------------------
 test_reloop.py
 test_*.py
+!tests/test_*.py
 !reloop/test_*.py
 
 # ----------------------------

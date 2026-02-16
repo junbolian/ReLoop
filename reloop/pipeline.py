@@ -4,21 +4,18 @@ ReLoop Main Pipeline
 Implements the complete Generate -> Verify -> Repair loop with:
 - Chain-of-Thought generation (single API call with step-by-step reasoning)
 - L1 FATAL handling with regeneration (not termination)
-- L2 Semantic Audit (LLM-based with Accept/Reject)
-- L3 Constraint Presence Testing (optional)
-- Conservative repair strategy: only fix ERROR/WARNING, not INFO
+- L2 Behavioral Testing (CPT + OPT)
+- Conservative repair strategy: only WARNING trigger repair, INFO is reference only
 - Guaranteed output when possible
 
-Three-Layer Architecture:
+Two-Layer Architecture:
 - L1: Execution Verification (blocking) + duality check
-- L2: Semantic Audit (adversarial LLM debate)
-- L3: Constraint Presence Testing (CPT)
+- L2: Behavioral Testing (CPT + OPT)
 
 Repair Trigger Rules:
 - FATAL (L1): Triggers regeneration
-- ERROR (L2 semantic audit accepted): Must fix
-- WARNING (L3 cpt_missing): Should fix / reference
-- INFO (L1 duality, L2 rejected): Do NOT trigger repair
+- WARNING (L2 CPT/OPT missing): Should fix / reference
+- INFO (L1 duality, L2 uncertain): Do NOT trigger repair
 """
 
 import time
@@ -29,7 +26,7 @@ from dataclasses import dataclass, field
 from .generation import CodeGenerator
 from .verification import (
     ReLoopVerifier, VerificationReport, Severity, Diagnostic,
-    layer_results_to_diagnostics, l2_verify_results_to_diagnostics,
+    layer_results_to_diagnostics,
 )
 from .repair import CodeRepairer, RepairResult
 from .prompts import (
@@ -39,21 +36,6 @@ from .prompts import (
 from .repair_safety import validate_repair_code, SAFETY_RE_REPAIR_PROMPT
 
 logger = logging.getLogger(__name__)
-from .l2_direction import (
-    L2DirectionVerifier,
-    L2VerifyResult,
-    L2RepairDecision,
-    L2_REPAIR_PROMPT,
-    should_exit_l2_loop,
-    # Backward compatibility aliases
-    L4AdversarialVerifier,
-    L4VerifyResult,
-    L4RepairDecision,
-    L4_REPAIR_PROMPT,
-    should_exit_l4_loop,
-)
-# perturbation module no longer needed for L2 semantic audit
-# from .perturbation import detect_perturbation_mode
 
 
 # Status ranking for regression detection
@@ -99,7 +81,7 @@ class PipelineResult:
     # Intermediate ablation checkpoints (recorded automatically)
     l1_checkpoint_obj: Optional[float] = None    # Objective after L1 verify + regeneration
     l1_checkpoint_status: str = ""               # Status after L1
-    l2_checkpoint_obj: Optional[float] = None    # Objective after L1 + L2 adversarial
+    l2_checkpoint_obj: Optional[float] = None    # Objective after L2 behavioral testing
     l2_checkpoint_status: str = ""               # Status after L2
 
 
@@ -123,15 +105,14 @@ class ReLoopPipeline:
     """
     Complete ReLoop Pipeline: Generate -> Verify -> Repair loop.
 
-    Three-Layer Architecture:
+    Two-Layer Architecture:
     - L1: Execution Verification (blocking) + duality check
-    - L2: Semantic Audit (adversarial LLM debate)
-    - L3: Constraint Presence Testing (CPT, optional)
+    - L2: Behavioral Testing (CPT + OPT)
 
     Key Features:
     - Chain-of-Thought generation: Single API call with step-by-step reasoning
     - L1 FATAL triggers regeneration (not termination)
-    - ERROR/WARNING triggers repair, INFO does NOT
+    - WARNING triggers repair, INFO does NOT
     - Guaranteed output when L1 passes
 
     Usage:
@@ -144,23 +125,16 @@ class ReLoopPipeline:
         llm_client,
         max_repair_iterations: int = 3,
         max_regeneration_attempts: int = 3,
-        max_l2_rejections: int = 2,
         enable_cpt: bool = True,
-        enable_l2_adversarial: bool = True,
-        # Backward compatibility aliases
-        max_l4_rejections: int = None,
-        enable_l4_adversarial: bool = None,
         use_structured_generation: bool = True,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         """
         Args:
             llm_client: LLM client with generate(prompt, system=None) method
-            max_repair_iterations: Max repair attempts for ERROR/WARNING issues
+            max_repair_iterations: Max repair attempts for WARNING issues
             max_regeneration_attempts: Max regeneration attempts for L1 FATAL
-            max_l2_rejections: Max rejections per finding before L2 downgrades to INFO
-            enable_cpt: Enable L3 CPT layer
-            enable_l2_adversarial: Enable L2 Semantic Audit
+            enable_cpt: Enable L2 behavioral testing (CPT + OPT)
             use_structured_generation: Use CoT generation pipeline
             verbose: Print progress messages
         """
@@ -174,24 +148,7 @@ class ReLoopPipeline:
         self.max_repair_iterations = max_repair_iterations
         self.max_regeneration_attempts = max_regeneration_attempts
         self.enable_cpt = enable_cpt
-        # Resolve backward compat: l4 aliases take precedence if explicitly passed
-        _l2_adv = enable_l4_adversarial if enable_l4_adversarial is not None else enable_l2_adversarial
-        _l2_rej = max_l4_rejections if max_l4_rejections is not None else max_l2_rejections
-        self.enable_l2_direction = _l2_adv
         self.verbose = verbose
-
-        # L2 Semantic Audit Verifier (adversarial)
-        if self.enable_l2_direction and llm_client:
-            self.l2_verifier = L2DirectionVerifier(
-                llm_client=llm_client,
-                max_rejections=_l2_rej
-            )
-        else:
-            self.l2_verifier = None
-
-        # Backward compatibility alias
-        self.l4_verifier = self.l2_verifier
-        self.enable_l4_adversarial = self.enable_l2_direction
 
     def run(
         self,
@@ -204,12 +161,11 @@ class ReLoopPipeline:
 
         Flow:
         1. Generate code (CoT or single-stage)
-        2. Verify with L1 (execution + duality)
+        2. Verify with L1 + L2 (execution + behavioral testing)
         3. If L1 FATAL: regenerate (up to max_regeneration_attempts)
-        4. Run L2 Semantic Audit (adversarial loop)
-        5. If ERROR/WARNING: repair (up to max_repair_iterations)
-        6. INFO does NOT trigger repair (likely normal)
-        7. Return result (always has output if any L1 passes)
+        4. If WARNING: repair (up to max_repair_iterations)
+        5. INFO does NOT trigger repair (likely normal)
+        6. Return result (always has output if any L1 passes)
 
         Args:
             problem_description: Natural language problem description
@@ -238,6 +194,13 @@ class ReLoopPipeline:
                 gen_start = time.time()
                 code = self.generator.generate(problem_description, data)
                 gen_time = time.time() - gen_start
+
+                # If extraction succeeded, use extracted data for execution
+                if self.generator.extracted_data is not None:
+                    data = self.generator.extracted_data
+                    if self.verbose:
+                        print(f"[Pipeline] Using extracted data ({len(data)} keys)")
+
                 if self.verbose:
                     print(f"[Pipeline] Generated code in {gen_time:.2f}s")
             except Exception as e:
@@ -246,7 +209,7 @@ class ReLoopPipeline:
                 code = ""
                 # Leave report=None to trigger regeneration loop
 
-        # Step 2: Initial verification (only if we have code and generation succeeded)
+        # Step 2: Initial verification (L1 + L2 behavioral)
         if report is None and code:
             verify_start = time.time()
             report = self.verifier.verify(
@@ -304,59 +267,20 @@ class ReLoopPipeline:
         l1_checkpoint_obj = report.objective if report else None
         l1_checkpoint_status = report.status if report else "FAILED"
 
-        # Step 4: Run L2 Semantic Audit (if enabled)
-        l2_time = 0.0
-        last_l2_results: List[L2VerifyResult] = []
-        if self.enable_l2_direction and self.l2_verifier and report.status != 'FAILED':
-            if self.verbose:
-                print("[Pipeline] Running L2 Semantic Audit")
-
-            l2_start = time.time()
-            baseline_obj = report.objective or 0.0
-
-            l2_results, l2_exit_reason, l2_code = self._run_l2_adversarial_loop(
-                code=code,
-                data=data,
-                baseline_obj=baseline_obj,
-                problem_description=problem_description,
-                report=report,
-                max_l2_iterations=3
-            )
-            l2_time = time.time() - l2_start
-            last_l2_results = l2_results
-
-            if self.verbose:
-                print(f"[Pipeline] L2 exit reason: {l2_exit_reason}")
-
-            # If L2 produced fixed code, update and re-verify
-            if l2_code != code and l2_exit_reason in ("accepted_fixed", "max_iterations"):
-                code = l2_code
-                verify_start = time.time()
-                report = self.verifier.verify(
-                    code, data,
-                    problem_description=problem_description,
-                    enable_cpt=self.enable_cpt,
-                    verbose=self.verbose
-                )
-                verify_time += time.time() - verify_start
-                history.append((code, report))
-
-                if self.verbose:
-                    print(f"[Pipeline] After L2 fix: {report.status}")
-
-        # -- Ablation checkpoint: after L2 adversarial loop --
+        # -- Ablation checkpoint: after L2 behavioral testing --
+        # L2 runs inside verify() and doesn't change code, so same objective
         l2_checkpoint_obj = report.objective if report else None
         l2_checkpoint_status = report.status if report else "FAILED"
 
-        # Step 5: Handle ERROR/WARNING with repair (INFO does NOT trigger)
+        # Step 4: Handle WARNING with repair (INFO does NOT trigger)
         # Uses unified Diagnostic schema + build_repair_prompt()
         # Save pre-repair state for regression rollback
         pre_repair_code = code
         pre_repair_report = report
         repair_iteration = 0
-        all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
+        all_diagnostics = self._collect_diagnostics(report)
 
-        # Skip repair if L2 checkpoint is already VERIFIED with no actionable issues
+        # Skip repair if already VERIFIED with no actionable issues
         has_actionable = any(
             d.severity in ("ERROR", "WARNING") and d.triggers_repair
             for d in all_diagnostics
@@ -366,7 +290,7 @@ class ReLoopPipeline:
             and not has_actionable
         )
         if skip_repair and self.verbose:
-            print("[Pipeline] L2 checkpoint VERIFIED with no actionable issues, skipping repair")
+            print("[Pipeline] VERIFIED with no actionable issues, skipping repair")
 
         while (not skip_repair
                and any(d.triggers_repair for d in all_diagnostics)
@@ -427,8 +351,8 @@ class ReLoopPipeline:
             verify_time += time.time() - verify_start
             history.append((code, report))
 
-            # Re-collect diagnostics from updated report.
-            all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
+            # Re-collect diagnostics from updated report
+            all_diagnostics = self._collect_diagnostics(report)
 
             if self.verbose:
                 print(f"[Pipeline] After repair: {report.status}")
@@ -483,7 +407,7 @@ class ReLoopPipeline:
                     pass
 
             # Re-collect diagnostics for next iteration
-            all_diagnostics = self._collect_diagnostics(report, l2_results=[])
+            all_diagnostics = self._collect_diagnostics(report)
 
         # Determine success and improvement
         success = report.status in ['VERIFIED', 'WARNINGS', 'ERRORS']
@@ -507,88 +431,20 @@ class ReLoopPipeline:
             l2_checkpoint_status=l2_checkpoint_status,
         )
 
-    def _analyze_verification_results(self, report: VerificationReport) -> RepairContext:
-        """
-        Analyze verification results to determine repair strategy.
-
-        Classification:
-        - critical_errors: ERROR level - Must fix
-        - should_fix: WARNING level (L3 cpt_missing) - Should fix
-        - for_reference: INFO level (L1 duality, etc.) - Do NOT fix
-
-        Note: L2 issues are handled separately by adversarial mechanism.
-        Only trigger repair if critical_errors or should_fix is non-empty.
-        """
-        critical_errors = []
-        should_fix = []
-        for_reference = []
-
-        for r in report.layer_results:
-            item = {
-                "layer": r.layer,
-                "check": r.check,
-                "severity": r.severity.value,
-                "message": r.message,
-                "details": r.details or {},
-                "is_likely_normal": (r.details or {}).get("is_likely_normal", False)
-            }
-
-            # L1 FATAL - handled separately by regeneration
-            if r.layer == "L1" and r.severity == Severity.FATAL:
-                item["action"] = "Fix code error or model feasibility"
-                critical_errors.append(item)
-
-            # L2 - handled by adversarial mechanism, skip here
-            elif r.layer == "L2":
-                item["action"] = "L2 issues handled by adversarial mechanism"
-                for_reference.append(item)
-
-            # WARNING level - should fix (L3 cpt_missing)
-            elif r.severity == Severity.WARNING:
-                item["action"] = (r.details or {}).get("repair_hint", "Fix this issue")
-                should_fix.append(item)
-
-            # INFO level - for reference only, do NOT fix
-            elif r.severity == Severity.INFO:
-                item["action"] = "No action needed - likely normal"
-                for_reference.append(item)
-
-        # Only trigger if there are ERROR or WARNING issues
-        should_trigger = len(critical_errors) > 0 or len(should_fix) > 0
-
-        return RepairContext(
-            critical_errors=critical_errors,
-            should_fix=should_fix,
-            for_reference=for_reference,
-            should_trigger=should_trigger
-        )
-
     def _collect_diagnostics(
         self,
         report: VerificationReport,
-        l2_results: Optional[List[L2VerifyResult]] = None,
     ) -> List[Diagnostic]:
         """
-        Collect unified Diagnostic objects from verification report + L2 results.
+        Collect unified Diagnostic objects from verification report.
 
-        Converts all LayerResult and L2VerifyResult into Diagnostic schema.
+        Converts all LayerResult (L1 + L2 behavioral) into Diagnostic schema.
         """
-        # Convert L1, L3 layer results
-        diagnostics = layer_results_to_diagnostics(
+        return layer_results_to_diagnostics(
             report.layer_results,
             baseline_obj=report.objective,
             delta=self.verifier.delta,
         )
-
-        # Convert L2 results (if any)
-        if l2_results and self.l2_verifier:
-            l2_diags = l2_verify_results_to_diagnostics(
-                l2_results,
-                rejection_history=self.l2_verifier.rejection_history,
-            )
-            diagnostics.extend(l2_diags)
-
-        return diagnostics
 
     def _get_l1_error(self, report: VerificationReport) -> str:
         """Extract L1 error message from report."""
@@ -596,11 +452,6 @@ class ReLoopPipeline:
             if r.layer == "L1" and r.severity == Severity.FATAL:
                 return r.message
         return "Unknown execution error"
-
-    def _needs_repair(self, report: VerificationReport) -> bool:
-        """Check if report indicates repair is needed."""
-        ctx = self._analyze_verification_results(report)
-        return ctx.should_trigger
 
     def _is_improved(
         self,
@@ -616,199 +467,6 @@ class ReLoopPipeline:
         }
         return status_order.get(after.status, 0) > status_order.get(before.status, 0)
 
-    # =========================================================================
-    # L2 Semantic Audit (Adversarial Loop)
-    # =========================================================================
-
-    def _run_l2_adversarial_loop(
-        self,
-        code: str,
-        data: Dict[str, Any],
-        baseline_obj: float,
-        problem_description: str,
-        report: VerificationReport,
-        max_l2_iterations: int = 3
-    ) -> Tuple[List[L2VerifyResult], str, str]:
-        """
-        Run L2 Semantic Audit with adversarial debate loop.
-
-        Flow per iteration:
-        1. Semantic audit: LLM compares problem description vs code
-        2. If no issues: PASS
-        3. If issues found: repair LLM decides Accept/Reject for each
-        4. Accepted → apply fix; Rejected → re-audit with rejection context
-
-        Args:
-            code: Current code
-            data: Problem data
-            baseline_obj: Baseline objective value
-            problem_description: Problem description
-            report: Current verification report
-            max_l2_iterations: Max iterations for L2 loop
-
-        Returns:
-            Tuple[l2_results, exit_reason, final_code]
-        """
-        if not self.l2_verifier or not self.enable_l2_direction:
-            return [], "disabled", code
-
-        # Reset L2 verifier state
-        self.l2_verifier.reset()
-
-        current_code = code
-        l2_results = []
-
-        for l2_iter in range(max_l2_iterations):
-            if self.verbose:
-                print(f"  [L2] Semantic audit iteration {l2_iter + 1}")
-
-            # Step 1: Semantic audit (no perturbation)
-            l2_results = self.l2_verifier.verify(
-                code=current_code,
-                data=data,
-                baseline_obj=baseline_obj,
-                problem_description=problem_description,
-            )
-
-            # Step 2: Check if all PASS (no issues found)
-            violations = [
-                r for r in l2_results
-                if r.is_violation and r.confidence >= self.l2_verifier.confidence_threshold
-            ]
-
-            if not violations:
-                if self.verbose:
-                    print("  [L2] No semantic issues found - PASS")
-                return l2_results, "all_pass", current_code
-
-            if self.verbose:
-                print(f"  [L2] Found {len(violations)} semantic issues")
-
-            # Step 3: Get repair decisions (Accept/Reject)
-            decisions, fixed_code = self._get_l2_repair_decisions(
-                code=current_code,
-                problem_description=problem_description,
-                data=data,
-                l2_results=l2_results
-            )
-
-            if not decisions:
-                if self.verbose:
-                    print("  [L2] No decisions received, treating as all rejected")
-                if self._check_other_layers_pass(report):
-                    return l2_results, "all_rejected_others_pass", current_code
-                continue
-
-            # Step 4: Process decisions
-            decision_result = self.l2_verifier.process_repair_decisions(
-                decisions=decisions,
-                verify_results=l2_results
-            )
-
-            accepted = decision_result["accepted"]
-            rejected = decision_result["rejected"]
-
-            if self.verbose:
-                print(f"  [L2] Accepted: {len(accepted)}, Rejected: {len(rejected)}")
-
-            # Step 5: Handle accepted (apply fix)
-            if accepted and fixed_code and fixed_code != current_code:
-                # Safety guardrail: validate L2 repair code
-                fixed_code = self._apply_safety_guardrail(
-                    fixed_code, current_code, data, prompt=None
-                )
-                if fixed_code == current_code:
-                    if self.verbose:
-                        print("  [L2] Fix rejected by safety guardrail")
-                    continue
-
-                # Verify fixed code executes
-                try:
-                    fix_result = self.verifier.executor.execute(fixed_code, data)
-                    if fix_result.get("status") == "OPTIMAL":
-                        # Regression guard: reject fix if objective drifts >5%
-                        new_obj = fix_result.get("objective")
-                        if (new_obj is not None and baseline_obj is not None
-                                and abs(baseline_obj) > 1e-12):
-                            rel_change = abs(new_obj - baseline_obj) / abs(baseline_obj)
-                            if rel_change > 0.05:
-                                if self.verbose:
-                                    print(f"  [L2] Fix rejected: objective drift {rel_change:.1%} "
-                                          f"({baseline_obj:.2f} -> {new_obj:.2f})")
-                                continue
-                        current_code = fixed_code
-                        if self.verbose:
-                            print("  [L2] Applied semantic fix, re-auditing")
-                        continue
-                except Exception:
-                    pass
-
-            # Step 6: Handle all rejected
-            if rejected and not accepted:
-                if decision_result["should_reverify"]:
-                    if self.verbose:
-                        print("  [L2] All rejected, re-auditing with context")
-                    continue
-
-                if self._check_other_layers_pass(report):
-                    if self.verbose:
-                        print("  [L2] All rejected + others PASS")
-                    return l2_results, "all_rejected_others_pass", current_code
-
-            # Step 7: Check max rejections
-            l2_status = self.l2_verifier.get_final_status(l2_results)
-            if l2_status == "INFO":
-                if self.verbose:
-                    print("  [L2] Max rejections reached, downgraded to INFO")
-                return l2_results, "max_rejections", current_code
-
-        if self.verbose:
-            print("  [L2] Max iterations reached")
-        return l2_results, "max_iterations", current_code
-
-    # Backward compatibility alias
-    def _run_l4_adversarial_loop(self, code, data, baseline_obj, problem_description,
-                                  report, max_l4_iterations=3):
-        return self._run_l2_adversarial_loop(
-            code, data, baseline_obj, problem_description,
-            report, max_l2_iterations=max_l4_iterations
-        )
-
-    def _get_l2_repair_decisions(
-        self,
-        code: str,
-        problem_description: str,
-        data: Dict[str, Any],
-        l2_results: List[L2VerifyResult]
-    ) -> Tuple[List[L2RepairDecision], Optional[str]]:
-        """
-        Call repair LLM to get Accept/Reject decisions for L2 diagnostics.
-
-        Returns:
-            Tuple[decisions, fixed_code]
-        """
-        # Format L2 diagnostics
-        diagnostics = self.l2_verifier.format_diagnostics_for_repair(l2_results)
-
-        if diagnostics == "No semantic issues detected.":
-            return [], None
-
-        # Build repair prompt
-        prompt = L2_REPAIR_PROMPT.format(
-            problem_description=problem_description,
-            code=code,
-            l4_diagnostics=diagnostics
-        )
-
-        try:
-            response = self.llm_client.generate(prompt, temperature=0.3)
-            decisions, fixed_code = self.l2_verifier.parse_repair_response(response)
-            return decisions, fixed_code
-        except Exception as e:
-            if self.verbose:
-                print(f"  [L2] Failed to get repair decisions: {e}")
-            return [], None
-
     def _apply_safety_guardrail(
         self,
         repaired_code: str,
@@ -821,15 +479,6 @@ class ReLoopPipeline:
 
         Strategy A: safety violations do NOT consume repair budget.
         Max 1 safety retry; if second attempt also fails, keep original code.
-
-        Args:
-            repaired_code: Code from repair LLM
-            original_code: Code before repair
-            data: External data dict
-            prompt: Original repair prompt (for re-repair context)
-
-        Returns:
-            Safe repaired code, or original_code if safety check fails twice
         """
         is_safe, violations = validate_repair_code(
             repaired_code, original_code, data
@@ -852,7 +501,6 @@ class ReLoopPipeline:
             safety_prompt = SAFETY_RE_REPAIR_PROMPT.format(
                 violations=violation_msg
             )
-            # Re-send original prompt with safety feedback prepended
             if prompt:
                 re_repair_prompt = safety_prompt + prompt
             else:
@@ -877,7 +525,6 @@ class ReLoopPipeline:
                     print("[Pipeline] Safety re-repair succeeded")
                 return retried_code
 
-            # Second violation — give up
             violation_msg_2 = "\n".join(violations_2)
             logger.warning(
                 f"Repair safety re-check: REJECTED again. "
@@ -892,15 +539,6 @@ class ReLoopPipeline:
                 print(f"[Pipeline] Safety re-repair exception: {e}")
 
         return original_code
-
-    def _check_other_layers_pass(self, report: VerificationReport) -> bool:
-        """Check if L1, L3 all PASS or INFO (no ERROR/WARNING)."""
-        for r in report.layer_results:
-            if r.layer == "L2":
-                continue  # Skip L2 (handled separately)
-            if r.severity in [Severity.ERROR, Severity.WARNING]:
-                return False
-        return True
 
 
 def run_reloop(
@@ -922,9 +560,9 @@ def run_reloop(
         data: Problem data dictionary
         llm_client: LLM client with generate(prompt, system=None) method
         code: Optional pre-generated code
-        max_iterations: Maximum repair iterations (for ERROR/WARNING issues)
+        max_iterations: Maximum repair iterations
         max_regenerations: Maximum regeneration attempts (for L1 FATAL)
-        enable_cpt: Enable L3 CPT layer
+        enable_cpt: Enable L2 behavioral testing (CPT + OPT)
         use_structured_generation: Use CoT generation pipeline
         verbose: Print progress messages
 

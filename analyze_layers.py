@@ -10,7 +10,7 @@ Reads an ablation_report.csv and computes:
 
 Usage:
     python analyze_layers.py <path_to_ablation_report.csv>
-    python analyze_layers.py experiment_results/RetailOpt-190/deepseek-v3.1/ablation_report.csv
+    python analyze_layers.py experiment_results/RetailOpt-190/deepseek-v3.2/ablation_report.csv
 """
 
 import argparse

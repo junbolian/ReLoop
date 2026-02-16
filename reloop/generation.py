@@ -9,12 +9,16 @@ Generation Approaches:
 This is a universal architecture that works for all optimization domains.
 """
 
+import json
+import logging
 import re
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from .prompts import (
     CHAIN_OF_THOUGHT_PROMPT, CHAIN_OF_THOUGHT_SYSTEM,
+    CHAIN_OF_THOUGHT_WITH_DATA_PROMPT, CHAIN_OF_THOUGHT_WITH_DATA_SYSTEM,
+    DATA_EXTRACTION_PROMPT, DATA_EXTRACTION_SYSTEM,
     CODE_GENERATION_PROMPT, CODE_GENERATION_SYSTEM,
     DIRECT_GENERATION_PROMPT, DIRECT_GENERATION_SYSTEM,
     UNDERSTAND_PROMPT, UNDERSTAND_SYSTEM,
@@ -23,6 +27,8 @@ from .prompts import (
     REGENERATE_PROMPT, REGENERATE_SYSTEM,
     describe_data_schema, format_data_instructions
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,6 +62,7 @@ class CodeGenerator:
         """
         self.llm_client = llm_client
         self.use_structured_generation = use_structured_generation
+        self.extracted_data = None  # Set when extraction succeeds
 
     def generate(
         self,
@@ -66,6 +73,10 @@ class CodeGenerator:
         """
         Generate Gurobi code for the given problem.
 
+        When extraction succeeds, self.extracted_data is set to the extracted
+        dict.  The caller (pipeline) should use self.extracted_data for
+        execution when it is not None.
+
         Args:
             problem_description: Natural language problem description
             data: Problem data dictionary
@@ -74,6 +85,7 @@ class CodeGenerator:
         Returns:
             Generated Python code string
         """
+        self.extracted_data = None  # Reset
         if self.use_structured_generation:
             return self._generate_chain_of_thought(problem_description, data)
         else:
@@ -104,25 +116,113 @@ class CodeGenerator:
         data: Dict[str, Any] = None
     ) -> str:
         """
-        Chain-of-Thought generation: Single API call with step-by-step reasoning.
+        Chain-of-Thought generation with extraction + fallback.
 
-        This is the RECOMMENDED approach. The LLM reasons through:
-        1. Understanding the problem
-        2. Formulating the mathematical model
-        3. Generating self-contained code (all data defined within)
+        Strategy:
+        1. Try extraction: LLM extracts structured data → generate code using data[...]
+        2. Fallback: Generate self-contained code (data embedded via json.loads)
 
-        All in ONE conversation turn, preserving context.
+        Extraction advantages:
+        - Data passed accurately as pre-loaded dict (no LLM copy errors)
+        - Perturbation testing works (code reads from external data dict)
+
+        Fallback ensures execution rate is preserved when extraction fails.
         """
+        # Try extraction + data-reference code generation
+        extracted_data, code = self._try_extraction_generation(
+            problem_description, data
+        )
+        if code is not None:
+            self.extracted_data = extracted_data
+            return code
+
+        # Fallback: self-contained generation (current behavior)
+        logger.info("Extraction failed, falling back to self-contained generation")
         prompt = CHAIN_OF_THOUGHT_PROMPT.format(
             problem_description=problem_description,
         )
 
         response = self.llm_client.generate(prompt, system=CHAIN_OF_THOUGHT_SYSTEM)
         code = self._extract_code(response)
-        # Even if validation would fail, return the extracted code for L1 to attempt/repair.
         if not code or not code.strip():
             raise ValueError("Chain-of-Thought generation produced no code block")
         return code
+
+    def _try_extraction_generation(
+        self,
+        problem_description: str,
+        data: Dict[str, Any] = None
+    ) -> tuple:
+        """
+        Try extraction-based code generation.
+
+        Returns:
+            (extracted_data, code) on success
+            (None, None) on failure (caller should fallback)
+        """
+        try:
+            # Step 1: Extract data from problem description
+            extracted_data = self._extract_data(problem_description)
+            if extracted_data is None:
+                return None, None
+
+            # Step 2: Generate code that uses data[...] (not self-contained)
+            data_structure = describe_data_schema(extracted_data)
+            prompt = CHAIN_OF_THOUGHT_WITH_DATA_PROMPT.format(
+                problem_description=problem_description,
+                data_structure=data_structure,
+            )
+
+            response = self.llm_client.generate(
+                prompt, system=CHAIN_OF_THOUGHT_WITH_DATA_SYSTEM
+            )
+            code = self._extract_code(response)
+            if not code or not code.strip():
+                return None, None
+
+            # Verify the code actually uses data[] and doesn't redefine data
+            if 'json.loads' in code:
+                logger.info("Extraction-mode code still uses json.loads, discarding")
+                return None, None
+
+            logger.info("Extraction + data-reference generation succeeded")
+            return extracted_data, code
+
+        except Exception as e:
+            logger.info(f"Extraction generation failed: {e}")
+            return None, None
+
+    def _extract_data(self, problem_description: str) -> Optional[Dict]:
+        """
+        LLM-based data extraction from problem description.
+
+        Returns parsed dict on success, None on failure.
+        """
+        prompt = DATA_EXTRACTION_PROMPT.format(
+            problem_description=problem_description,
+        )
+
+        try:
+            response = self.llm_client.generate(prompt, system=DATA_EXTRACTION_SYSTEM)
+
+            # Extract JSON block
+            json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
+            if json_match:
+                json_str = json_match.group(1).strip()
+            else:
+                # Try raw JSON
+                json_str = response.strip()
+
+            data = json.loads(json_str)
+            if not isinstance(data, dict):
+                return None
+
+            logger.info(f"Data extraction succeeded: {len(data)} top-level keys")
+            return data
+
+        except (json.JSONDecodeError, Exception) as e:
+            logger.info(f"Data extraction failed: {e}")
+            return None
 
     def generate_structured(
         self,

@@ -5,7 +5,7 @@ Dataset ablation runner.
 For each record:
 1) Generate CoT code.
 2) Evaluate baseline execution (CoT only).
-3) Run L1, L1+L2 (direction analysis), final L1+L2+L3 (with CPT).
+3) Run L1 + L2 behavioral testing (CPT + OPT) + repair.
 4) Record objective per stage and pass/fail vs ground truth with tolerance.
 5) Accumulate token usage and runtime. Concurrency = 20.
 6) Save summary CSV and chat logs JSONL.
@@ -346,7 +346,6 @@ def run_item(
         pipeline = ReLoopPipeline(
             llm_client=llm,
             enable_cpt=enable_cpt,
-            enable_l2_adversarial=True,
             max_repair_iterations=3,
             verbose=False,
         )
@@ -355,10 +354,18 @@ def run_item(
         if verbose:
             print(f"[ablation] idx={idx} start, model={model}")
 
-        # Both CoT and Direct generate self-contained code (no data extraction).
-        # CoT uses 3-stage reasoning; Direct uses single-stage generation.
+        # Generate code.  CoT uses extraction + fallback strategy:
+        # 1. Try LLM data extraction → code uses data["key"]
+        # 2. Fallback → self-contained code (data embedded)
         data = {}
         code = generator.generate(problem)
+
+        # If extraction succeeded, use the extracted data dict so the
+        # generated data["key"] code can actually run.
+        if generator.extracted_data is not None:
+            data = generator.extracted_data
+            if verbose:
+                print(f"[ablation] idx={idx} using extracted data ({len(data)} keys)")
 
         if verbose:
             print(f"[ablation] idx={idx} code generated (len={len(code)})")
@@ -371,8 +378,8 @@ def run_item(
         if run_verify:
             # Single pipeline run with intermediate checkpoints.
             # pipeline.run() records l1/l2 checkpoints automatically:
-            #   l1_checkpoint: after L1 verify + regeneration (before L2)
-            #   l2_checkpoint: after L2 adversarial loop (before repair)
+            #   l1_checkpoint: after L1 verify + regeneration (before L2 behavioral)
+            #   l2_checkpoint: after L2 behavioral testing (CPT+OPT, before repair)
             #   final: after full repair loop with all diagnostics
             result = pipeline.run(
                 problem_description=problem,
@@ -456,7 +463,7 @@ def main():
     parser.add_argument("--api-key", default=None, help="Override API key (for local services you can set EMPTY).")
     parser.add_argument("--local", action="store_true", help="Local mode: default base URL -> http://127.0.0.1:8000/v1.")
     parser.add_argument("--request-timeout", type=int, default=300, help="Per-request timeout in seconds.")
-    parser.add_argument("--enable-cpt", action="store_true", help="Enable L3 CPT in final stage.")
+    parser.add_argument("--enable-cpt", action="store_true", help="Enable L2 behavioral testing (CPT + OPT).")
     parser.add_argument("--workers", type=int, default=20, help="Concurrency.")
     parser.add_argument("--no-cot", action="store_true", help="Use direct generation (no CoT structured generation).")
     parser.add_argument("--no-verify", action="store_true", help="Skip all verification stages (execute only).")
