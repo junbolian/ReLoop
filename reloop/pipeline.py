@@ -4,19 +4,19 @@ ReLoop Main Pipeline
 Implements the complete Generate -> Verify -> Repair loop with:
 - Chain-of-Thought generation (single API call with step-by-step reasoning)
 - L1 FATAL handling with regeneration (not termination)
-- L2 Direction Consistency Analysis (LLM-based with Accept/Reject)
+- L2 Semantic Audit (LLM-based with Accept/Reject)
 - L3 Constraint Presence Testing (optional)
 - Conservative repair strategy: only fix ERROR/WARNING, not INFO
 - Guaranteed output when possible
 
 Three-Layer Architecture:
 - L1: Execution Verification (blocking) + duality check
-- L2: Direction Consistency Analysis (adversarial LLM debate)
+- L2: Semantic Audit (adversarial LLM debate)
 - L3: Constraint Presence Testing (CPT)
 
 Repair Trigger Rules:
 - FATAL (L1): Triggers regeneration
-- ERROR (L2 direction accepted): Must fix
+- ERROR (L2 semantic audit accepted): Must fix
 - WARNING (L3 cpt_missing): Should fix / reference
 - INFO (L1 duality, L2 rejected): Do NOT trigger repair
 """
@@ -34,7 +34,7 @@ from .verification import (
 from .repair import CodeRepairer, RepairResult
 from .prompts import (
     format_diagnostic_report, build_repair_prompt, REPAIR_PROMPT_SYSTEM,
-    describe_data_schema,
+    describe_data_schema, format_data_instructions,
 )
 from .repair_safety import validate_repair_code, SAFETY_RE_REPAIR_PROMPT
 
@@ -52,7 +52,8 @@ from .l2_direction import (
     L4_REPAIR_PROMPT,
     should_exit_l4_loop,
 )
-from .perturbation import detect_perturbation_mode
+# perturbation module no longer needed for L2 semantic audit
+# from .perturbation import detect_perturbation_mode
 
 
 # Status ranking for regression detection
@@ -65,11 +66,19 @@ def _is_regression(before: 'VerificationReport', after: 'VerificationReport') ->
     Regression cases:
     - Crash regression: before had an objective, after crashed (None)
     - Status regression: after's status rank is lower than before's
+    - Value regression: same status but objective shifted > 4%
     """
     if before.objective is not None and after.objective is None:
         return True
     if _STATUS_ORDER.get(after.status, -1) < _STATUS_ORDER.get(before.status, -1):
         return True
+    # Value regression: same status, objective drifted significantly
+    if (before.objective is not None and after.objective is not None
+            and before.status == after.status):
+        denom = max(abs(before.objective), 1e-12)
+        rel_change = abs(after.objective - before.objective) / denom
+        if rel_change > 0.04:
+            return True
     return False
 
 
@@ -116,7 +125,7 @@ class ReLoopPipeline:
 
     Three-Layer Architecture:
     - L1: Execution Verification (blocking) + duality check
-    - L2: Direction Consistency Analysis (adversarial LLM debate)
+    - L2: Semantic Audit (adversarial LLM debate)
     - L3: Constraint Presence Testing (CPT, optional)
 
     Key Features:
@@ -149,9 +158,9 @@ class ReLoopPipeline:
             llm_client: LLM client with generate(prompt, system=None) method
             max_repair_iterations: Max repair attempts for ERROR/WARNING issues
             max_regeneration_attempts: Max regeneration attempts for L1 FATAL
-            max_l2_rejections: Max rejections per param before L2 downgrades to INFO
+            max_l2_rejections: Max rejections per finding before L2 downgrades to INFO
             enable_cpt: Enable L3 CPT layer
-            enable_l2_adversarial: Enable L2 Direction Consistency Analysis
+            enable_l2_adversarial: Enable L2 Semantic Audit
             use_structured_generation: Use CoT generation pipeline
             verbose: Print progress messages
         """
@@ -171,7 +180,7 @@ class ReLoopPipeline:
         self.enable_l2_direction = _l2_adv
         self.verbose = verbose
 
-        # L2 Direction Consistency Verifier (adversarial)
+        # L2 Semantic Audit Verifier (adversarial)
         if self.enable_l2_direction and llm_client:
             self.l2_verifier = L2DirectionVerifier(
                 llm_client=llm_client,
@@ -197,7 +206,7 @@ class ReLoopPipeline:
         1. Generate code (CoT or single-stage)
         2. Verify with L1 (execution + duality)
         3. If L1 FATAL: regenerate (up to max_regeneration_attempts)
-        4. Run L2 Direction Consistency Analysis (adversarial loop)
+        4. Run L2 Semantic Audit (adversarial loop)
         5. If ERROR/WARNING: repair (up to max_repair_iterations)
         6. INFO does NOT trigger repair (likely normal)
         7. Return result (always has output if any L1 passes)
@@ -295,12 +304,12 @@ class ReLoopPipeline:
         l1_checkpoint_obj = report.objective if report else None
         l1_checkpoint_status = report.status if report else "FAILED"
 
-        # Step 4: Run L2 Direction Consistency Analysis (if enabled)
+        # Step 4: Run L2 Semantic Audit (if enabled)
         l2_time = 0.0
         last_l2_results: List[L2VerifyResult] = []
         if self.enable_l2_direction and self.l2_verifier and report.status != 'FAILED':
             if self.verbose:
-                print("[Pipeline] Running L2 Direction Consistency Analysis")
+                print("[Pipeline] Running L2 Semantic Audit")
 
             l2_start = time.time()
             baseline_obj = report.objective or 0.0
@@ -347,7 +356,20 @@ class ReLoopPipeline:
         repair_iteration = 0
         all_diagnostics = self._collect_diagnostics(report, l2_results=last_l2_results)
 
-        while (any(d.triggers_repair for d in all_diagnostics)
+        # Skip repair if L2 checkpoint is already VERIFIED with no actionable issues
+        has_actionable = any(
+            d.severity in ("ERROR", "WARNING") and d.triggers_repair
+            for d in all_diagnostics
+        )
+        skip_repair = (
+            pre_repair_report.status == "VERIFIED"
+            and not has_actionable
+        )
+        if skip_repair and self.verbose:
+            print("[Pipeline] L2 checkpoint VERIFIED with no actionable issues, skipping repair")
+
+        while (not skip_repair
+               and any(d.triggers_repair for d in all_diagnostics)
                and repair_iteration < self.max_repair_iterations):
             repair_iteration += 1
             n_actionable = sum(1 for d in all_diagnostics if d.triggers_repair)
@@ -595,7 +617,7 @@ class ReLoopPipeline:
         return status_order.get(after.status, 0) > status_order.get(before.status, 0)
 
     # =========================================================================
-    # L2 Direction Consistency Analysis (Adversarial Loop)
+    # L2 Semantic Audit (Adversarial Loop)
     # =========================================================================
 
     def _run_l2_adversarial_loop(
@@ -608,7 +630,13 @@ class ReLoopPipeline:
         max_l2_iterations: int = 3
     ) -> Tuple[List[L2VerifyResult], str, str]:
         """
-        Run L2 Direction Consistency Analysis loop.
+        Run L2 Semantic Audit with adversarial debate loop.
+
+        Flow per iteration:
+        1. Semantic audit: LLM compares problem description vs code
+        2. If no issues: PASS
+        3. If issues found: repair LLM decides Accept/Reject for each
+        4. Accepted → apply fix; Rejected → re-audit with rejection context
 
         Args:
             code: Current code
@@ -620,15 +648,6 @@ class ReLoopPipeline:
 
         Returns:
             Tuple[l2_results, exit_reason, final_code]
-
-        Exit reasons:
-            - "all_pass": All L2 checks passed
-            - "all_rejected_others_pass": All L2 rejected, other layers PASS
-            - "max_rejections": Max rejections reached, downgraded to INFO
-            - "accepted_fixed": Some accepted and code was fixed
-            - "max_iterations": Reached max L2 iterations
-            - "no_violations": No violations found
-            - "disabled": L2 disabled or no LLM client
         """
         if not self.l2_verifier or not self.enable_l2_direction:
             return [], "disabled", code
@@ -636,51 +655,34 @@ class ReLoopPipeline:
         # Reset L2 verifier state
         self.l2_verifier.reset()
 
-        # Detect perturbation mode for L2
-        mode = detect_perturbation_mode(code, data)
-
         current_code = code
         l2_results = []
-        # After first iteration, constrain future analyses to only the originally
-        # flagged parameters (or their rejected subset) to avoid surfacing new issues.
-        allowed_params: Optional[List[str]] = None
 
         for l2_iter in range(max_l2_iterations):
             if self.verbose:
-                print(f"  [L2] Adversarial loop iteration {l2_iter + 1}")
+                print(f"  [L2] Semantic audit iteration {l2_iter + 1}")
 
-            # Step 1: L2 Verify
+            # Step 1: Semantic audit (no perturbation)
             l2_results = self.l2_verifier.verify(
                 code=current_code,
                 data=data,
                 baseline_obj=baseline_obj,
                 problem_description=problem_description,
-                params=allowed_params,
-                executor=self.verifier.executor,
-                mode=mode
             )
 
-            # Step 2: Check if all PASS (no violations)
+            # Step 2: Check if all PASS (no issues found)
             violations = [
                 r for r in l2_results
                 if r.is_violation and r.confidence >= self.l2_verifier.confidence_threshold
             ]
 
-            # Freeze the parameter set after first pass to prevent new params
-            # from appearing in subsequent iterations.
-            if allowed_params is None:
-                allowed_params = [v.param for v in violations]
-            else:
-                # Keep only violations within the locked set
-                violations = [v for v in violations if v.param in allowed_params]
-
             if not violations:
                 if self.verbose:
-                    print("  [L2] No violations found - PASS")
+                    print("  [L2] No semantic issues found - PASS")
                 return l2_results, "all_pass", current_code
 
             if self.verbose:
-                print(f"  [L2] Found {len(violations)} violations")
+                print(f"  [L2] Found {len(violations)} semantic issues")
 
             # Step 3: Get repair decisions (Accept/Reject)
             decisions, fixed_code = self._get_l2_repair_decisions(
@@ -693,7 +695,6 @@ class ReLoopPipeline:
             if not decisions:
                 if self.verbose:
                     print("  [L2] No decisions received, treating as all rejected")
-                # Check if other layers pass
                 if self._check_other_layers_pass(report):
                     return l2_results, "all_rejected_others_pass", current_code
                 continue
@@ -706,8 +707,6 @@ class ReLoopPipeline:
 
             accepted = decision_result["accepted"]
             rejected = decision_result["rejected"]
-            # Limit any further L2 runs to only the still-rejected params
-            allowed_params = [d.param for d in rejected]
 
             if self.verbose:
                 print(f"  [L2] Accepted: {len(accepted)}, Rejected: {len(rejected)}")
@@ -727,9 +726,19 @@ class ReLoopPipeline:
                 try:
                     fix_result = self.verifier.executor.execute(fixed_code, data)
                     if fix_result.get("status") == "OPTIMAL":
+                        # Regression guard: reject fix if objective drifts >5%
+                        new_obj = fix_result.get("objective")
+                        if (new_obj is not None and baseline_obj is not None
+                                and abs(baseline_obj) > 1e-12):
+                            rel_change = abs(new_obj - baseline_obj) / abs(baseline_obj)
+                            if rel_change > 0.05:
+                                if self.verbose:
+                                    print(f"  [L2] Fix rejected: objective drift {rel_change:.1%} "
+                                          f"({baseline_obj:.2f} -> {new_obj:.2f})")
+                                continue
                         current_code = fixed_code
                         if self.verbose:
-                            print("  [L2] Applied fix, continuing to verify")
+                            print("  [L2] Applied semantic fix, re-auditing")
                         continue
                 except Exception:
                     pass
@@ -738,11 +747,9 @@ class ReLoopPipeline:
             if rejected and not accepted:
                 if decision_result["should_reverify"]:
                     if self.verbose:
-                        print("  [L2] All rejected, re-verifying with context")
-                    allowed_params = [d.param for d in rejected if d.param in (allowed_params or [])]
+                        print("  [L2] All rejected, re-auditing with context")
                     continue
 
-                # Check if other layers pass
                 if self._check_other_layers_pass(report):
                     if self.verbose:
                         print("  [L2] All rejected + others PASS")
@@ -783,7 +790,7 @@ class ReLoopPipeline:
         # Format L2 diagnostics
         diagnostics = self.l2_verifier.format_diagnostics_for_repair(l2_results)
 
-        if diagnostics == "No direction violations detected.":
+        if diagnostics == "No semantic issues detected.":
             return [], None
 
         # Build repair prompt

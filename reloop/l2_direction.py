@@ -1,12 +1,14 @@
 """
-ReLoop L2: Direction Consistency Analysis (Adversarial)
+ReLoop L2: Semantic Audit (Adversarial)
 
-LLM-based parameter direction verification with adversarial rejection mechanism.
+LLM-based semantic verification with adversarial rejection mechanism.
+Compares problem description against generated code to identify
+missing terms, wrong coefficients, and missing constraints.
 
 Design:
-- LLM_verify: Analyzes each parameter's expected direction
+- LLM_audit: Compares problem description vs code using 3-part checklist
 - LLM_repair: Can Accept (fix) or Reject (with reason) diagnostics
-- Rejection triggers re-analysis with context
+- Rejection triggers re-audit with context
 - Exit when: all PASS, all rejected + others PASS, or max iterations
 """
 
@@ -28,16 +30,16 @@ from .perturbation import (
 
 @dataclass
 class L2VerifyResult:
-    """Result of L2 direction verification for a single parameter."""
-    param: str
-    param_role: str              # "constraint_bound" | "objective_coef" | "other"
-    expected_direction: str      # "increase" | "decrease" | "no_effect" | "uncertain"
-    actual_direction: str        # Observed direction from perturbation
-    is_violation: bool           # Whether behavior violates expectation
+    """Result of L2 semantic audit for a single finding."""
+    param: str                   # Target element name (cost term, coefficient, constraint)
+    param_role: str              # "missing_term" | "wrong_coefficient" | "missing_constraint"
+    expected_direction: str      # "n/a" (no perturbation in semantic audit)
+    actual_direction: str        # "n/a" (no perturbation in semantic audit)
+    is_violation: bool           # Whether a semantic issue was found
     confidence: float            # 0.0 - 1.0
-    reason: str                  # Explanation of the analysis
-    z_plus: float               # Objective after param increase
-    z_minus: float              # Objective after param decrease
+    reason: str                  # Evidence and suggested fix
+    z_plus: float               # 0.0 (unused, kept for API compatibility)
+    z_minus: float              # 0.0 (unused, kept for API compatibility)
     z_baseline: float           # Baseline objective
 
 
@@ -79,56 +81,59 @@ L4Result = L2Result
 # Prompts
 # =============================================================================
 
-L2_VERIFY_SYSTEM = """You are an optimization expert analyzing parameter behavior in mathematical models.
-Your task is to determine what behavior we SHOULD expect from each parameter, and whether the observed behavior matches."""
+L2_VERIFY_SYSTEM = """You are an optimization model auditor. Your task is to compare a problem description against generated code and identify semantic errors: missing cost/revenue terms, wrong coefficient interpretations, and missing constraints."""
 
-L2_VERIFY_PROMPT = '''Analyze the parameter behavior in this optimization problem.
+L2_VERIFY_PROMPT = '''Audit this optimization code against the problem description. Identify any semantic discrepancies.
 
 ## Problem Description
 {problem_description}
-
-## Optimization Sense
-{sense}
 
 ## Generated Code
 ```python
 {code}
 ```
 
-## Parameters to Analyze (batched)
-For EACH entry below, first reason about the expected direction, then decide violation.
+## Audit Checklist
 
-{param_block}
+### 1. Objective Function Completeness
+List EVERY cost or revenue term mentioned in the problem description, then check if each is present in the code's objective function.
+- Common miss: purchasing/procurement cost, holding cost, shortage/backorder cost, transportation cost, setup/fixed cost
+- If a term from the description is missing from the objective, flag it.
 
-## Important Notes
-- For MINIMIZATION: increasing a cost coefficient -> objective INCREASES (worse)
-- For MAXIMIZATION: increasing a revenue coefficient -> objective INCREASES (better)
-- Constraint bounds vs objective coefficients behave differently.
-- Consider whether the parameter appears in constraints or the objective function.
+### 2. Coefficient Semantic Correctness
+For each numeric coefficient used in the code, verify its interpretation matches the problem description:
+- **Rate vs total**: Is `r` a rate (e.g., 5% = 0.05) or a multiplier (e.g., 1.05)? Does the code use `r * x` when it should use `(1 + r) * x`, or vice versa?
+- **Per-unit vs aggregate**: Is the cost per-unit or total? Does the code multiply correctly?
+- **Percentage vs absolute**: Is the value a percentage (divide by 100) or already a fraction?
+
+### 3. Constraint Completeness
+Check whether all constraints mentioned in the problem description are present in the code:
+- Supply/capacity limits
+- Demand satisfaction requirements
+- Budget constraints
+- Logical/linking constraints
+- Variable bounds (non-negativity, upper bounds)
 
 ## Confidence Guidelines
-- 0.9+: Very certain (clear constraint bound or objective coefficient)
-- 0.7-0.9: Fairly certain (typical parameter role)
-- 0.5-0.7: Uncertain (ambiguous role)
-- <0.5: Low confidence (don't trigger repair based on this)
+- 0.9+: Clear evidence from problem text that something is missing or wrong
+- 0.7-0.9: Likely issue based on domain knowledge
+- 0.5-0.7: Possible issue, ambiguous problem text
+- <0.5: Speculative, do not flag
 
-Return ONLY JSON (no text) in this format:
+## Response Format
+Return ONLY a JSON array. If no issues found, return an empty array `[]`.
 ```json
 [
   {{
-    "param": "param_name",
-    "param_role": "constraint_bound" | "objective_coef" | "other",
-    "role_explanation": "...",
-    "expected_direction": "increase" | "decrease" | "no_effect" | "uncertain",
-    "direction_explanation": "...",
-    "is_violation": true | false,
-    "violation_explanation": "...",
+    "issue_type": "missing_term" | "wrong_coefficient" | "missing_constraint",
+    "target": "name of the missing/wrong element",
+    "evidence": "quote from problem description vs what code does",
     "confidence": 0.0 to 1.0,
-    "suggested_fix": "..."
+    "suggested_fix": "specific fix description"
   }}
 ]
 ```
-Include one object per parameter, in the same order.
+Only include issues with confidence >= 0.5. Be precise — false positives waste repair budget.
 '''
 
 L2_REJECTION_CONTEXT = """
@@ -141,7 +146,7 @@ If the rejection reason is valid, adjust your conclusion.
 If you still believe your original analysis was correct, provide stronger justification.
 """
 
-L2_REPAIR_PROMPT = '''Review these L2 direction analysis diagnostics and decide how to handle each.
+L2_REPAIR_PROMPT = '''Review these semantic audit findings and decide how to handle each.
 
 ## Problem Description
 {problem_description}
@@ -151,28 +156,27 @@ L2_REPAIR_PROMPT = '''Review these L2 direction analysis diagnostics and decide 
 {code}
 ```
 
-## L2 Diagnostics
+## Semantic Audit Findings
 
 {l4_diagnostics}
 
-## For Each Diagnostic, Choose One:
+## For Each Finding, Choose One:
 
 ### Option 1: ACCEPT
-If you agree the analysis is correct, the code will be fixed accordingly.
+If you agree the finding is correct and the code has this issue, fix the code accordingly.
 
 ### Option 2: REJECT
-If you believe the analysis is WRONG, provide a detailed rejection reason.
-Your rejection will trigger re-analysis with your feedback.
+If you believe the finding is WRONG (the code is actually correct), provide a detailed rejection reason.
 
 **When to REJECT (examples):**
-1. "wage is classified as constraint_bound, but it's actually an objective coefficient"
-2. "The expected direction assumes minimization, but context suggests maximization"
-3. "The parameter is correctly used; the 'violation' is actually expected behavior"
+1. "The audit says purchasing cost is missing, but it IS included in variable `procurement_cost` on line X"
+2. "The coefficient is correctly interpreted as a rate — the problem says 'annual rate of 5%' and code uses 0.05"
+3. "The constraint is present but named differently than what the audit expected"
 
 **When to ACCEPT:**
-1. The analysis correctly identifies a constraint direction error
-2. The parameter role is correctly identified AND behavior violates expectation
-3. You cannot find a reason to reject the analysis
+1. A cost/revenue term from the problem description is genuinely missing from the objective
+2. A coefficient is demonstrably misinterpreted (rate vs total, per-unit vs aggregate)
+3. A constraint mentioned in the problem is genuinely absent from the model
 
 **SAFETY RULES (violations will cause your repair to be rejected):**
 - Do NOT redefine the `data` variable. Data is provided externally as a Python dict.
@@ -188,7 +192,7 @@ Return JSON only (no other text):
         {{
             "param": "parameter_name",
             "action": "accept" | "reject",
-            "reason": "If reject: why L2 analysis is wrong. If accept: description of the fix needed"
+            "reason": "If reject: why the finding is wrong. If accept: description of the fix applied"
         }}
     ],
     "fixed_code": "Complete fixed code if any accepts, otherwise null"
@@ -204,14 +208,15 @@ L4_REPAIR_PROMPT = L2_REPAIR_PROMPT
 
 
 # =============================================================================
-# L2 Direction Consistency Verifier (Adversarial)
+# L2 Semantic Audit Verifier (Adversarial)
 # =============================================================================
 
 class L2DirectionVerifier:
     """
-    L2: Direction Consistency Analysis (Adversarial)
+    L2: Semantic Audit (Adversarial)
 
-    Uses LLM to analyze parameter direction expectations.
+    Uses LLM to compare problem description against generated code,
+    identifying missing terms, wrong coefficients, and missing constraints.
     Features adversarial mechanism where repair LLM can reject diagnostics.
     """
 
@@ -251,79 +256,29 @@ class L2DirectionVerifier:
         mode: str = "data_dict"
     ) -> List[L2VerifyResult]:
         """
-        Verify parameter directions using a single batched LLM analysis call.
+        Semantic audit: compare problem description against generated code
+        to identify missing terms, wrong coefficients, and missing constraints.
+
+        No perturbation is performed. Uses a single LLM call for the audit.
 
         Args:
             code: Generated optimization code
             data: Problem data dictionary
             baseline_obj: Baseline objective value
             problem_description: Natural language problem description
-            params: Parameters to analyze (if None, extract from data)
-            exclude_params: Parameters to skip (e.g., already flagged)
-            executor: Code executor (for perturbation tests)
+            params: (unused, kept for API compatibility)
+            exclude_params: (unused, kept for API compatibility)
+            executor: (unused, kept for API compatibility)
+            mode: (unused, kept for API compatibility)
 
         Returns:
-            List of L2VerifyResult for each analyzed parameter
+            List of L2VerifyResult for each identified issue
         """
-        # Get parameters to analyze
-        if params is None:
-            if mode == "source_code":
-                params = get_source_code_param_names(code)
-            elif mode == "hybrid":
-                data_params = extract_numeric_params(data)
-                code_params = get_source_code_param_names(code)
-                params = data_params + [p for p in code_params if p not in data_params]
-            else:
-                params = extract_numeric_params(data)
-
-        exclude_params = exclude_params or []
-        # Analyze all numeric params (excluding those flagged elsewhere)
-        params_to_analyze = [p for p in params if p not in exclude_params]
-
-        param_entries = []
-        for param in params_to_analyze:
-            if mode != "source_code":
-                param_in_data = get_param_value(data, param) is not None
-                if param_in_data:
-                    skip, _ = should_skip_param(data, param)
-                    if skip:
-                        continue
-
-            if executor is None:
-                continue
-
-            z_plus, z_minus = self._perturb_and_solve(
-                executor, code, data, param, mode, baseline_obj
-            )
-            if z_plus is None or z_minus is None:
-                continue
-
-            change_plus = ((z_plus - baseline_obj) / abs(baseline_obj) * 100
-                           if abs(baseline_obj) > 1e-6 else z_plus - baseline_obj)
-            change_minus = ((z_minus - baseline_obj) / abs(baseline_obj) * 100
-                            if abs(baseline_obj) > 1e-6 else z_minus - baseline_obj)
-
-            param_entries.append({
-                "param": param,
-                "value": self._get_param_value(data, param),
-                "z_plus": z_plus,
-                "z_minus": z_minus,
-                "change_plus": change_plus,
-                "change_minus": change_minus,
-                "rejection_context": self._build_rejection_context(param)
-            })
-
-        if not param_entries:
-            return []
-
-        analyses = self._analyze_params_batch(
+        return self._semantic_audit(
             code=code,
             problem_description=problem_description,
             baseline_obj=baseline_obj,
-            param_entries=param_entries
         )
-
-        return analyses
 
     def _perturb_and_solve(
         self, executor, code: str, data: Dict, param: str,
@@ -379,33 +334,33 @@ class L2DirectionVerifier:
             rejection_reason=latest.rejection_reason
         )
 
-    def _analyze_params_batch(
+    def _semantic_audit(
         self,
         code: str,
         problem_description: str,
         baseline_obj: float,
-        param_entries: List[Dict[str, Any]]
     ) -> List[L2VerifyResult]:
-        """Analyze multiple parameters in one LLM call."""
-        lines = []
-        for i, p in enumerate(param_entries, 1):
-            lines.append(
-                f"""### Param {i}: {p['param']}
-- Current value: {p['value']}
-- Baseline objective: {baseline_obj:.4f}
-- +{int(self.delta*100)}% => {p['z_plus']:.4f} (change: {p['change_plus']:+.2f}%)
-- -{int(self.delta*100)}% => {p['z_minus']:.4f} (change: {p['change_minus']:+.2f}%)
-{p['rejection_context']}
-"""
-            )
-        param_block = "\n".join(lines)
+        """Run semantic audit: single LLM call comparing problem desc vs code."""
+        # Build rejection context from any previous rounds
+        rejection_ctx = ""
+        if self.rejection_history:
+            parts = []
+            for param, history in self.rejection_history.items():
+                latest = history[-1]
+                parts.append(
+                    L2_REJECTION_CONTEXT.format(
+                        previous_reason=latest.verify_reason,
+                        rejection_reason=latest.rejection_reason,
+                    )
+                )
+            rejection_ctx = "\n".join(parts)
 
         prompt = L2_VERIFY_PROMPT.format(
             problem_description=problem_description,
-            sense="minimize",
             code=code,
-            param_block=param_block
         )
+        if rejection_ctx:
+            prompt += f"\n\n## Previous Audit Feedback\n{rejection_ctx}"
 
         try:
             response = self.llm_client.generate(prompt, system=L2_VERIFY_SYSTEM)
@@ -415,26 +370,27 @@ class L2DirectionVerifier:
 
             results: List[L2VerifyResult] = []
             for analysis in analysis_list:
-                param_name = analysis.get("param")
-                entry = next((p for p in param_entries if p["param"] == param_name), None)
-                if not entry:
+                confidence = analysis.get("confidence", 0.5)
+                if confidence < self.confidence_threshold:
                     continue
 
-                actual_direction = self._determine_actual_direction(
-                    entry["z_plus"], entry["z_minus"], baseline_obj
-                )
-
+                issue_type = analysis.get("issue_type", "unknown")
+                target = analysis.get("target", "unknown")
+                # Map semantic audit fields to L2VerifyResult
+                evidence = analysis.get("evidence", "")
+                suggested_fix = analysis.get("suggested_fix", "")
+                reason = f"{evidence} | Fix: {suggested_fix}" if suggested_fix else evidence
                 results.append(L2VerifyResult(
-                    param=param_name,
-                    param_role=analysis.get("param_role", "other"),
-                    expected_direction=analysis.get("expected_direction", "uncertain"),
-                    actual_direction=actual_direction,
-                    is_violation=analysis.get("is_violation", False),
-                    confidence=analysis.get("confidence", 0.5),
-                    reason=analysis.get("direction_explanation", ""),
-                    z_plus=entry["z_plus"],
-                    z_minus=entry["z_minus"],
-                    z_baseline=baseline_obj
+                    param=target,
+                    param_role=issue_type,
+                    expected_direction="n/a",       # No perturbation
+                    actual_direction="n/a",          # No perturbation
+                    is_violation=True,               # All returned issues are violations
+                    confidence=confidence,
+                    reason=reason,
+                    z_plus=0.0,                      # No perturbation data
+                    z_minus=0.0,
+                    z_baseline=baseline_obj,
                 ))
             return results
         except Exception:
@@ -588,7 +544,7 @@ class L2DirectionVerifier:
         self,
         verify_results: List[L2VerifyResult]
     ) -> str:
-        """Format L2 results for repair prompt."""
+        """Format L2 semantic audit results for repair prompt."""
         lines = []
 
         violations = [
@@ -597,18 +553,15 @@ class L2DirectionVerifier:
         ]
 
         if not violations:
-            return "No direction violations detected."
+            return "No semantic issues detected."
 
         for i, v in enumerate(violations, 1):
             rejection_count = len(self.rejection_history.get(v.param, []))
             lines.append(f"""
 ### Diagnostic {i}: {v.param}
-- **Role**: {v.param_role}
-- **Expected Direction**: {v.expected_direction}
-- **Actual Behavior**: {v.actual_direction}
+- **Issue Type**: {v.param_role}
 - **Confidence**: {v.confidence:.0%}
-- **Reason**: {v.reason}
-- **Perturbation Results**: baseline={v.z_baseline:.4f}, +{int(self.delta*100)}%={v.z_plus:.4f}, -{int(self.delta*100)}%={v.z_minus:.4f}
+- **Evidence & Fix**: {v.reason}
 - **Previous Rejections**: {rejection_count}
 """)
 

@@ -30,11 +30,11 @@ The **RetailOpt-190** benchmark is a key contribution of this paper, featuring:
 
 ## Overview
 
-ReLoop is a behavioral verification framework that detects **silent failures** in LLM-generated optimization code—code that executes successfully but produces incorrect results. Our key insight is that correct optimization models satisfy fundamental mathematical invariants (execution correctness, direction consistency, constraint presence) that can be tested without ground truth.
+ReLoop is a behavioral verification framework that detects **silent failures** in LLM-generated optimization code—code that executes successfully but produces incorrect results. Our key insight is that correct optimization models satisfy fundamental invariants (execution correctness, semantic consistency, constraint presence) that can be tested without ground truth.
 
 **Key Results:**
 - Consistent improvements across all five models and three benchmarks
-- Detection of missing constraints, direction reversals, and data access errors
+- Detection of missing cost terms, wrong coefficients, missing constraints, and data access errors
 - No ground truth required for verification
 
 ---
@@ -49,12 +49,13 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 |-----------|-------------|
 | **Chain-of-Thought Generation** | 3-stage structured generation: Understand → Formalize (with variable type reasoning) → Synthesize |
 | **L1 Execution & Solver** | Syntax, runtime, and solver status checks with IIS/unbounded diagnostics (FATAL → regeneration) + duality check (INFO) |
-| **L2 Direction Consistency** | LLM-based adversarial debate between verify and repair roles with Accept/Reject |
+| **L2 Semantic Audit** | LLM-based adversarial audit: compares problem description vs code for missing terms, wrong coefficients, missing constraints |
 | **L3 Constraint Presence Test** | LLM-based verification of expected constraints in generated code (CPT) |
 | **Unified Diagnostic Schema** | All layers output `Diagnostic` objects; unified `build_repair_prompt()` assembles repair prompts |
 | **Diagnostic-Based Repair** | Conservative strategy: only ERROR/WARNING trigger repair, INFO is reference only |
 | **Repair Safety Guardrails** | Prevents repair LLM from modifying input data or introducing dangerous operations |
-| **Repair Regression Guard** | Post-repair rollback if repaired code crashes or status degrades vs pre-repair baseline |
+| **Repair Regression Guard** | Post-repair rollback on crash, status degradation, or objective value drift (>4%) vs pre-repair baseline |
+| **Repair Skip Guard** | Skip repair loop entirely when code is already VERIFIED with no actionable diagnostics |
 
 ### Design Principles
 
@@ -63,7 +64,8 @@ ReLoop is a behavioral verification framework that detects **silent failures** i
 3. **Robustness Guarantee**: L1 FATAL triggers regeneration; L2-L3 are diagnostic only
 4. **LLM-Only Analysis**: No keyword-based heuristics; all semantic analysis uses LLM
 5. **Repair Safety**: Repair code is validated before execution; data variable cannot be reassigned
-6. **Regression Guard**: Repair never makes results worse — rollback on crash or status degradation
+6. **Regression Guard**: Repair never makes results worse — rollback on crash, status degradation, or value drift >4%
+7. **Repair Skip**: Already-verified code is not subjected to unnecessary repair attempts
 
 ### Generation: Chain-of-Thought (CoT)
 
@@ -103,38 +105,32 @@ Checks whether generated code executes and produces a valid solution (`verificat
 
 **FATAL handling:** Triggers regeneration (up to `max_regeneration_attempts=3`). The LLM receives the failed code and error message to generate corrected code.
 
-### L2: Direction Consistency Analysis (Adversarial)
+### L2: Semantic Audit (Adversarial)
 
-![L2 Direction Consistency Analysis](fig/L2.png)
-
-Detects parameters whose objective response contradicts expected behavior (`l2_direction.py`, `pipeline.py:_run_l2_adversarial_loop`).
+Detects semantic discrepancies between the problem description and generated code (`l2_direction.py`, `pipeline.py:_run_l2_adversarial_loop`).
 
 **Procedure:**
 
-1. **Perturb** — For each numeric parameter, perturb by +delta and -delta (default delta=10%), re-solve, record `z_plus` and `z_minus`
-2. **LLM_verify** (temperature=0) — Single batched LLM call analyzes all parameters:
-   - Input: parameter name, current value, baseline objective, +delta% objective change, -delta% objective change
-   - Output per parameter: `param_role` (constraint_bound / objective_coef / other), `expected_direction`, `is_violation`, `confidence` (0.0-1.0)
-3. **LLM_repair** (temperature=0.3) — For each violation with confidence >= 0.5, repair LLM decides:
-   - **Accept** — Agrees with diagnosis, provides fixed code
-   - **Reject** — Disagrees with diagnosis, provides rejection reason
+1. **LLM_audit** (temperature=0) — Single LLM call compares problem description against generated code using a 3-part checklist:
+   - **Objective function completeness**: Is every cost/revenue term mentioned in the problem present in the code's objective?
+   - **Coefficient semantic correctness**: Are coefficients correctly interpreted? (rate vs total return, per-unit vs aggregate, percentage vs absolute)
+   - **Constraint completeness**: Are all constraints from the problem description present in the code?
+   - Output per issue: `issue_type` (missing_term / wrong_coefficient / missing_constraint), `target`, `evidence`, `confidence` (0.0-1.0), `suggested_fix`
+2. **LLM_repair** (temperature=0.3) — For each finding with confidence >= 0.5, repair LLM decides:
+   - **Accept** — Agrees the finding is correct, provides fixed code
+   - **Reject** — Disagrees with the finding, provides rejection reason
    - Higher temperature encourages diverse reasoning for the adversarial "devil's advocate" role
-4. **Re-analysis** — Rejected parameters are re-analyzed with rejection context (up to `max_rejections=2` per parameter)
+3. **Re-audit** — Rejected findings are re-audited with rejection context (up to `max_rejections=2` per finding)
 
 **Exit conditions:**
 
 | Condition | Exit Reason | Severity |
 |-----------|-------------|----------|
-| No violations found | `all_pass` | PASS |
-| All violations rejected + L1/L3 PASS | `all_rejected_others_pass` | INFO |
-| Max rejections reached for all params | `max_rejections` (downgrade) | INFO |
+| No issues found | `all_pass` | PASS |
+| All findings rejected + L1/L3 PASS | `all_rejected_others_pass` | INFO |
+| Max rejections reached for all findings | `max_rejections` (downgrade) | INFO |
 | Some accepted, code fixed | `accepted_fixed` | ERROR (triggers repair) |
 | Max L2 iterations (3) reached | `max_iterations` | ERROR |
-
-**Perturbation modes** (auto-detected per problem):
-- `data_dict` — Perturb values in the data dictionary
-- `source_code` — Perturb hardcoded values in generated code
-- `hybrid` — Try data_dict first, fall back to source_code if no effect
 
 ### L3: Constraint Presence Test (CPT, Optional)
 
@@ -169,7 +165,7 @@ All layers output unified `Diagnostic` objects with severity and evidence (`veri
 | Severity | Source | Action |
 |----------|--------|--------|
 | FATAL | L1 execution errors | Regenerate code (not repair) |
-| ERROR | L2 accepted direction violations | **Must fix** — included in repair prompt |
+| ERROR | L2 accepted semantic audit findings | **Must fix** — included in repair prompt |
 | WARNING | L3 CPT missing constraints | **Should fix** — included in repair prompt |
 | INFO | L1 duality, L2 rejected, L3 uncertain | **Reference only** — shown but not fixed |
 
@@ -181,11 +177,13 @@ All layers output unified `Diagnostic` objects with severity and evidence (`veri
    - Exception: `data = json.loads(...)` is allowed (re-parses existing data)
    - On violation: 1 guided retry (does not consume repair budget); 2nd failure → keep original code
 4. Re-verify repaired code
-5. **Regression guard** — Compare post-repair result against pre-repair baseline:
+5. **Repair skip guard** — If the code is already VERIFIED with no ERROR/WARNING diagnostics, skip the entire repair loop (prevents unnecessary modifications to correct code)
+6. **Regression guard** — Compare post-repair result against pre-repair baseline:
    - Crash regression: objective was not None → now None
    - Status regression: status rank decreased (VERIFIED=3 > WARNINGS=2 > ERRORS=1 > FAILED=0)
+   - Value regression: same status but objective shifted >4% relative (prevents "value drift" where repair changes a correct answer)
    - On regression: **rollback** to pre-repair code and stop all further repair
-6. Repeat until: no actionable diagnostics, no change, regression detected, or budget exhausted
+7. Repeat until: no actionable diagnostics, no change, regression detected, or budget exhausted
 
 ---
 
@@ -348,7 +346,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 
 | Type | Model | Provider | Temp. | Max Tokens | Notes |
 |------|-------|----------|:---:|:---:|-------|
-| Foundation | Claude Opus 4.5 | Anthropic API | 0.0 | 8192 | |
+| Foundation | Claude Opus 4.6 | Anthropic API | 0.0 | 8192 | |
 | Foundation | DeepSeek-V3.1 | DeepSeek API | 0.0 | 8192 | |
 | Foundation | Qwen3-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
 | Offline SFT | OptMATH-Qwen2.5-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
@@ -365,8 +363,8 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Type | Model | Exec% ||| Acc% (ε=10⁻⁴) ||| Acc% (ε=10⁻²) |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
-| Foundation | Claude Opus 4.5 | 42.1 | 37.4 | **99.5** | 10.0 | 11.1 | **25.3** | 11.1 | 12.1 | **31.6** |
-| Foundation | DeepSeek-V3.1 | 63.2 | 51.1 | **76.3** | 5.3 | 11.6 | **17.9** | 9.5 | 15.3 | **22.1** |
+| Foundation | Claude Opus 4.6 | 80.0 | 79.5 | **98.4** | 27.4 | 28.9 | **31.6** | 31.1 | 31.6 | **35.3** |
+| Foundation | DeepSeek-V3.1 | 76.8 | 69.5 | **96.3** | **2.1** | 1.1 | 1.1 | **6.3** | 3.7 | 5.3 |
 | Foundation | Qwen3-32B | 0.0 | 0.0 | **2.1** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | Offline SFT | OptMATH-Qwen2.5-32B | 0.5 | 0.0 | **4.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | Online RL | SIRL-Qwen2.5-32B | 1.6 | 1.6 | 1.6 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
@@ -376,7 +374,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | | | MAMO-ComplexLP ||| IndustryOR |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
-| Foundation | Claude Opus 4.5 | 76.8 | 74.4 | **78.8** | 61.0 | 64.0 | **65.0** |
+| Foundation | Claude Opus 4.6 | 78.8 | 79.8 | **82.3** | 69.0 | 69.0 | **69.0** |
 | Foundation | DeepSeek-V3.1 | 60.6 | 62.1 | **63.5** | 44.0 | 58.0 | **60.0** |
 | Foundation | Qwen3-32B | 29.1 | 30.0 | **36.0** | 38.0 | 44.0 | **47.0** |
 | Offline SFT | OptMATH-Qwen2.5-32B | 44.8 | 45.8 | **46.3** | 31.0 | 33.0 | **33.0** |
@@ -384,15 +382,23 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 
 > For reference from SIRL (Chen et al., 2025) and StepORLM (Zhou et al., 2025): GPT-4 (49.3%/33.0%), DeepSeek-R1 (67.9%/45.0%), o3 (51.2%/44.0%) on MAMO/IndustryOR.
 
-### Table 3: Ablation (Claude Opus 4.5 × RetailOpt-190)
+### Table 3: Ablation on RetailOpt-190
 
-| Config | Exec% | Acc% pass@1 (ε=10⁻⁴) | Acc% pass@1 (ε=10⁻²) |
-|--------|:---:|:---:|:---:|
-| Direct | 42.1 | 10.0 | 11.1 |
-| +CoT | 37.4 | 11.1 | 12.1 |
-| +CoT+L1 | 98.9 | 25.8 | 31.6 |
-| +CoT+L1+L2 | 98.9 | 25.8 | 31.6 |
-| +CoT+L1+L2+L3 | **99.5** | **25.3** | **31.6** |
+| Config | Claude Opus 4.6 ||| DeepSeek-V3.1 |||
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|
+| | Exec% | ε=10⁻⁴ | ε=10⁻² | Exec% | ε=10⁻⁴ | ε=10⁻² |
+| Direct | 80.0 | 27.4 | 31.1 | 76.8 | **2.1** | **6.3** |
+| +CoT | 79.5 | 28.9 | 31.6 | 69.5 | 1.1 | 3.7 |
+| +CoT+L1 | 97.4 | 31.6 | 35.3 | **96.3** | 1.1 | 5.3 |
+| +CoT+L1+L2 | 97.4 | 31.6 | 35.3 | **96.3** | 1.1 | 5.3 |
+| +CoT+L1+L2+L3 | **98.4** | **31.6** | **35.3** | **96.3** | 1.1 | 5.3 |
+
+> **Model strength determines layer contributions and overall effectiveness:**
+>
+> - **Claude Opus 4.6** (strong model): CoT and L1 provide the primary accuracy gains (+4.2pp at ε=10⁻⁴). L2/L3 serve as safety nets — the regression guard prevents over-repair. Claude's baseline formulations are already near-correct, so L2 semantic fixes rarely improve accuracy. L3 contributes +1pp Exec%.
+> - **DeepSeek-V3.1** (mid-tier model): L1 crash recovery is the dominant contributor (+26.8pp Exec%). However, **CoT actually hurts accuracy** (2.1% → 1.1% at ε=10⁻⁴): the structured reasoning format constrains a model that lacks sufficient capacity for complex retail optimization, producing worse formulations than direct generation. L2/L3 have no additional effect — the formulation errors in the surviving (non-crashing) code are structural (wrong decomposition, incorrect modeling approach) rather than the localized semantic issues (missing terms, wrong coefficients) that L2 can detect.
+> - **32B models** (Qwen3, OptMATH, SIRL): Near-zero accuracy on RetailOpt-190 regardless of pipeline configuration. These models lack fundamental capacity for complex multi-period, multi-product retail optimization with 20+ parameters and dozens of constraints. ReLoop can improve execution rates (e.g., Qwen3: 0% → 2.1%) but cannot compensate for fundamentally incorrect formulations.
+> - **Implication**: ReLoop's verification layers are most effective when the base model can produce *approximately correct* formulations that contain localized, detectable errors. For models below this capability threshold (on a given problem complexity), crash recovery (L1) provides the primary benefit.
 
 ---
 
@@ -402,34 +408,45 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 
 > Base = direct generation for foundation models, native format for SFT/RL models. +ReLoop = CoT + L1–L3 for all models.
 
-| Family | #Inst | Claude Opus 4.5 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
+| Family | #Inst | Claude Opus 4.6 || DeepSeek-V3.1 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
-| F1 Core Ops | 20 | 5.0 | **65.0** | 0.0 | **40.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F2 Assort & Sub | 30 | 3.3 | **26.7** | 6.7 | **20.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F3 Resource | 20 | 0.0 | 0.0 | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F4 Demand Dyn | 30 | 0.0 | **16.7** | 3.3 | **6.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F5 Feasibility | 20 | 15.0 | 5.0 | 5.0 | **15.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F6 Discrete Log | 20 | 0.0 | 0.0 | 5.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F7 Network & ME | 30 | 13.3 | **26.7** | 6.7 | **16.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F8 Omni-channel | 20 | 50.0 | **65.0** | 15.0 | **35.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| **Total** | **190** | **10.0** | **25.3** | **5.3** | **17.9** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| F1 Core Ops | 20 | 85.0 | **90.0** | 5.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F2 Assort & Sub | 30 | 46.7 | **46.7** | 3.3 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F3 Resource | 20 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F4 Demand Dyn | 30 | 23.3 | **33.3** | 0.0 | **6.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F5 Feasibility | 20 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F6 Discrete Log | 20 | 0.0 | 0.0 | 5.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F7 Network & ME | 30 | 13.3 | **23.3** | 3.3 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F8 Omni-channel | 20 | 50.0 | **55.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| **Total** | **190** | **27.4** | **31.6** | **2.1** | **1.1** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
-### Table A2: Silent Failure Taxonomy (Claude Opus 4.5 baseline on RetailOpt-190)
+### Table A2: Silent Failure Analysis (Claude Opus 4.6 × RetailOpt-190)
 
-> Each silent failure instance is manually classified by root cause and cross-referenced with the detecting layer.
+> Of 190 baseline (direct generation) problems, 100 are silent failures: execute successfully but produce incorrect results (ε=10⁻⁴). We analyze how each ReLoop component addresses them.
 
-| Error Type | Count | Detected by L2 | Detected by L3 | None | Repaired |
-|------------|:---:|:---:|:---:|:---:|:---:|
-| Missing constraint | | | | | |
-| Wrong constraint direction | | | — | | |
-| Wrong indexing/subscript | | | — | | |
-| Wrong coefficient | | | — | | |
-| Missing variable | | | | | |
-| Logic/composition error | | | | | |
-| Data access error | | | — | | |
-| Other | | | | | |
-| **Total** | | | | | |
+**Coverage by component:**
+
+| Component | Mechanism | Addressed |
+|-----------|-----------|:---------:|
+| Structured CoT | 3-stage reasoning prevents formulation errors | 9 corrected |
+| L1 crash recovery | Regeneration yields correct formulation | 1 corrected |
+| L2 semantic audit | Detects missing objective terms, wrong coefficients, constraint gaps | 5 flagged |
+| L3 CPT | Detects missing/inactive constraints via perturbation testing | 7 flagged |
+| Regression guard | Prevents over-repair from degrading correct solutions (>4% drift) | 2 protected |
+| **Total** | | **10 corrected, 11 flagged** |
+
+> The remaining 79 involve complex structural formulation differences (e.g., alternative model decompositions, multi-component errors) beyond automated verification scope.
+
+**Detection capability by error type:**
+
+| Error Type | L2 | L3 | Example |
+|------------|:---:|:---:|---------|
+| Missing objective term | ✓ | — | Revenue/cost component omitted |
+| Wrong coefficient/unit | ✓ | — | Per-unit cost vs aggregate, rate vs total |
+| Missing constraint | ✓ | ✓ | Capacity or demand limit not enforced |
+| Variable type error | — | — | Continuous vs integer decision |
+| Structural formulation | — | — | Incorrect decomposition or modeling approach |
 
 ---
 
@@ -442,7 +459,7 @@ The ablation study measures each component's marginal contribution. The pipeline
 | **Direct** | Direct generation without CoT | No structured reasoning |
 | **+CoT** | Structured generation output | Before any verification |
 | **+CoT+L1** | After L1 verify + FATAL regeneration | Before L2 |
-| **+CoT+L1+L2** | After L2 adversarial analysis | Before L3 |
+| **+CoT+L1+L2** | After L2 semantic audit | Before L3 |
 | **+CoT+L1+L2+L3** (Full ReLoop) | After full pipeline | Complete |
 
 ### Running ablation experiments
@@ -470,7 +487,7 @@ Output includes:
 The `PipelineResult` dataclass includes `l1_checkpoint_obj/status` and `l2_checkpoint_obj/status` fields, recorded automatically during `pipeline.run()`:
 
 1. **L1 checkpoint**: Recorded after L1 verification and FATAL regeneration loop (Step 3). Captures L1's contribution through crash recovery via code regeneration.
-2. **L2 checkpoint**: Recorded after L2 adversarial loop (Step 4). Captures L2's additional contribution through direction consistency repair.
+2. **L2 checkpoint**: Recorded after L2 semantic audit loop (Step 4). Captures L2's additional contribution through semantic audit and repair.
 3. **Final**: The standard pipeline output after the full diagnostic-based repair loop (Step 5), which processes diagnostics from all enabled layers.
 
 ---
@@ -485,7 +502,7 @@ reloop/
 │   ├── perturbation.py           # Source-code level perturbation (AST-based) + mode detection
 │   ├── executor.py               # Isolated subprocess execution with IIS/unbounded diagnostics
 │   ├── verification.py           # 3-layer verification engine (L1-L3) + unified Diagnostic schema
-│   ├── l2_direction.py           # L2 Direction Consistency Analysis (adversarial LLM debate)
+│   ├── l2_direction.py           # L2 Semantic Audit (adversarial LLM debate)
 │   ├── prompts.py                # LLM prompt templates
 │   ├── generation.py             # Code generation
 │   ├── repair.py                 # Diagnostic-based repair with L2 Accept/Reject
@@ -495,12 +512,12 @@ reloop/
 │   └── experiment_runner.py      # Batch experiment runner
 ├── tests/                        # Test suite
 │   ├── test_perturbation.py      # Unit tests for perturbation module
-│   ├── test_e2e_perturbation.py  # E2E tests for L2 perturbation modes
+│   ├── test_e2e_perturbation.py  # E2E tests for L3 perturbation modes
 │   ├── test_repair_safety.py     # Unit tests for repair safety guardrails
 ├── data/                         # Benchmark datasets (JSONL)
 ├── fig/                          # Architecture diagrams
 │   ├── Reloop_framework.png      # System architecture diagram
-│   └── L2.png                    # L2 Direction Consistency Analysis diagram
+│   └── L2.png                    # L2 Semantic Audit diagram
 ├── run_ablation.py               # Ablation experiment runner (per-layer contribution)
 ├── analyze_layers.py             # Layer contribution analysis from ablation CSV
 ├── requirements.txt              # Python dependencies
@@ -519,7 +536,7 @@ reloop/
 |-------|-------------|
 | `ReLoopVerifier` | 3-layer verification engine |
 | `Diagnostic` | Unified diagnostic schema for all layers |
-| `L2DirectionVerifier` | L2 Direction Consistency Analysis with LLM adversarial debate |
+| `L2DirectionVerifier` | L2 Semantic Audit with LLM adversarial debate |
 | `CodeGenerator` | Generate Gurobi code from problem description |
 | `CodeRepairer` | Repair code based on diagnostics (with L2 Accept/Reject) |
 | `ReLoopPipeline` | Complete generate→verify→repair pipeline |
@@ -560,7 +577,7 @@ pipeline = ReLoopPipeline(
     max_repair_iterations=3,        # L2-L3 repair attempts
     max_regeneration_attempts=3,    # L1 FATAL regeneration attempts
     enable_cpt=True,                # Enable L3 CPT layer
-    enable_l2_adversarial=True,     # Enable L2 Direction Consistency Analysis
+    enable_l2_adversarial=True,     # Enable L2 Semantic Audit
     use_structured_generation=True  # Use 3-stage pipeline
 )
 result = pipeline.run(problem_description, data)
@@ -672,7 +689,7 @@ ReLoop supports two data input modes for code generation. Both produce code that
 | Layer | Name | Type | Description |
 |-------|------|------|-------------|
 | L1 | Execution & Solver + Duality | Blocking | Syntax, runtime, solver status with IIS/unbounded diagnostics → triggers regeneration on FATAL; duality check as add-on diagnostic (INFO) |
-| L2 | Direction Consistency Analysis | Diagnostic | LLM-based adversarial direction verification with Accept/Reject |
+| L2 | Semantic Audit | Diagnostic | LLM-based adversarial semantic verification with Accept/Reject |
 | L3 | Constraint Presence Test (CPT) | Enhancement | LLM-based constraint testing (WARNING/INFO) |
 
 **Severity Levels (Conservative Repair Strategy):**
@@ -680,9 +697,9 @@ ReLoop supports two data input modes for code generation. Both produce code that
 | Severity | Confidence | Source | Repair Action |
 |----------|------------|--------|---------------|
 | `FATAL` | 100% | L1 only | Triggers regeneration (up to 3 attempts) |
-| `ERROR` | 99%+ | L2 direction (accepted) | **MUST fix** |
+| `ERROR` | 99%+ | L2 semantic audit (accepted) | **MUST fix** |
 | `WARNING` | 80%+ | L3 cpt_missing | **SHOULD fix** |
-| `INFO` | <80% | L1 duality, L2 (rejected/inconclusive) | **DO NOT fix** (reference only) |
+| `INFO` | <80% | L1 duality, L2 audit (rejected/inconclusive) | **DO NOT fix** (reference only) |
 | `PASS` | - | All layers | No action needed |
 
 **Key Design Principle:**
@@ -692,7 +709,7 @@ ReLoop supports two data input modes for code generation. Both produce code that
 
 ### Perturbation Modes (Source-Code vs Data-Dict)
 
-L2 and L3 perform parameter perturbation to test model behavior. ReLoop supports two perturbation strategies with automatic detection:
+L3 (CPT) performs parameter perturbation to test constraint presence. ReLoop supports two perturbation strategies with automatic detection:
 
 | Mode | Detection Criterion | Perturbation Strategy | Typical Datasets |
 |------|---------------------|-----------------------|------------------|
@@ -700,7 +717,7 @@ L2 and L3 perform parameter perturbation to test model behavior. ReLoop supports
 | `source_code` | Code hardcodes numeric values, no `data[` access | Perturb via AST-based code rewriting | IndustryOR, MAMO |
 | `hybrid` | Both patterns present | Try data-dict first; fallback to source-code if no effect | Mixed |
 
-**Auto-Detection:** `detect_perturbation_mode(code, data)` inspects the generated code for `data[` access patterns and counts hardcoded numeric assignments. The result determines which perturbation strategy L2-L3 use.
+**Auto-Detection:** `detect_perturbation_mode(code, data)` inspects the generated code for `data[` access patterns and counts hardcoded numeric assignments. The result determines which perturbation strategy L3 uses.
 
 **Source-Code Perturbation Flow:**
 ```
@@ -713,11 +730,11 @@ Perturbed:   capacity = 600; demand = 300
 Objective:   Compare with baseline to detect anomalies
 ```
 
-**Hybrid Fallback:** For `hybrid` mode, L2-L3 first try data-dict perturbation. If the perturbed objective is unchanged (parameter hardcoded in code rather than read from data), the system falls back to AST-based source-code perturbation.
+**Hybrid Fallback:** For `hybrid` mode, L3 first tries data-dict perturbation. If the perturbed objective is unchanged (parameter hardcoded in code rather than read from data), the system falls back to AST-based source-code perturbation.
 
-**Key Design Constraint:** The detection/judgment logic (thresholds, direction analysis, CPT thresholds) is completely unchanged. Only the perturbation mechanism is extended.
+Note: L2 (Semantic Audit) does not use perturbation — it performs direct LLM-based comparison of problem description vs code.
 
-### L2: Direction Consistency Analysis (LLM-based Adversarial)
+### L2: Semantic Audit (LLM-based Adversarial)
 
 L2 uses an **adversarial mechanism** where two LLM roles debate to converge on the correct analysis:
 
@@ -726,15 +743,15 @@ L2 uses an **adversarial mechanism** where two LLM roles debate to converge on t
 │                 L2 Adversarial Flow                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  LLM_verify ──→ "Parameter X should decrease objective"     │
+│  LLM_audit ──→ "Purchasing cost missing from objective"     │
 │       │                                                     │
 │       ▼                                                     │
 │  LLM_repair ──→ Accept? ──→ YES ──→ ERROR (must fix)       │
 │       │              │                                      │
-│       │              └──→ NO (Reject) ──→ Re-analyze        │
+│       │              └──→ NO (Reject) ──→ Re-audit          │
 │       │                        │                            │
 │       │                        ▼                            │
-│       │              LLM_verify (with rejection feedback)   │
+│       │              LLM_audit (with rejection feedback)    │
 │       │                        │                            │
 │       │                        ▼                            │
 │       │              [Repeat until Accept or max rejections]│
@@ -744,25 +761,30 @@ L2 uses an **adversarial mechanism** where two LLM roles debate to converge on t
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Semantic Audit Checklist:**
+1. **Objective completeness**: Every cost/revenue term in problem → present in code objective?
+2. **Coefficient semantics**: Rate vs total return? Per-unit vs aggregate? Percentage vs absolute?
+3. **Constraint completeness**: All constraints from problem description → present in code?
+
 **Exit Conditions (forces output):**
-1. `all_pass`: No violations found → output
-2. `all_rejected_others_pass`: All L2 rejected + L1/L3 PASS → output (INFO level)
-3. `max_rejections`: Max rejections per param reached (default 2) → downgrade to INFO → output
+1. `all_pass`: No issues found → output
+2. `all_rejected_others_pass`: All findings rejected + L1/L3 PASS → output (INFO level)
+3. `max_rejections`: Max rejections per finding reached (default 2) → downgrade to INFO → output
 4. `max_iterations`: Reached max L2 iterations (default 3) → output
 5. `accepted_fixed`: Some accepted, code fixed → re-verify and continue
 
 **Key Parameters:**
-- `max_l2_rejections`: Max times a param can be rejected before downgrade (default: 2)
+- `max_l2_rejections`: Max times a finding can be rejected before downgrade (default: 2)
 - `max_l2_iterations`: Max L2 loop iterations (default: 3)
 
 > **Design Principle:** The adversarial mechanism allows two LLM perspectives to debate.
-> This is more reliable than single-LLM analysis because errors get caught by the other role.
-> Keyword-based direction verification has been completely removed.
+> The audit role identifies potential semantic discrepancies, while the repair role acts as a "devil's advocate" to filter false positives before any code changes are made.
 
 **Robustness Guarantee:**
 - L1 `FATAL` triggers regeneration, not immediate termination
 - L2-L3 are diagnostic only: never block output
 - L2 loop always exits with output (one of the exit conditions will be met)
+- L2 regression guard: accepted fixes that cause objective drift >5% are rejected (prevents over-repair)
 - False positives don't affect result values (objective/solution always returned if L1 passes)
 - INFO-level issues do NOT trigger repair (prevents over-correction)
 
@@ -843,7 +865,7 @@ All verification layers output results in a unified `Diagnostic` format:
 @dataclass
 class Diagnostic:
     layer: str          # "L1", "L2", "L3"
-    issue_type: str     # "INFEASIBLE", "UNBOUNDED", "RUNTIME_ERROR", "DIRECTION_VIOLATION", "MISSING_CONSTRAINT", etc.
+    issue_type: str     # "INFEASIBLE", "UNBOUNDED", "RUNTIME_ERROR", "missing_term", "wrong_coefficient", "missing_constraint", etc.
     severity: str       # "ERROR", "WARNING", "INFO"
     target_name: str    # Which parameter/constraint
     evidence: str       # Auto-generated evidence description

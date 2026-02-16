@@ -70,22 +70,61 @@ class DataExtractor:
         return self._extract_numbers_regex(problem_description)
 
     def _parse_json(self, response: str) -> Optional[Dict]:
-        """Parse JSON from LLM response."""
+        """Parse JSON from LLM response, with repair for common LLM errors."""
         # Try to find JSON code block
         json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
         if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except Exception:
-                pass
+            result = self._try_parse_with_repair(json_match.group(1))
+            if result is not None:
+                return result
 
         # Try to find {} block
         json_match = re.search(r'\{[\s\S]*\}', response)
         if json_match:
-            try:
-                return json.loads(json_match.group())
-            except Exception:
-                pass
+            result = self._try_parse_with_repair(json_match.group())
+            if result is not None:
+                return result
+
+        return None
+
+    def _try_parse_with_repair(self, text: str) -> Optional[Dict]:
+        """Try to parse JSON, with progressive repair for common LLM errors."""
+        text = text.strip()
+
+        # Attempt 1: parse as-is
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        # Attempt 2: fix trailing commas (e.g., {"a": 1,} or [1, 2,])
+        repaired = re.sub(r',\s*([}\]])', r'\1', text)
+        try:
+            return json.loads(repaired)
+        except Exception:
+            pass
+
+        # Attempt 3: fix single quotes → double quotes
+        repaired2 = repaired.replace("'", '"')
+        try:
+            return json.loads(repaired2)
+        except Exception:
+            pass
+
+        # Attempt 4: remove // comments
+        repaired3 = re.sub(r'//[^\n]*', '', repaired2)
+        try:
+            return json.loads(repaired3)
+        except Exception:
+            pass
+
+        # Attempt 5: remove NaN/Infinity (replace with null)
+        repaired4 = re.sub(r'\bNaN\b', 'null', repaired3)
+        repaired4 = re.sub(r'\bInfinity\b', 'null', repaired4)
+        try:
+            return json.loads(repaired4)
+        except Exception:
+            pass
 
         return None
 

@@ -17,10 +17,6 @@ CHAIN_OF_THOUGHT_PROMPT = '''Solve this optimization problem using chain-of-thou
 ## Problem
 {problem_description}
 
-## Data Structure
-The `data` variable is PRE-DEFINED with these keys:
-{data_structure}
-
 ---
 ## STEP 1: UNDERSTAND THE PROBLEM
 First, analyze the problem:
@@ -32,7 +28,7 @@ First, analyze the problem:
 ## STEP 2: FORMULATE THE MATHEMATICAL MODEL
 Write the formal model:
 - Sets and indices
-- Parameters (use exact keys from data structure)
+- Parameters (extract all numerical values from the problem description)
 - Decision variables with domains
   **Variable Type**: For each variable, explicitly decide CONTINUOUS, INTEGER, or BINARY.
   Look for context where fractional values would be physically meaningless
@@ -42,25 +38,22 @@ Write the formal model:
 - Objective function
 
 ## STEP 3: GENERATE GUROBI CODE
-Write Python code using gurobipy.
+Write self-contained Python code using gurobipy.
 
 **CRITICAL RULES:**
-1. Do NOT define `data = {{...}}` - the data variable already exists
-2. Access data as: `data["key_name"]`
-3. Model variable must be named `m`
-4. Set `m.Params.OutputFlag = 0`
-5. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
-6. Implement ALL constraints from Step 2
+1. Define ALL data within your code (extract numbers from the problem description above)
+2. Model variable must be named `m`
+3. Set `m.Params.OutputFlag = 0`
+4. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+5. Implement ALL constraints from Step 2
 
 **Big-M Guidelines (if using indicator/logical constraints):**
 - NEVER hardcode Big-M values like `M = 1e6`
-- ALWAYS compute M dynamically from data: `M = sum(data["demand"]) * 1.5`
-- Use problem-relevant parameters for M calculation
+- ALWAYS compute M dynamically from data parameters
 
 **Edge Case Handling:**
-- Check array length before iteration: `if data["items"]: ...`
+- Check array length before iteration
 - Avoid division by zero: `max(value, 1e-6)`
-- Use `.get()` for optional keys: `data.get("key", default)`
 
 ---
 Now solve the problem. Show your reasoning for Steps 1-2, then provide the final code in a ```python block.
@@ -91,6 +84,27 @@ The `data` variable is PRE-DEFINED with these keys:
 7. Handle edge cases: check array length, avoid division by zero
 
 Return ONLY Python code. Do NOT include any `data = ` definition.
+'''
+
+# ============================================================================
+# Direct Generation (True baseline - self-contained, no data extraction)
+# ============================================================================
+
+DIRECT_GENERATION_SYSTEM = '''You write correct Gurobi Python code. Include ALL constraints from the problem.'''
+
+DIRECT_GENERATION_PROMPT = '''Generate self-contained Gurobi Python code for this optimization problem.
+
+## Problem
+{problem_description}
+
+## Requirements
+1. Use `gurobipy` library, model named `m`
+2. Define ALL data within your code (extract numbers from the problem description above)
+3. Set `m.Params.OutputFlag = 0`
+4. Print exactly: `print(f"status: {{m.Status}}")` and `print(f"objective: {{m.ObjVal}}")`
+5. Implement ALL constraints mentioned in the problem
+
+Return ONLY Python code in a ```python block.
 '''
 
 # ============================================================================
@@ -245,9 +259,7 @@ REPAIR_PROMPT = '''Fix this optimization code based on the diagnostic report.
 ## Problem
 {problem_description}
 
-## Data Structure
-The `data` variable is PRE-DEFINED with these keys:
-{data_structure}
+{data_instructions}
 
 ## Current Code
 ```python
@@ -265,10 +277,9 @@ The `data` variable is PRE-DEFINED with these keys:
 2. Fix the specific problems identified
 3. If a parameter "has NO EFFECT", add the missing constraint that uses it
 4. Ensure all constraints from the problem are implemented
-5. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
-6. Do not remove working code unnecessarily
+5. Do not remove working code unnecessarily
 
-Return the COMPLETE fixed code. Do NOT include any `data = ` definition.
+Return the COMPLETE fixed code in a ```python block.
 '''
 
 REPAIR_SYSTEM = '''You debug optimization models. Fix each issue in the report while preserving correct code.'''
@@ -290,16 +301,14 @@ REGENERATE_PROMPT = '''The previous code failed to execute. Generate a new, corr
 ## Error
 {error_message}
 
-## Data Structure
-{data_structure}
+{data_instructions}
 
 ## Instructions
 1. Analyze why the previous code failed
 2. Generate completely new code that avoids the error
-3. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`. Just use `data["key"]` directly.**
-4. Handle edge cases (empty arrays, missing keys)
+3. Handle edge cases (empty arrays, division by zero)
 
-Return ONLY the corrected Python code. Do NOT include any `data = ` definition.
+Return ONLY the corrected Python code in a ```python block.
 '''
 
 REGENERATE_SYSTEM = '''You fix broken optimization code. Ensure the new code is syntactically correct and handles all edge cases.'''
@@ -314,8 +323,7 @@ L2_ANOMALY_REPAIR_PROMPT = '''Fix the structural anomaly in this optimization co
 ## Problem
 {problem_description}
 
-## Data Structure
-{data_structure}
+{data_instructions}
 
 ## Current Code
 ```python
@@ -345,7 +353,6 @@ Review all constraints and objective terms involving '{param}' and fix the struc
 1. Find where '{param}' is used in the code
 2. Check if the constraint direction or sign is correct
 3. Fix the structural error
-4. **CRITICAL: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.**
 
 Return the COMPLETE fixed code in a ```python block.
 '''
@@ -355,7 +362,7 @@ Focus on constraint directions (>= vs <=) and parameter signs.'''
 
 
 # ============================================================================
-# L2 Direction Consistency Analysis Prompts
+# L2 Semantic Audit Prompts
 # ============================================================================
 # Note: L2 prompts are defined in l2_direction.py to keep the module self-contained.
 # Import them from there if needed:
@@ -365,6 +372,18 @@ Focus on constraint directions (>= vs <=) and parameter signs.'''
 # ============================================================================
 # Helper functions
 # ============================================================================
+
+def format_data_instructions(data_structure: str) -> str:
+    """Format data-related instructions based on whether data dict is provided."""
+    if data_structure and data_structure.strip():
+        return (
+            f"## Data Structure\n"
+            f"The `data` variable is PRE-DEFINED with these keys:\n"
+            f"{data_structure}\n\n"
+            f"**CRITICAL: Do NOT create `data = {{...}}`. Just use `data[\"key\"]` directly.**"
+        )
+    return "## Note\nCode is self-contained — all data is defined within the code itself."
+
 
 def describe_data_schema(data: dict, prefix: str = "", depth: int = 0) -> str:
     """
@@ -469,9 +488,7 @@ REPAIR_WITH_CONTEXT_PROMPT = '''Fix this optimization code based on the categori
 ## Problem
 {problem_description}
 
-## Data Structure
-The `data` variable is PRE-DEFINED with these keys:
-{data_structure}
+{data_instructions}
 
 ## Current Code
 ```python
@@ -505,8 +522,6 @@ The `data` variable is PRE-DEFINED with these keys:
    - These are likely normal behavior or numerical artifacts
    - Slack constraints, normal optimization behavior, etc.
    - Provided for context only - ignore for repair purposes
-
-4. **CRITICAL**: The `data` variable is PRE-DEFINED. Do NOT create `data = {{...}}`.
 
 Return the COMPLETE fixed code in a ```python block.
 '''
@@ -574,14 +589,28 @@ def build_repair_prompt(
     else:
         obj_line = "Model did not produce an objective value."
 
+    # Data instructions: conditional on whether data is provided
+    if data_structure and data_structure.strip():
+        data_section = f"""## Data Structure
+The `data` variable is PRE-DEFINED with these keys:
+{data_structure}"""
+        safety_rules = """**SAFETY RULES (violations will cause your repair to be rejected):**
+- Do NOT redefine the `data` variable. Data is provided externally as a Python dict.
+- Do NOT use `json.loads()` to re-parse data. Access `data["key"]` directly.
+- Do NOT modify data contents (no `data[key] = new_value`).
+- Only modify the optimization model: variables, constraints, objective function."""
+    else:
+        data_section = "## Note\nCode is self-contained (all data defined within code)."
+        safety_rules = """**SAFETY RULES:**
+- Do NOT remove or change hardcoded data values unless the diagnostic evidence requires it.
+- Only modify the optimization model: variables, constraints, objective function."""
+
     prompt = f"""Fix this optimization code based on the behavioral verification report.
 
 ## Problem
 {problem_desc}
 
-## Data Structure
-The `data` variable is PRE-DEFINED with these keys:
-{data_structure}
+{data_section}
 
 ## Current Code
 ```python
@@ -607,15 +636,9 @@ The `data` variable is PRE-DEFINED with these keys:
 2. Identify the root cause in your code for each actionable issue
 3. Fix ALL actionable issues above
 4. DO NOT fix items in the REFERENCE section — they are likely normal
-5. **CRITICAL**: The `data` variable is PRE-DEFINED as a Python dict. Do NOT create `data = {{{{...}}}}`.
-6. **CRITICAL**: Do NOT use `data = json.loads(...)`. The `data` variable is ALREADY a dict — access it directly as `data["key"]`.
-7. Preserve all working code — only change what is broken
+5. Preserve all working code — only change what is broken
 
-**SAFETY RULES (violations will cause your repair to be rejected):**
-- Do NOT redefine the `data` variable. Data is provided externally as a Python dict.
-- Do NOT use `json.loads()` to re-parse data. Access `data["key"]` directly.
-- Do NOT modify data contents (no `data[key] = new_value`).
-- Only modify the optimization model: variables, constraints, objective function.
+{safety_rules}
 
 Return the COMPLETE fixed code in a ```python block."""
 
@@ -629,8 +652,7 @@ CRITICAL RULES:
 2. Items in REFERENCE ONLY are for context — DO NOT modify code based on them
 3. Be conservative — only make changes that are clearly necessary
 4. Preserve all working code — only change what is broken
-5. NEVER redefine or modify the `data` variable — it is provided externally as a Python dict
-6. NEVER use `json.loads()` — `data` is already a dict, access keys directly with `data["key"]`"""
+5. Do NOT change hardcoded data values unless the diagnostic evidence specifically requires it"""
 
 
 def format_repair_section(items: list, empty_message: str = "None") -> str:
