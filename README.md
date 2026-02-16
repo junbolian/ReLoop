@@ -524,7 +524,6 @@ reloop/
 │   ├── Reloop_framework.png      # System architecture diagram
 │   └── L2.png                    # L2 Semantic Audit diagram
 ├── run_ablation.py               # Ablation experiment runner (per-layer contribution)
-├── run_one.py                    # Run single problem for debugging
 ├── analyze_layers.py             # Layer contribution analysis from ablation CSV
 ├── requirements.txt              # Python dependencies
 ├── requirements.local-inference.txt  # Optional: vLLM / llama.cpp for local serving
