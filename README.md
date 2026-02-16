@@ -198,9 +198,10 @@ pip install -r requirements.txt
 ### Requirements
 
 - Python >= 3.8
-- Gurobi >= 9.0 (with valid license)
-- numpy
-- (Optional) LLM API access for L2/L3 layers
+- Gurobi >= 11.0 (with valid license)
+- Core: `numpy`, `pandas`, `openai`, `pydantic`, `tenacity`, `tiktoken`
+- Agent stack: `langchain>=1.0`, `langgraph>=1.0`, `langchain-openai`
+- See `requirements.txt` for full dependency list
 
 ```bash
 # Verify installation
@@ -337,6 +338,7 @@ print(f"Objective: {result.final_report.objective}")
 |---------|:---:|:---:|:---:|--------|
 | `RetailOpt-190.jsonl` | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Data-embedded |
 | `MAMO_ComplexLP_fixed.jsonl` | 203 | ~459 | 10⁻⁶ | Data-embedded |
+| `MAMO_EasyLP_fixed.jsonl` | 642 | ~168 | 10⁻⁶ | Data-embedded |
 | `IndustryOR_fixedV2.jsonl` | 100 | ~267 | 10⁻⁶ | Data-embedded |
 All datasets use data-embedded format (full data in prompt) for evaluation. RetailOpt additionally provides schema-based prompts for ReLoop's verification pipeline, where the LLM sees only data schema and actual values are injected at runtime.
 
@@ -349,7 +351,7 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Foundation | Claude Opus 4.6 | Anthropic API | 0.0 | 8192 | |
 | Foundation | DeepSeek-V3.1 | DeepSeek API | 0.0 | 8192 | |
 | Foundation | Qwen3-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
-| Offline SFT | OptMATH-Qwen2.5-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
+| Offline SFT | OptMATH-Qwen2.5-32B | Local (llama.cpp) | 0.0 | 8192 | GGUF |
 | Online RL | SIRL-Qwen2.5-32B | Local (vLLM) | 0.0 | 8192 | BF16 |
 
 ---
@@ -511,16 +513,22 @@ reloop/
 │   ├── data_extraction.py        # NL → structured data extraction
 │   └── experiment_runner.py      # Batch experiment runner
 ├── tests/                        # Test suite
+│   ├── __init__.py
 │   ├── test_perturbation.py      # Unit tests for perturbation module
 │   ├── test_e2e_perturbation.py  # E2E tests for L3 perturbation modes
-│   ├── test_repair_safety.py     # Unit tests for repair safety guardrails
+│   └── test_repair_safety.py     # Unit tests for repair safety guardrails
+├── scripts/                      # Deployment & automation scripts
+│   ├── deploy_local_llm.py       # Launch local OpenAI-compatible LLM server (vLLM / llama.cpp)
+│   └── run_all_local_ablation.sh # Run ablation experiments for all local models
 ├── data/                         # Benchmark datasets (JSONL)
 ├── fig/                          # Architecture diagrams
 │   ├── Reloop_framework.png      # System architecture diagram
 │   └── L2.png                    # L2 Semantic Audit diagram
 ├── run_ablation.py               # Ablation experiment runner (per-layer contribution)
+├── run_one.py                    # Run single problem for debugging
 ├── analyze_layers.py             # Layer contribution analysis from ablation CSV
 ├── requirements.txt              # Python dependencies
+├── requirements.local-inference.txt  # Optional: vLLM / llama.cpp for local serving
 ├── pyproject.toml                # Project configuration
 ├── LICENSE                       # MIT License
 └── README.md                     # This file
@@ -585,9 +593,12 @@ result = pipeline.run(problem_description, data)
 # Using convenience function
 result = run_reloop(
     problem_description, data, llm_client,
+    code=None,                 # Optional pre-generated code
     max_iterations=3,          # Repair iterations
     max_regenerations=3,       # Regeneration attempts
-    use_structured_generation=True
+    enable_cpt=True,           # Enable L3 CPT layer
+    use_structured_generation=True,
+    verbose=False
 )
 
 # Result fields
