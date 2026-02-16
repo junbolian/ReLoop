@@ -73,6 +73,15 @@ test/
 outputs/
 results/
 logs/
+experiment_results/
+
+# ----------------------------
+# Ad-hoc analysis / check scripts
+# ----------------------------
+check_*.py
+analyze_chat_logs.py
+analyze_all.py
+analyze_table_a2.py
 
 # ----------------------------
 # Test files (not for commit)

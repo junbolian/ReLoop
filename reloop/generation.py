@@ -15,11 +15,13 @@ from dataclasses import dataclass
 
 from .prompts import (
     CHAIN_OF_THOUGHT_PROMPT, CHAIN_OF_THOUGHT_SYSTEM,
+    CODE_GENERATION_PROMPT, CODE_GENERATION_SYSTEM,
+    DIRECT_GENERATION_PROMPT, DIRECT_GENERATION_SYSTEM,
     UNDERSTAND_PROMPT, UNDERSTAND_SYSTEM,
     FORMALIZE_PROMPT, FORMALIZE_SYSTEM,
     SYNTHESIZE_PROMPT, SYNTHESIZE_SYSTEM,
     REGENERATE_PROMPT, REGENERATE_SYSTEM,
-    describe_data_schema
+    describe_data_schema, format_data_instructions
 )
 
 
@@ -58,7 +60,7 @@ class CodeGenerator:
     def generate(
         self,
         problem_description: str,
-        data: Dict[str, Any],
+        data: Dict[str, Any] = None,
         max_retries: int = 1  # kept for backward compatibility, ignored
     ) -> str:
         """
@@ -72,14 +74,34 @@ class CodeGenerator:
         Returns:
             Generated Python code string
         """
-        # Always do a single CoT generation attempt. We intentionally ignore
-        # max_retries here to avoid repeated CoT prompts.
-        return self._generate_chain_of_thought(problem_description, data)
+        if self.use_structured_generation:
+            return self._generate_chain_of_thought(problem_description, data)
+        else:
+            return self._generate_direct(problem_description, data)
+
+    def _generate_direct(
+        self,
+        problem_description: str,
+        data: Dict[str, Any] = None
+    ) -> str:
+        """
+        Direct generation: Single API call without chain-of-thought reasoning.
+        Generates self-contained code (no data extraction needed).
+        """
+        prompt = DIRECT_GENERATION_PROMPT.format(
+            problem_description=problem_description,
+        )
+
+        response = self.llm_client.generate(prompt, system=DIRECT_GENERATION_SYSTEM)
+        code = self._extract_code(response)
+        if not code or not code.strip():
+            raise ValueError("Direct generation produced no code block")
+        return code
 
     def _generate_chain_of_thought(
         self,
         problem_description: str,
-        data: Dict[str, Any]
+        data: Dict[str, Any] = None
     ) -> str:
         """
         Chain-of-Thought generation: Single API call with step-by-step reasoning.
@@ -87,14 +109,12 @@ class CodeGenerator:
         This is the RECOMMENDED approach. The LLM reasons through:
         1. Understanding the problem
         2. Formulating the mathematical model
-        3. Generating the code
+        3. Generating self-contained code (all data defined within)
 
         All in ONE conversation turn, preserving context.
         """
-        data_structure = self._describe_data_schema(data)
         prompt = CHAIN_OF_THOUGHT_PROMPT.format(
             problem_description=problem_description,
-            data_structure=data_structure
         )
 
         response = self.llm_client.generate(prompt, system=CHAIN_OF_THOUGHT_SYSTEM)
@@ -208,9 +228,9 @@ class CodeGenerator:
         max_retries: int = 1
     ) -> str:
         """
-        Legacy placeholder: reuse single-attempt CoT generation.
+        Legacy placeholder: reuse direct generation.
         """
-        return self._generate_chain_of_thought(problem_description, data)
+        return self._generate_direct(problem_description, data)
 
     def _stage1_understand(self, problem_description: str) -> Optional[str]:
         """
@@ -289,7 +309,7 @@ class CodeGenerator:
         problem_description: str,
         failed_code: str,
         error_message: str,
-        data: Dict[str, Any]
+        data: Dict[str, Any] = None
     ) -> str:
         """
         Regenerate code after L1 FATAL error.
@@ -302,18 +322,19 @@ class CodeGenerator:
             problem_description: Original problem description
             failed_code: The code that failed
             error_message: Error message from execution
-            data: Problem data dictionary
+            data: Problem data dictionary (empty dict for self-contained code)
 
         Returns:
             New generated code
         """
-        data_structure = self._describe_data_schema(data)
+        data_structure = self._describe_data_schema(data) if data else ""
+        data_instructions = format_data_instructions(data_structure)
 
         prompt = REGENERATE_PROMPT.format(
             problem_description=problem_description,
             failed_code=failed_code,
             error_message=error_message,
-            data_structure=data_structure
+            data_instructions=data_instructions
         )
 
         response = self.llm_client.generate(prompt, system=REGENERATE_SYSTEM)

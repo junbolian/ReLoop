@@ -25,7 +25,6 @@ from reloop import (
     CodeGenerator,
     ReLoopVerifier,
     ReLoopPipeline,
-    DataExtractor,
     CodeExecutor,
     Severity,
 )
@@ -342,7 +341,6 @@ def run_item(
         request_timeout=request_timeout,
     )
     generator = CodeGenerator(llm_client=llm, use_structured_generation=use_cot)
-    extractor = DataExtractor(llm_client=llm)
     executor = CodeExecutor()
     if run_verify:
         pipeline = ReLoopPipeline(
@@ -356,13 +354,12 @@ def run_item(
     try:
         if verbose:
             print(f"[ablation] idx={idx} start, model={model}")
-        # Extract data
-        data = extractor.extract(problem)
-        if verbose:
-            print(f"[ablation] idx={idx} extracted {len(data)} params")
 
-        # Generate code
-        code = generator.generate(problem, data)
+        # Both CoT and Direct generate self-contained code (no data extraction).
+        # CoT uses 3-stage reasoning; Direct uses single-stage generation.
+        data = {}
+        code = generator.generate(problem)
+
         if verbose:
             print(f"[ablation] idx={idx} code generated (len={len(code)})")
 
@@ -598,8 +595,8 @@ def main():
         medium_count = sum(1 for s in stages if s.passed_medium)
 
         label = f"{gen_label} (no verify)" if stage_name == "cot" else f"{gen_label} + ReLoop"
-        tol_s = "ε=10⁻⁶" if is_cross else "ε=10⁻⁴"
-        tol_m = "ε=10⁻⁶" if is_cross else "ε=10⁻²"
+        tol_s = "eps=1e-6" if is_cross else "eps=1e-4"
+        tol_m = "eps=1e-6" if is_cross else "eps=1e-2"
         print(f"\n  {label}:")
         print(f"    Exec%           = {exec_count}/{n} ({100*exec_count/n:.1f}%)")
         print(f"    Acc%({tol_s})    = {strict_count}/{n} ({100*strict_count/n:.1f}%)")

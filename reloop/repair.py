@@ -25,7 +25,8 @@ from .prompts import (
     REPAIR_WITH_CONTEXT_PROMPT, REPAIR_WITH_CONTEXT_SYSTEM,
     L2_ANOMALY_REPAIR_PROMPT, L2_ANOMALY_REPAIR_SYSTEM,
     format_diagnostic_report, format_issues_for_repair,
-    format_repair_section, format_reference_section, describe_data_schema
+    format_repair_section, format_reference_section,
+    describe_data_schema, format_data_instructions
 )
 
 
@@ -57,11 +58,12 @@ class CodeRepairer:
 
         diagnostic_report = format_diagnostic_report(report)
         issues = format_issues_for_repair(report)
-        data_structure = describe_data_schema(data)
+        data_structure = describe_data_schema(data) if data else ""
+        data_instructions = format_data_instructions(data_structure)
 
         prompt = REPAIR_PROMPT.format(
             problem_description=problem_description,
-            data_structure=data_structure,
+            data_instructions=data_instructions,
             code=code,
             diagnostic_report=diagnostic_report,
             issues=issues
@@ -126,7 +128,8 @@ class CodeRepairer:
         if not critical_errors and not should_fix:
             return code
 
-        data_structure = describe_data_schema(data)
+        data_structure = describe_data_schema(data) if data else ""
+        data_instructions = format_data_instructions(data_structure)
 
         # Format each section
         critical_section = format_repair_section(
@@ -142,7 +145,7 @@ class CodeRepairer:
 
         prompt = REPAIR_WITH_CONTEXT_PROMPT.format(
             problem_description=problem_description,
-            data_structure=data_structure,
+            data_instructions=data_instructions,
             code=code,
             critical_errors=critical_section,
             should_fix=should_fix_section,
@@ -182,11 +185,12 @@ class CodeRepairer:
         Returns:
             Repaired code
         """
-        data_structure = describe_data_schema(data)
+        data_structure = describe_data_schema(data) if data else ""
+        data_instructions = format_data_instructions(data_structure)
 
         prompt = L2_ANOMALY_REPAIR_PROMPT.format(
             problem_description=problem_description,
-            data_structure=data_structure,
+            data_instructions=data_instructions,
             code=code,
             param=anomaly_result.get("param", "unknown"),
             z_baseline=anomaly_result.get("baseline_obj", 0),
@@ -234,7 +238,8 @@ class CodeRepairer:
         """
         from .l2_direction import L2_REPAIR_PROMPT
 
-        data_structure = describe_data_schema(data)
+        data_structure = describe_data_schema(data) if data else ""
+        data_instructions = format_data_instructions(data_structure)
 
         # Format sections
         l1_section = format_repair_section(l1_errors, "None") if l1_errors else "None"
@@ -247,8 +252,7 @@ class CodeRepairer:
 ## Problem
 {problem_description}
 
-## Data Structure
-{data_structure}
+{data_instructions}
 
 ## Current Code
 ```python

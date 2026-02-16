@@ -3,7 +3,7 @@ ReLoop Core Verification Module - 3 Layer Architecture
 
 Layers:
 - L1: Execution Verification (Blocking Layer) -> FATAL + duality INFO
-- L2: Direction Consistency Analysis (Diagnostic Layer) -> WARNING/INFO
+- L2: Semantic Audit (Diagnostic Layer) -> WARNING/INFO
 - L3: Constraint Presence Testing (Enhancement Layer, Optional) -> WARNING/INFO
 
 Severity Levels:
@@ -154,9 +154,9 @@ class ReLoopVerifier:
             print(f"\n[Complexity: {complexity.value}]")
             print(f"[Parameters: {len(params)} found]")
 
-        # L2: Direction Consistency Analysis (placeholder - full analysis in pipeline)
+        # L2: Semantic Audit (placeholder - full analysis in pipeline)
         if verbose:
-            print("\n[L2] Direction Consistency Analysis")
+            print("\n[L2] Semantic Audit")
         l2_results = self._layer2(
             code, data, params, objective, complexity, verbose,
             problem_description=problem_description,
@@ -380,7 +380,7 @@ class ReLoopVerifier:
         return results
 
     # =========================================================================
-    # L2: Direction Consistency Analysis (placeholder in verifier)
+    # L2: Semantic Audit (placeholder in verifier)
     # =========================================================================
 
     def _layer2(
@@ -391,10 +391,10 @@ class ReLoopVerifier:
         mode: str = "data_dict"
     ) -> List[LayerResult]:
         """
-        L2: Direction Consistency Analysis.
+        L2: Semantic Audit.
 
-        Uses LLM to analyze parameter direction expectations and detect violations.
-        Full implementation uses L4AdversarialVerifier (called from pipeline.py).
+        Uses LLM to compare problem description vs code for semantic issues.
+        Full implementation uses L2DirectionVerifier (called from pipeline.py).
         When LLM client is not available, L2 returns PASS (no analysis performed).
         """
         results = []
@@ -403,7 +403,7 @@ class ReLoopVerifier:
         if self.llm_client is None:
             results.append(LayerResult(
                 "L2", "skipped", Severity.INFO,
-                "L2 Direction Consistency Analysis skipped (no LLM client)",
+                "L2 Semantic Audit skipped (no LLM client)",
                 0.5,
                 {"trigger_repair": False, "is_likely_normal": True}
             ))
@@ -947,10 +947,10 @@ def l2_verify_results_to_diagnostics(
     rejection_history: Optional[Dict] = None,
 ) -> List[Diagnostic]:
     """
-    Convert L2 Direction Analysis results to unified Diagnostic list.
+    Convert L2 Semantic Audit results to unified Diagnostic list.
 
     Args:
-        l2_results: List of L2VerifyResult objects (from L2AdversarialVerifier)
+        l2_results: List of L2VerifyResult objects (from L2DirectionVerifier)
         rejection_history: Dict of param -> rejection history (for rejected items)
     """
     diagnostics: List[Diagnostic] = []
@@ -960,37 +960,32 @@ def l2_verify_results_to_diagnostics(
         if not r.is_violation or r.confidence < 0.5:
             continue
 
-        # Check if this param was rejected
+        # Check if this finding was rejected
         param_rejections = rejection_history.get(r.param, [])
         if param_rejections:
             latest = param_rejections[-1]
             diagnostics.append(Diagnostic(
                 layer="L2",
-                issue_type="DIRECTION_VIOLATION",
+                issue_type="SEMANTIC_AUDIT",
                 severity="INFO",
                 target_name=r.param,
                 evidence=(
-                    f"Parameter '{r.param}' direction initially flagged but "
+                    f"Finding '{r.param}' initially flagged but "
                     f"REJECTED by repair-role: {latest.rejection_reason}"
                 ),
                 triggers_repair=False,
             ))
         else:
-            delta_pct = int(getattr(r, '_delta', 10) if hasattr(r, '_delta') else 10)
             diagnostics.append(Diagnostic(
                 layer="L2",
-                issue_type="DIRECTION_VIOLATION",
+                issue_type="SEMANTIC_AUDIT",
                 severity="ERROR",
                 target_name=r.param,
                 evidence=(
-                    f"Parameter '{r.param}' moves objective in UNEXPECTED direction. "
-                    f"Role: {r.param_role}. "
-                    f"Expected '{r.expected_direction}' effect, "
-                    f"observed '{r.actual_direction}' effect. "
-                    f"Perturbation: baseline={r.z_baseline:.4f}, "
-                    f"+{delta_pct}%={r.z_plus:.4f}, -{delta_pct}%={r.z_minus:.4f}. "
+                    f"Semantic issue: {r.param_role}. "
+                    f"Target: '{r.param}'. "
                     f"Confidence: {r.confidence:.0%}. "
-                    f"Reason: {r.reason}"
+                    f"Details: {r.reason}"
                 ),
                 triggers_repair=True,
             ))
