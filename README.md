@@ -338,7 +338,6 @@ print(f"Objective: {result.final_report.objective}")
 |---------|:---:|:---:|:---:|--------|
 | `RetailOpt-190.jsonl` | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Data-embedded |
 | `MAMO_ComplexLP_fixed.jsonl` | 203 | ~459 | 10⁻⁶ | Data-embedded |
-| `MAMO_EasyLP_fixed.jsonl` | 642 | ~168 | 10⁻⁶ | Data-embedded |
 | `IndustryOR_fixedV2.jsonl` | 100 | ~267 | 10⁻⁶ | Data-embedded |
 All datasets use data-embedded format (full data in prompt) for evaluation. RetailOpt additionally provides schema-based prompts for ReLoop's verification pipeline, where the LLM sees only data schema and actual values are injected at runtime.
 
