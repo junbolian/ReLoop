@@ -86,12 +86,11 @@ analyze_all.py
 analyze_table_a2.py
 
 # ----------------------------
-# Test files (not for commit)
+# Test files
 # ----------------------------
+tests/
 test_reloop.py
 test_*.py
-!tests/test_*.py
-!reloop/test_*.py
 
 # ----------------------------
 # Temp files
