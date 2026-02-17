@@ -454,20 +454,19 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 
 ### Table A2: Silent Failure Analysis (Claude Opus 4.6 × RetailOpt-190)
 
-> Of 190 baseline (direct generation) problems, ~94 are silent failures: execute successfully but produce incorrect results (ε=10⁻⁴). We analyze how each ReLoop component addresses them.
+> Of 190 baseline (direct generation) problems, 94 are silent failures: execute successfully but produce incorrect results (ε=10⁻⁴). We analyze how each ReLoop component addresses them.
 
 **Coverage by component:**
 
 | Component | Mechanism | Addressed |
 |-----------|-----------|:---------:|
-| Structured CoT | 4-stage reasoning with self-verification prevents formulation errors | 9 corrected |
-| L1 crash recovery | Regeneration yields correct formulation | 1 corrected |
-| L2 CPT | Detects missing/inactive constraints via perturbation testing | 7 flagged |
-| L2 OPT | Detects missing objective terms via perturbation testing | *pending evaluation* |
-| Regression guard | Prevents over-repair from degrading correct solutions (>4% drift) | 2 protected |
-| **Total** | | **10 corrected, 7+ flagged** |
+| Structured CoT | 4-stage reasoning with self-verification corrects formulation errors | 20 corrected |
+| L1 crash recovery | Regeneration recovers 12 crashes (Exec 93.7% → 100.0%) | 0 additional accuracy |
+| L2 behavioral testing (CPT + OPT) | Detects missing constraints/objective terms via perturbation | 0 additional accuracy |
+| **CoT regression** | CoT generates different (incorrect) formulation for 4 problems | 4 hurt |
+| **Net** | | **+16 net (20 corrected − 4 hurt)** |
 
-> The remaining ~75 involve complex structural formulation differences (e.g., alternative model decompositions, multi-component errors) beyond automated verification scope.
+> The 4 hurt problems (P18, P20, P140, P169) all break at the CoT stage — the structured reasoning produces a different formulation that executes successfully but with incorrect objectives. Verification layers (L1, L2) cannot detect these because the code runs without errors. The remaining ~74 silent failures involve complex structural formulation differences beyond automated verification scope.
 
 **Detection capability by error type:**
 
