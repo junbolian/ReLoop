@@ -422,7 +422,21 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | +CoT+L1 | 99.5 | 31.1 | 35.3 | 97.4 | 5.8 | 10.5 |
 | +CoT+L1+L2 (Full ReLoop) | **100.0** | **31.1** | **35.3** | **97.4** | **5.8** | **11.1** |
 
+### Table 4: Ablation on MAMO-ComplexLP (Acc% pass@1, ε=10⁻⁶)
 
+| Config | Claude Opus 4.6 || DeepSeek-V3.2 ||
+|--------|:---:|:---:|:---:|:---:|
+| | Exec% | ε=10⁻⁶ | Exec% | ε=10⁻⁶ |
+| Direct | 94.1 | 70.4 | 93.6 | 60.1 |
+| +CoT | 95.6 | 73.9 | 87.7 | 59.6 |
+| +CoT+L1 | 98.0 | 75.4 | 88.7 | 60.6 |
+| +CoT+L1+L2 (Full ReLoop) | **98.0** | **79.8** | **88.7** | **62.6** |
+
+> **L2 behavioral testing contributes significantly on MAMO:**
+>
+> - **Claude Opus 4.6**: L2+repair is the largest single contributor on MAMO, adding +9 net accuracy (11 helped, 2 hurt) from 75.4% to 79.8%. This is because MAMO problems are shorter (~459 tokens) with simpler structure, making missing constraints/objective terms more detectable by perturbation testing.
+> - **DeepSeek-V3.2**: L2+repair adds +4 accuracy (60.6% → 62.6%) with 0 hurt, demonstrating consistent benefit across models.
+> - **Contrast with RetailOpt**: On RetailOpt-190, L2 has near-zero impact because errors are predominantly structural (incorrect model decomposition) rather than localized missing components. MAMO's simpler problem structure makes L2's perturbation-based detection more effective.
 
 > **Model strength determines layer contributions and overall effectiveness:**
 >
