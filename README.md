@@ -391,8 +391,8 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Type | Model | Exec% ||| Acc% (ε=10⁻⁴) ||| Acc% (ε=10⁻²) |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | CoT | ReLoop | Base | CoT | ReLoop | Base | CoT | ReLoop |
-| Foundation | Claude Opus 4.6 | 72.1 | 76.3 | **99.5** | 22.6 | 20.5 | **26.8** | 26.8 | 23.2 | **30.0** |
-| Foundation | DeepSeek-V3.2 | 91.1 | — | **98.9** | 0.5 | — | **4.7** | 3.7 | — | **8.9** |
+| Foundation | Claude Opus 4.6 | 72.1 | 93.7 | **100.0** | 22.6 | 31.1 | **31.1** | 26.8 | 34.7 | **35.3** |
+| Foundation | DeepSeek-V3.2 | 91.1 | 53.2 | **97.4** | 0.5 | 3.7 | **5.8** | 3.7 | 5.8 | **11.1** |
 | Foundation | Qwen3-32B | 0.0 | 0.0 | **2.1** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | Offline SFT | OptMATH-Qwen2.5-32B | 0.5 | 0.0 | **4.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | Online RL | SIRL-Qwen2.5-32B | 1.6 | 1.6 | 1.6 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
@@ -404,8 +404,8 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | | | MAMO-ComplexLP ||| IndustryOR |||
 |------|-------|:---:|:---:|:---:|:---:|:---:|:---:|
 | Type | Model | Base | CoT | +ReLoop | Base | CoT | +ReLoop |
-| Foundation | Claude Opus 4.6 | 70.4 | 74.4 | **74.9** | **66.0** | 65.0 | 65.0 |
-| Foundation | DeepSeek-V3.2 | — | — | — | — | — | — |
+| Foundation | Claude Opus 4.6 | 70.4 | 73.9 | **79.8** | 66.0 | 66.0 | **68.0** |
+| Foundation | DeepSeek-V3.2 | 60.1 | 59.6 | **62.6** | 50.0 | 54.0 | **62.0** |
 | Foundation | Qwen3-32B | 29.1 | 30.0 | **36.0** | 38.0 | 44.0 | **47.0** |
 | Offline SFT | OptMATH-Qwen2.5-32B | 44.8 | 45.8 | **46.3** | 31.0 | 33.0 | **33.0** |
 | Online RL | SIRL-Qwen2.5-32B | 56.7 | 54.2 | **57.6** | 47.0 | 47.0 | **48.0** |
@@ -418,16 +418,16 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|
 | | Exec% | ε=10⁻⁴ | ε=10⁻² | Exec% | ε=10⁻⁴ | ε=10⁻² |
 | Direct | 72.1 | 22.6 | 26.8 | 91.1 | 0.5 | 3.7 |
-| +CoT | 76.3 | 20.5 | 23.2 | — | — | — |
-| +CoT+L1 | 99.5 | **26.8** | **30.0** | **98.9** | **4.7** | **8.9** |
-| +CoT+L1+L2 (Full ReLoop) | **99.5** | **26.8** | **30.0** | **98.9** | **4.7** | **8.9** |
+| +CoT | 93.7 | 31.1 | 34.7 | 53.2 | 3.7 | 5.8 |
+| +CoT+L1 | 99.5 | 31.1 | 35.3 | 97.4 | 5.8 | 10.5 |
+| +CoT+L1+L2 (Full ReLoop) | **100.0** | **31.1** | **35.3** | **97.4** | **5.8** | **11.1** |
 
 
 
 > **Model strength determines layer contributions and overall effectiveness:**
 >
-> - **Claude Opus 4.6** (strong model): CoT and L1 provide the primary accuracy gains (+4.2pp at ε=10⁻⁴). L2 behavioral testing serves as a safety net — the regression guard prevents over-repair. Claude's baseline formulations are already near-correct, so behavioral testing rarely detects additional issues at the aggregate level.
-> - **DeepSeek-V3.2** (mid-tier model): L1 crash recovery is the dominant contributor (+7.8pp Exec% from Direct to +CoT+L1, 91.1% → 98.9%). ReLoop improves accuracy from 0.5% to 4.7% (ε=10⁻⁴) and 3.7% to 8.9% (ε=10⁻²), driven primarily by L1 regeneration producing correct formulations. L2 behavioral testing has no additional effect at the aggregate level — the formulation errors in surviving code are structural rather than localized missing components. (CoT-only numbers pending re-run.)
+> - **Claude Opus 4.6** (strong model): CoT is the primary accuracy contributor (+8.5pp at ε=10⁻⁴, from 22.6% to 31.1%), demonstrating that structured 4-stage reasoning significantly improves formulation quality. L1 adds crash recovery (+5.8pp Exec%, 93.7% → 99.5%) and L2 behavioral testing brings execution to 100.0%. Accuracy is stable across layers — Claude's CoT formulations are already near-correct, so verification layers primarily serve as a safety net.
+> - **DeepSeek-V3.2** (mid-tier model): L1 crash recovery is the dominant contributor (+44.2pp Exec%, 53.2% → 97.4%). CoT extraction frequently fails for DeepSeek (Exec drops from 91.1% Direct to 53.2% CoT), but L1 regeneration recovers most crashes and improves accuracy from 0.5% to 5.8% (ε=10⁻⁴) and 3.7% to 11.1% (ε=10⁻²). L2 behavioral testing contributes +1 problem at ε=10⁻² via the repair loop.
 > - **32B models** (Qwen3, OptMATH, SIRL): Near-zero accuracy on RetailOpt-190 regardless of pipeline configuration. These models lack fundamental capacity for complex multi-period, multi-product retail optimization with 20+ parameters and dozens of constraints. ReLoop can improve execution rates (e.g., Qwen3: 0% → 2.1%) but cannot compensate for fundamentally incorrect formulations.
 > - **Implication**: ReLoop's verification layers are most effective when the base model can produce *approximately correct* formulations that contain localized, detectable errors. For models below this capability threshold (on a given problem complexity), crash recovery (L1) provides the primary benefit.
 
@@ -442,15 +442,15 @@ All datasets use data-embedded format (full data in prompt) for evaluation. Reta
 | Family | #Inst | Claude Opus 4.6 || DeepSeek-V3.2 || Qwen3-32B || OptMATH-32B || SIRL-32B ||
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | | | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop | Base | +ReLoop |
-| F1 Core Ops | 20 | 55.0 | **85.0** | 5.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F2 Assort & Sub | 30 | **50.0** | 46.7 | 0.0 | **3.3** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F3 Resource | 20 | 0.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F4 Demand Dyn | 30 | 3.3 | **16.7** | 0.0 | **13.3** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F1 Core Ops | 20 | 55.0 | **95.0** | 5.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F2 Assort & Sub | 30 | 50.0 | **53.3** | 0.0 | **3.3** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F3 Resource | 20 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F4 Demand Dyn | 30 | 3.3 | **20.0** | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
 | F5 Feasibility | 20 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F6 Discrete Log | 20 | 0.0 | 0.0 | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F7 Network & ME | 30 | **20.0** | 16.7 | 0.0 | **3.3** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| F8 Omni-channel | 20 | **50.0** | 45.0 | 0.0 | **5.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| **Total** | **190** | **22.6** | **26.8** | **0.5** | **4.7** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| F6 Discrete Log | 20 | 0.0 | 0.0 | 0.0 | **20.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F7 Network & ME | 30 | 20.0 | **26.7** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| F8 Omni-channel | 20 | **50.0** | **50.0** | 0.0 | **10.0** | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| **Total** | **190** | **22.6** | **31.1** | **0.5** | **5.8** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
 ### Table A2: Silent Failure Analysis (Claude Opus 4.6 × RetailOpt-190)
 
