@@ -9,8 +9,6 @@ HOST="${HOST:-127.0.0.1}"
 BASE_URL="http://${HOST}:${PORT}/v1"
 GPUS="${GPUS:-4,5,6,7}"
 WORKERS="${WORKERS:-8}"
-DEPLOY_MODEL_PATH="${DEPLOY_MODEL_PATH:-models/OptMATH-Qwen2.5-32B-Instruct}"
-SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-OptMATH-Qwen2.5-32B-Instruct}"
 
 DATASETS=(
   "data/RetailOpt-190.jsonl"
@@ -103,12 +101,22 @@ run_suite_for_model() {
 }
 
 main() {
-  # Run only OptMATH-Qwen2.5-32B-Instruct (HF format via vLLM).
-  start_server "${DEPLOY_MODEL_PATH}" "vllm" "${SERVED_MODEL_NAME}"
-  run_suite_for_model "${SERVED_MODEL_NAME}"
+  # Model 1: Qwen3-32B
+  start_server "models/Qwen3-32B" "vllm" "Qwen3-32B"
+  run_suite_for_model "Qwen3-32B"
   stop_server
 
-  echo "[runner] ${SERVED_MODEL_NAME} suite completed."
+  # Model 2: SIRL-Gurobi32B
+  start_server "models/SIRL-Gurobi32B" "vllm" "SIRL-Gurobi32B"
+  run_suite_for_model "SIRL-Gurobi32B"
+  stop_server
+
+  # Model 3: OptMATH-Qwen2.5-32B-Instruct (HF format via vLLM)
+  start_server "models/OptMATH-Qwen2.5-32B-Instruct" "vllm" "OptMATH-Qwen2.5-32B-Instruct"
+  run_suite_for_model "OptMATH-Qwen2.5-32B-Instruct"
+  stop_server
+
+  echo "[runner] all local model suites completed."
 }
 
 main "$@"
