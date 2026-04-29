@@ -10,7 +10,7 @@ Official implementation for:
 
 > **ReLoop: Structured Modeling and Behavioral Verification for Reliable LLM-Based Optimization**
 >
-> Junbo Jacob Lian, Yujun Sun, Huiling Chen, Chaoyu Zhang, Chung-Piaw Teo
+> Junbo Jacob Lian, Yujun Sun, Huiling Chen, Chaoyu Zhang, Hanzhang Qin, Chung-Piaw Teo
 >
 > *arXiv preprint, 2026*
 
