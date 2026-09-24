@@ -221,4 +221,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-We thank the developers of [Gurobi](https://www.gurobi.com/), [MAMO](https://github.com/FreedomIntelligence/Mamo), [IndustryOR](https://huggingface.co/datasets/CardinalOperations/IndustryOR), [OptMATH](https://github.com/optsuite/OptMATH), and [SIRL](https://github.com/Cardinal-Operations/SIRL) for making their code and data publicly available.
+We thank the developers of [Gurobi](https://www.gurobi.com/), [MAMO](https://github.com/FreedomIntelligence/Mamo), [IndustryOR](https://huggingface.co/datasets/CardinalOperations/IndustryOR), [OptMATH](https://github.com/optsuite/OptMATH), and [SIRL](https://github.com/Cardinal-Operations/SIRL) for making their code and data publicly available!
