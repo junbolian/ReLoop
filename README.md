@@ -12,7 +12,7 @@ Official implementation for:
 >
 > Junbo Jacob Lian, Yujun Sun, Huiling Chen, Chaoyu Zhang, Hanzhang Qin, Chung-Piaw Teo
 >
-> *arXiv preprint, 2026*
+> *NeurIPS 2026*
 
 | Resource | Link |
 |----------|------|
@@ -29,7 +29,7 @@ LLMs can generate optimization code that *executes perfectly but solves the wron
 - **Structured generation**: a 4-stage reasoning chain (understand → formalize → synthesize → verify) that mirrors expert modeling practice
 - **Behavioral verification**: solver-based perturbation testing that detects missing constraints and objective terms *without ground truth*
 
-These two mechanisms are complementary: structured generation dominates on complex compositional problems, while behavioral verification is the largest single contributor on problems with localized defects. Together, ReLoop raises correctness from 22.6% to 31.1% and execution from 72.1% to 100.0% on the strongest model, with gains across five models, three paradigms (foundation, SFT, RL), and three benchmarks.
+These two mechanisms are complementary by error structure: structured generation gives the largest gain on compositional problems (+8.5pp accuracy on RetailOpt-190 with Claude Opus 4.6, from 22.6% to 31.1%), while behavioral verification makes its largest contribution on MAMO-ComplexLP (+4.4pp with Claude Opus 4.6). With diagnostic execution recovery, the full pipeline raises execution on Claude Opus 4.6 from 72.1% to 100.0%. For narrowly fine-tuned SFT models, the chain-of-thought prompt conflicts with the learned output format and lowers accuracy; the paper documents this interaction.
 
 ---
 
@@ -205,14 +205,12 @@ ReLoop/
 ## Citation
 
 ```bibtex
-@misc{lian2026reloop,
-      title={ReLoop: Structured Modeling and Behavioral Verification for Reliable LLM-Based Optimization},
-      author={Junbo Jacob Lian and Yujun Sun and Huiling Chen and Chaoyu Zhang and Chung-Piaw Teo},
-      year={2026},
-      eprint={2602.15983},
-      archivePrefix={arXiv},
-      primaryClass={cs.SE},
-      url={https://arxiv.org/abs/2602.15983},
+@inproceedings{lian2026reloop,
+  title     = {{ReLoop}: Structured Modeling and Behavioral Verification for Reliable {LLM}-Based Optimization},
+  author    = {Lian, Junbo Jacob and Sun, Yujun and Chen, Huiling and Zhang, Chaoyu and Qin, Hanzhang and Teo, Chung-Piaw},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2026},
+  url       = {https://arxiv.org/abs/2602.15983}
 }
 ```
 
