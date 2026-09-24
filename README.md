@@ -1,13 +1,13 @@
 # ReLoop: Structured Modeling and Behavioral Verification for Reliable LLM-Based Optimization
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![arXiv](https://img.shields.io/badge/arXiv-2026-b31b1b.svg)](https://arxiv.org/abs/2602.15983)
-[![Dataset](https://img.shields.io/badge/🤗_HuggingFace-RetailOpt--190-FFD21E.svg)](https://huggingface.co/datasets/Jacoblian/RetailOpt-190)
-[![Dataset](https://img.shields.io/badge/GitHub-RetailOpt--190-181717.svg?logo=github)](https://github.com/junbolian/RetailOpt-190)
 [![NeurIPS 2026](https://img.shields.io/badge/NeurIPS-2026-4b44ce.svg)](https://neurips.cc/Conferences/2026)
+[![arXiv](https://img.shields.io/badge/arXiv-2602.15983-b31b1b.svg)](https://arxiv.org/abs/2602.15983)
+[![Hugging Face](https://img.shields.io/badge/🤗_HuggingFace-RetailOpt--190-FFD21E.svg)](https://huggingface.co/datasets/Jacoblian/RetailOpt-190)
+[![GitHub](https://img.shields.io/badge/GitHub-RetailOpt--190-181717.svg?logo=github)](https://github.com/junbolian/RetailOpt-190)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Official implementation for:
+Official implementation of the NeurIPS 2026 paper:
 
 > **ReLoop: Structured Modeling and Behavioral Verification for Reliable LLM-Based Optimization**
 >
@@ -17,7 +17,7 @@ Official implementation for:
 
 | Resource | Link |
 |----------|------|
-| **Paper** | [arXiv:2602.15983](https://arxiv.org/abs/2602.15983) |
+| **Paper** | NeurIPS 2026 · [arXiv:2602.15983](https://arxiv.org/abs/2602.15983) |
 | **RetailOpt-190 Dataset** | [Hugging Face](https://huggingface.co/datasets/Jacoblian/RetailOpt-190) · [GitHub](https://github.com/junbolian/RetailOpt-190) |
 | **ReLoop Code** | [GitHub](https://github.com/junbolian/ReLoop) |
 
@@ -90,13 +90,13 @@ cd ReLoop
 pip install -r requirements.txt
 ```
 
-**Requirements:** Python ≥ 3.8, Gurobi ≥ 11.0 (with valid license).
+**Requirements:** Python ≥ 3.10 and Gurobi ≥ 11.0 with a valid license (free academic licenses are available from Gurobi).
 
 ---
 
 ## Quick Start
 
-ReLoop uses the OpenAI-compatible API interface. Any provider works (OpenAI, Anthropic via proxy, vLLM, Ollama, etc.).
+ReLoop talks to models through the OpenAI-compatible chat API, so it works with OpenAI, vLLM, Ollama, or any other OpenAI-compatible endpoint.
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
@@ -117,6 +117,9 @@ python run_ablation.py \
 |------|---------|-------------|
 | `-d, --dataset` | *(required)* | Path to dataset JSONL |
 | `-m, --model` | `gpt-4.1` | Model name (OpenAI SDK format) |
+| `-o, --output-dir` | `experiment_results/<dataset>/<model>` | Output directory |
+| `--base-url` | `$OPENAI_BASE_URL` | Single OpenAI-compatible endpoint |
+| `--api-key` | `$OPENAI_API_KEY` | API key override (`EMPTY` for local servers) |
 | `--enable-cpt` | off | Enable L2 behavioral testing (CPT + OPT) |
 | `--no-cot` | off | Direct generation baseline (skip CoT) |
 | `--no-verify` | off | CoT-only baseline (skip verification) |
@@ -161,13 +164,13 @@ print(f"Objective: {result.final_report.objective}")
 
 ## Datasets
 
-| Dataset | Instances | Avg Tokens | Tolerance | Source |
-|---------|:---------:|:----------:|:---------:|-------|
-| RetailOpt-190 | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Ours |
-| MAMO-ComplexLP | 203 | ~459 | 10⁻⁶ | [Huang et al., 2024](https://github.com/FreedomIntelligence/Mamo) |
-| IndustryOR | 100 | ~267 | 10⁻⁶ | [Huang et al., 2025](https://huggingface.co/datasets/CardinalOperations/IndustryOR) |
+| Dataset | File | Instances | Avg Tokens | Tolerance | Source |
+|---------|------|:---------:|:----------:|:---------:|-------|
+| RetailOpt-190 | `data/RetailOpt-190.jsonl` | 190 | ~2,900 | 10⁻⁴ / 10⁻² | Ours |
+| MAMO-ComplexLP | `data/MAMO_ComplexLP_fixed.jsonl` | 203 | ~459 | 10⁻⁶ | [Huang et al., 2024](https://github.com/FreedomIntelligence/Mamo) |
+| IndustryOR | `data/IndustryOR_fixedV2.jsonl` | 100 | ~267 | 10⁻⁶ | [Huang et al., 2025](https://huggingface.co/datasets/CardinalOperations/IndustryOR) |
 
-All datasets are included in `data/` in JSONL format (one problem per line).
+All datasets are stored as JSONL (one problem per line). The tolerance is the relative error allowed when comparing an objective value against the ground truth; `run_ablation.py` selects it automatically from the dataset name.
 
 ---
 
