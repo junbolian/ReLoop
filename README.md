@@ -5,6 +5,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2026-b31b1b.svg)](https://arxiv.org/abs/2602.15983)
 [![Dataset](https://img.shields.io/badge/🤗_HuggingFace-RetailOpt--190-FFD21E.svg)](https://huggingface.co/datasets/Jacoblian/RetailOpt-190)
 [![Dataset](https://img.shields.io/badge/GitHub-RetailOpt--190-181717.svg?logo=github)](https://github.com/junbolian/RetailOpt-190)
+[![NeurIPS 2026](https://img.shields.io/badge/NeurIPS-2026-4b44ce.svg)](https://neurips.cc/Conferences/2026)
 
 Official implementation for:
 
